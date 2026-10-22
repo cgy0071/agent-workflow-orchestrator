@@ -101,8 +101,10 @@ class Transport:
             # Copy real metadata only. Do not synthesize thread/branch identity.
             for key in ("conversation_id", "branch_id"):
                 if agent.get(key): identity[key] = agent[key]
-            return {"identity": identity,
-                    "status": agent.get("agent_status"), "completion_seq": agent.get("completion_seq", 0)}
+            source = "completion_seq" if agent.get("completion_seq") is not None else "state_change_seq"
+            return {"identity": identity, "status": agent.get("agent_status"),
+                    "completion_seq": sequence(agent.get(source)), "sequence_source": source,
+                    "prompt_available": bool(agent.get("agent_session"))}
         if adapter == "command":
             return json.loads(self.run(spec["status_argv"]))
         if adapter == "receipt":
@@ -120,13 +122,26 @@ class Transport:
 
     def reviewer_identity(self, spec):
         if spec["adapter"] == "herdr":
-            return self.status(spec)["identity"]
+            state = self.status(spec)
+            if spec.get("context_policy", "inbox_only") != "inbox_only":
+                self.check_prompt_available(state)
+            return state["identity"]
         if spec["adapter"] == "command":
             return json.loads(self.run(spec["identity_argv"]))["identity"]
         raise ValueError("reviewer needs a verified herdr or command adapter")
 
+    @staticmethod
+    def check_prompt_available(state):
+        if not state.get("prompt_available"):
+            raise ValueError("Herdr target exposes no agent_session; direct prompt is unavailable. "
+                             "Use context_policy=inbox_only or a verified prompt-capable adapter.")
+
     def send(self, spec, message):
         if spec["adapter"] == "herdr":
+            state = self.status(spec)
+            if not identity_matches(state["identity"], spec["expected_identity"]):
+                raise ValueError("Herdr target identity changed before prompt")
+            self.check_prompt_available(state)
             return self.herdr(spec, "prompt", spec["pane"], message)
         argv = spec["prompt_argv"]
         if argv.count("{message}") != 1:
@@ -204,6 +219,8 @@ def validate_request(request, require_dispatch=True):
         if "nonempty" in row and type(row["nonempty"]) is not bool: raise ValueError("nonempty must be boolean")
     if "marker" in request["completion"] and not isinstance(request["completion"]["marker"], str):
         raise ValueError("completion marker must be a string")
+    if request["completion"].get("marker_source", "output") not in ("output", "artifact", "both"):
+        raise ValueError("marker_source must be output, artifact, or both")
     monitor = request.get("monitor", {})
     if not isinstance(monitor, dict): raise ValueError("monitor must be an object")
     number(monitor.get("interval_seconds", 300), "interval_seconds", 1, True, 86400)
@@ -255,7 +272,9 @@ def inspect_once(request, transport, idle_since=None, now=None):
         return "identity_changed", "Receipt belongs to another task/nonce.", idle_since, None
     status = request.get("status_map", {}).get(state.get("status"), state.get("status"))
     if status == "working":
-        return "working", "", None, None
+        # State-change counters can oscillate while one delivery is pending.
+        timer = idle_since if state.get("sequence_source") == "state_change_seq" else None
+        return "working", "", timer, None
     if status in ("blocked", "exited", "failed"):
         return status, "Worker requires inspection; no approval answered or task resent.", idle_since, None
     if status not in ("idle", "done"):
@@ -265,7 +284,7 @@ def inspect_once(request, transport, idle_since=None, now=None):
     seq = sequence(state.get("completion_seq"))
     fresh = seq > worker["baseline_completion_seq"]
     if fresh:
-        if timer["sequence"] != seq:
+        if timer["sequence"] is None or (state.get("sequence_source") != "state_change_seq" and timer["sequence"] != seq):
             timer.update(sequence=seq, delivery_since=now)
         try:
             cwd = Path(request["cwd"])
@@ -276,10 +295,14 @@ def inspect_once(request, transport, idle_since=None, now=None):
             if request["task_id"] not in text or request["nonce"] not in text:
                 raise ValueError("binding artifact lacks task ID/nonce")
             marker = completion.get("marker")
-            if marker and marker not in transport.output(worker):
+            source = completion.get("marker_source", "output")
+            if marker and source in ("artifact", "both") and marker not in text:
+                raise ValueError("completion marker missing from binding artifact")
+            if marker and source in ("output", "both") and marker not in transport.output(worker):
                 raise ValueError("completion marker missing from worker output")
             receipt = {"task_id": request["task_id"], "nonce": request["nonce"],
-                       "completion_seq": state["completion_seq"], "artifacts": artifacts,
+                       "completion_seq": state["completion_seq"],
+                       "sequence_source": state.get("sequence_source", "completion_seq"), "artifacts": artifacts,
                        "binding_artifact": binding}
             return "review_ready", "Task-bound delivery received; independent review required.", timer, receipt
         except (OSError, ValueError) as exc:

@@ -38,6 +38,7 @@
   "completion": {
     "artifacts": ["RESULT.md", "EVIDENCE.md", "HANDOFF.md"],
     "binding_artifact": "HANDOFF.md",
+    "marker_source": "artifact",
     "marker": "TASK_DONE TASK-UNIQUE-ID REPLACE-WITH-FRESH-NONCE"
   },
   "monitor": {

@@ -108,14 +108,27 @@ def active(con, role):
     return json.loads(row[0])
 
 
+def prepare_binding_spec(spec, mode, policy, reason):
+    from monitor_task import validate_spec
+    if mode != "worker":
+        spec = dict(spec, context_policy=policy)
+        if policy == "dedicated_window" and reason.strip():
+            spec.setdefault("context_declaration", reason)
+    validate_spec(spec, reviewer=(mode != "worker"))
+    return spec
+
+
 def bind(state, role, spec, observed, mode="worker", policy="inbox_only", defer=False, reason=""):
-    from monitor_task import identity_matches, validate_identity, validate_spec
+    from monitor_task import Transport, identity_matches, validate_identity
     if mode not in ("controller", "reviewer", "worker", "advisor") or policy not in ("inbox_only", "exact_thread", "dedicated_window"):
         raise ValueError("invalid mode or context policy")
-    validate_spec(spec, reviewer=(mode != "worker"))
+    spec = prepare_binding_spec(spec, mode, policy, reason)
     validate_identity(observed)
     if not identity_matches(observed, spec["expected_identity"]):
         raise ValueError("live identity does not match the selected binding")
+    if mode != "worker" and policy != "inbox_only" and spec["adapter"] == "herdr":
+        if not identity_matches(Transport({}).reviewer_identity(spec), spec["expected_identity"]):
+            raise ValueError("live reviewer identity changed during binding")
     if policy == "exact_thread" and not all(observed.get(k) and spec["expected_identity"].get(k)
                                             for k in ("conversation_id", "branch_id")):
         raise ValueError("exact_thread requires observed and pinned conversation_id AND branch_id")
@@ -143,7 +156,7 @@ def bind(state, role, spec, observed, mode="worker", policy="inbox_only", defer=
 
 
 def activate(state, role, observed):
-    from monitor_task import identity_matches
+    from monitor_task import Transport, identity_matches
     with database(state) as con:
         row = con.execute("SELECT data FROM bindings WHERE role=? AND status='pending'", (role,)).fetchone()
         if not row:
@@ -153,6 +166,10 @@ def activate(state, role, observed):
         value = json.loads(row[0])
         if not identity_matches(observed, value["spec"]["expected_identity"]):
             raise ValueError("pending binding failed live recheck")
+        if value["mode"] != "worker" and value["context_policy"] != "inbox_only" and value["spec"]["adapter"] == "herdr":
+            spec = dict(value["spec"], context_policy=value["context_policy"])
+            if not identity_matches(Transport({}).reviewer_identity(spec), spec["expected_identity"]):
+                raise ValueError("pending reviewer identity changed during activation")
         con.execute("UPDATE bindings SET status='retired' WHERE role=? AND status='active'", (role,))
         con.execute("UPDATE bindings SET status='active' WHERE id=?", (value["instance_id"],))
         audit(con, "binding_activated", value)
@@ -202,8 +219,11 @@ def register_task(state, request, actor, version, context):
         worker = active(con, worker_role)
         if worker["mode"] != "worker":
             raise ValueError("execution target must hold worker mode")
-        if worker["spec"] != {k: v for k, v in request["worker"].items() if k != "baseline_completion_seq"}:
-            raise ValueError("request worker does not match the active role binding")
+        requested = {k: v for k, v in request["worker"].items() if k != "baseline_completion_seq"}
+        differences = sorted(k for k in worker["spec"].keys() | requested.keys()
+                             if k not in worker["spec"] or k not in requested or worker["spec"][k] != requested[k])
+        if differences:
+            raise ValueError("request worker does not match the active role binding; differs in: " + ", ".join(differences))
         old = con.execute("SELECT request_hash FROM tasks WHERE id=?", (request["task_id"],)).fetchone()
         if old:
             if old[0] != digest(request):
@@ -275,7 +295,9 @@ def deliver_event(state, event_id, transport):
         target = active(con, event["role"])
         if target["mode"] not in ("controller", "reviewer") or target["context_policy"] == "inbox_only":
             return {"status": "INBOX_ONLY", "event_id": event_id}
-        spec = target["spec"]
+        spec = dict(target["spec"], context_policy=target["context_policy"])
+        if target["context_policy"] == "dedicated_window":
+            spec.setdefault("context_declaration", target["reason"])
         from monitor_task import identity_matches
         observed = transport.reviewer_identity(spec)
         if not identity_matches(observed, spec["expected_identity"]):
@@ -385,7 +407,8 @@ def main():
     from monitor_task import Transport, read_json
     if args.command == "init": result = initialize(args.state, read_json(args.config))
     elif args.command in ("bind", "switch"):
-        spec = read_json(args.spec); transport = Transport({})
+        spec = prepare_binding_spec(read_json(args.spec), args.mode, args.policy, args.reason)
+        transport = Transport({})
         observed = transport.status(spec)["identity"] if args.mode == "worker" else transport.reviewer_identity(spec)
         result = bind(args.state, args.role, spec, observed, args.mode, args.policy, args.defer, args.reason)
     elif args.command == "activate":

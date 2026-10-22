@@ -3,6 +3,7 @@ import copy
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import unittest
 import uuid
@@ -74,6 +75,55 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(monitor.preflight(self.req)["status"], "PREFLIGHT_OK")
         bad = copy.deepcopy(self.req); bad["worker"]["baseline_completion_seq"] = 9
         with self.assertRaises(ValueError): monitor.preflight(bad)
+
+    def test_cli_runs_from_unrelated_directory(self):
+        script = Path(control.__file__).resolve()
+        proc = subprocess.run([sys.executable, "-B", str(script), "--state", str(self.state), "bindings"],
+                              cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(len(json.loads(proc.stdout)), 2)
+
+    def test_binding_mismatch_names_fields_without_values(self):
+        self.req["worker"]["_comment"] = "private detail"
+        with self.assertRaisesRegex(ValueError, "differs in: _comment") as raised: self.register()
+        self.assertNotIn("private detail", str(raised.exception))
+
+    def test_dedicated_binding_inherits_declaration_and_checks_herdr(self):
+        spec = self.spec("paper", True)
+        bound = control.bind(self.state, "paper", spec, spec["expected_identity"], "reviewer",
+                             "dedicated_window", reason="exclusive review window")
+        self.assertEqual(bound["spec"]["context_declaration"], "exclusive review window")
+        spec.update(adapter="herdr", executable="herdr", session="offline", pane="p1")
+        agent = {"agent": "any-harness", "terminal_id": "terminal-paper", "cwd": str(self.root),
+                 "pane_id": "p1", "agent_status": "idle", "state_change_seq": 11}
+        with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
+            with self.assertRaisesRegex(ValueError, "agent_session"):
+                control.bind(self.state, "paper", spec, spec["expected_identity"], "reviewer",
+                             "dedicated_window", reason="exclusive review window")
+        agent["agent_session"] = {"kind": "path", "value": "offline"}
+        with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
+            control.bind(self.state, "paper", spec, spec["expected_identity"], "reviewer",
+                         "dedicated_window", defer=True, reason="new exclusive review window")
+        agent.pop("agent_session")
+        with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
+            with self.assertRaisesRegex(ValueError, "agent_session"):
+                control.activate(self.state, "paper", spec["expected_identity"])
+
+    def test_cli_inbox_policy_overrides_spec_before_live_query(self):
+        spec = self.spec("paper", True)
+        spec.update(adapter="herdr", executable="herdr", session="offline", pane="p1",
+                    context_policy="dedicated_window")
+        file = self.root / "paper.json"
+        file.write_text(json.dumps(spec), encoding="utf-8")
+        agent = {"agent": "any-harness", "terminal_id": "terminal-paper", "cwd": str(self.root),
+                 "pane_id": "p1", "agent_status": "idle", "state_change_seq": 11}
+        argv = ["workflow_control.py", "--state", str(self.state), "bind", "--role", "paper",
+                "--mode", "reviewer", "--policy", "inbox_only", "--spec", str(file)]
+        with patch.object(sys, "argv", argv), patch.object(monitor.Transport, "run",
+                return_value=json.dumps({"result": {"agent": agent}})), patch("builtins.print"):
+            control.main()
+        with control.database(self.state) as con:
+            self.assertEqual(control.active(con, "paper")["context_policy"], "inbox_only")
 
     def test_side_unknown_and_stale_controller_are_rejected(self):
         for ctx in ("side", "unknown"):

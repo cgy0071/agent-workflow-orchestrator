@@ -7,6 +7,7 @@ import subprocess
 import sys
 import unittest
 import uuid
+from unittest.mock import patch
 
 import monitor_task as module
 import check_encoding
@@ -216,6 +217,85 @@ class Tests(unittest.TestCase):
         actual = transport.status(spec)
         self.assertEqual(actual["identity"]["kind"], "arbitrary-harness")
         self.assertEqual(actual["status"], "working")
+
+    def herdr_fixture(self, **fields):
+        spec = {"adapter": "herdr", "executable": "herdr", "session": "offline", "pane": "p1",
+                "expected_identity": {"kind": "pi", "terminal": "t1", "launch_cwd": str(self.root)}}
+        agent = {"agent": "pi", "terminal_id": "t1", "cwd": str(self.root), "pane_id": "p1",
+                 "agent_status": "idle", "state_change_seq": 11}
+        agent.update(fields)
+        transport = module.Transport(self.request)
+        transport.run = lambda argv, cwd=None: json.dumps({"result": {"agent": agent}})
+        return spec, agent, transport
+
+    def test_herdr_state_sequence_and_missing_counter(self):
+        spec, agent, transport = self.herdr_fixture()
+        state = transport.status(spec)
+        self.assertEqual((state["completion_seq"], state["sequence_source"]), (11, "state_change_seq"))
+        self.request["worker"] = dict(spec, baseline_completion_seq=10)
+        self.request["completion"].pop("marker")
+        self.assertEqual(module.inspect_once(self.request, transport)[0], "review_ready")
+        agent["completion_seq"] = 12
+        self.assertEqual(transport.status(spec)["sequence_source"], "completion_seq")
+        agent.pop("completion_seq"); agent.pop("state_change_seq")
+        with self.assertRaises(module.AdapterResponseError): transport.status(spec)
+
+    def test_state_sequence_churn_cannot_extend_delivery_grace(self):
+        spec, agent, transport = self.herdr_fixture()
+        self.request["worker"] = dict(spec, baseline_completion_seq=10)
+        self.request["monitor"]["settle_grace_seconds"] = 120
+        (self.root / "RESULT.md").unlink()
+        first = module.inspect_once(self.request, transport, now=0)
+        self.assertEqual(first[0], "settling")
+        agent.update(agent_status="working", state_change_seq=12)
+        working = module.inspect_once(self.request, transport, first[2], now=60)
+        self.assertEqual(working[0], "working")
+        agent.update(agent_status="idle", state_change_seq=13)
+        last = module.inspect_once(self.request, transport, working[2], now=121)
+        self.assertEqual(last[0], "incomplete")
+
+    def test_completion_counter_still_gets_new_delivery_grace(self):
+        self.request["monitor"]["settle_grace_seconds"] = 120
+        (self.root / "RESULT.md").unlink()
+        first = module.inspect_once(self.request, FakeTransport(self.request, seq=11), now=0)
+        second = module.inspect_once(self.request, FakeTransport(self.request, seq=12), first[2], now=121)
+        self.assertEqual(second[0], "settling")
+
+    def test_herdr_prompt_capability_without_harness_blacklist(self):
+        spec, agent, transport = self.herdr_fixture(agent="dsh-tui")
+        spec["expected_identity"]["kind"] = "dsh-tui"
+        self.assertEqual(transport.reviewer_identity(spec)["kind"], "dsh-tui")
+        spec["context_policy"] = "dedicated_window"
+        with self.assertRaisesRegex(ValueError, "agent_session"):
+            transport.reviewer_identity(spec)
+        with self.assertRaisesRegex(ValueError, "agent_session"):
+            transport.send(spec, "offline")
+        agent["agent_session"] = {"kind": "path", "value": "offline-session"}
+        self.assertEqual(transport.reviewer_identity(spec)["kind"], "dsh-tui")
+        transport.send(spec, "offline")
+
+    def test_herdr_preflight_rejects_undeliverable_reviewer_without_sending(self):
+        spec, agent, transport = self.herdr_fixture()
+        self.request["worker"] = dict(spec, baseline_completion_seq=11)
+        self.request["reviewer"] = dict(spec, context_policy="dedicated_window", context_declaration="offline only")
+        with patch.object(module, "Transport", return_value=transport), patch.object(transport, "send") as send:
+            with self.assertRaisesRegex(ValueError, "agent_session"): module.preflight(self.request)
+            send.assert_not_called()
+            self.request["reviewer"]["context_policy"] = "inbox_only"
+            self.assertEqual(module.preflight(self.request)["status"], "PREFLIGHT_OK")
+
+    def test_artifact_marker_ignores_echo_and_both_requires_output(self):
+        self.request["completion"]["marker_source"] = "artifact"
+        client = FakeTransport(self.request)
+        self.assertEqual(module.inspect_once(self.request, client)[0], "incomplete")
+        (self.root / "HANDOFF.md").write_text(self.request["completion"]["marker"], encoding="utf-8")
+        self.assertEqual(module.inspect_once(self.request, client)[0], "review_ready")
+        self.assertEqual(client.reads, 0)
+        self.request["completion"]["marker_source"] = "both"
+        client.output = lambda spec: ""
+        self.assertEqual(module.inspect_once(self.request, client)[0], "incomplete")
+        self.request["completion"]["marker_source"] = "typo"
+        with self.assertRaisesRegex(ValueError, "marker_source"): module.validate_request(self.request)
 
     def test_real_local_job_and_receipt_monitor(self):
         scripts = Path(__file__).parent

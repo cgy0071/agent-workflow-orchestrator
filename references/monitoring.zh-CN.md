@@ -18,7 +18,8 @@
 | worker.baseline_completion_seq | 派工前完成序列，新完成必须大于它 |
 | completion.artifacts | 必需文件列表；对象可设 nonempty 和已知 sha256 |
 | completion.binding_artifact | 含本任务 ID/nonce 的 Markdown 或结构化结果文件 |
-| completion.marker | 完成后有限输出中必须包含的标记；若采用另一可靠合同可省略 |
+| completion.marker | 所选来源中必须包含的标记；若采用另一可靠合同可省略 |
+| completion.marker_source | artifact 检查绑定文件，output 检查有限终端输出，both 同时检查；旧请求默认 output，新示例采用 artifact |
 | monitor.interval_seconds | 默认300秒；可按任务改为1–86400秒 |
 | monitor.command_timeout_seconds | 单次适配命令超时，默认15秒 |
 | monitor.settle_grace_seconds | idle/done 后等待文件齐全的宽限，默认120秒 |
@@ -65,6 +66,10 @@ working 时只查状态。新完成且交付齐全后才读有限输出验证 ma
 台账模式在 SQLite 事务中记录通知尝试，包含目标、请求/授权哈希和 UTC 时间。只读查询错误有限重试；身份变化、blocked、未知状态和失败停止等待检查。检查异常后显式 --resume，可保留旧摘要为历史并使用冻结输入恢复监控；不会重发已经尝试的提示，也不会把已待审核交付当成新执行。
 
 ## 非 Herdr 适配
+
+Herdr 优先读取 completion_seq，缺失时读取 state_change_seq；计数器缺失或类型错误会报错，不再静默返回 0。派工前将实际观测的归一化值写入 baseline_completion_seq。state_change_seq 记录所有状态变化，其递增只证明发生了新活动，仍须满足 idle/done、任务 ID/nonce 绑定文件及 marker 合同。其交付宽限从第一次新活动后的 idle/done 开始，不因计数变化或中间的 working 状态重新计时。真正的 completion_seq 仍为每次完成提供新宽限。回执记录 sequence_source。
+
+新任务建议使用示例的 marker_source=artifact，并将完整标记写入 HANDOFF.md。终端文本可能包含命令回显，不能作为作者身份凭证；文件标记加强交付合同，也不能认证作者或证明验收通过，仍需独立审核。已冻结的旧请求保持默认 output 行为，不原地修改。
 
 - command：worker.status_argv 返回规范 JSON，output_argv 返回完成后的有限文本；reviewer.identity_argv 返回 identity，prompt_argv 以独立 `{message}` 参数接收通知。所有命令按参数数组执行，无 shell 插值。
 - receipt：worker.status_path 指向任务绑定 JSON，output_path 为有限读取的 stdout。适合 `run_job.py` 的单次作业；见 examples/job.json。先确认具体 harness 的非交互命令，不能把交互 TUI 进程当单次作业。

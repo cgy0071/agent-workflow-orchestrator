@@ -18,7 +18,8 @@ All adapters use task_id, nonce, cwd, worker, reviewer, completion, and authoriz
 | worker.baseline_completion_seq | Pre-dispatch sequence; a new completion must exceed it |
 | completion.artifacts | Required files; objects may specify nonempty and a known sha256 |
 | completion.binding_artifact | Markdown or structured file containing this task ID and nonce |
-| completion.marker | Marker required in bounded completion output; omit only when another reliable contract is used |
+| completion.marker | Marker required at the selected source; omit only when another reliable contract is used |
+| completion.marker_source | artifact: binding file; output: bounded terminal text; both: require both. Legacy default is output; new example uses artifact |
 | monitor.interval_seconds | Default 300; configurable from 1 to 86400 seconds |
 | monitor.command_timeout_seconds | Timeout for each adapter command; default 15 seconds |
 | monitor.settle_grace_seconds | Grace for delivery after idle/done; default 120 seconds |
@@ -65,6 +66,10 @@ An exclusive notification-attempt file is written before sending. Delivery timeo
 Ledger mode records attempts transactionally in SQLite instead of a task-local attempt file. Each attempt binds the target, request/authorization hashes, and UTC time. Read-only query failures have bounded retries; identity changes, blocked states, unknown states, and failures stop for inspection. After inspection, --resume preserves the old summary as history and resumes unchanged frozen inputs. It never retries a previously attempted prompt or resumes review-ready delivery into new execution.
 
 ## Other adapters
+
+Herdr responses use completion_seq when present, otherwise state_change_seq. Missing or invalid counters are errors, not zero. Copy the observed normalized value into baseline_completion_seq before dispatch. state_change_seq records every state change, so its advance is only freshness evidence: idle/done, task/nonce-bound artifacts, and the configured marker are still required. Its delivery grace starts at the first fresh idle/done observation and is not renewed by counter churn, including intervening working states. A true completion_seq retains a new grace period for each completion. Receipts record sequence_source.
+
+For new tasks, put the exact marker in HANDOFF.md and select marker_source=artifact (as in the example). Terminal text can include echoed commands and is not a trustworthy authorship signal. A file marker strengthens the delivery contract but does not authenticate its author or prove acceptance; independent review remains required. Existing frozen requests keep the legacy output default; do not edit them in place.
 
 - command: worker.status_argv emits canonical JSON; output_argv emits bounded completion text. Reviewer identity_argv emits identity, and prompt_argv accepts one standalone `{message}`. Arguments are executed without shell interpolation.
 - receipt: worker.status_path points to task-bound JSON and output_path to stdout. Use `run_job.py` for verified one-shot CLI commands; see examples/job.json. Set baseline_completion_seq to 0 for a new job. Do not treat a persistent TUI process as a one-shot job.

@@ -25,6 +25,8 @@ First-difference, environment, scope, preservation, and escalation conditions.
 
 Adapt the template to the domain. Git, synthesis, and paper evidence are not required for every task. Specify only the applicable acceptance checks.
 
+When using the example's marker_source=artifact, require HANDOFF.md to contain the exact completion marker as well as the task ID and nonce. A terminal echo alone does not satisfy that contract. Older requests without marker_source retain output checking.
+
 ## Default review
 
 Verify task/worker identity and change scope. Read the raw evidence. Distinguish executed from unexecuted work, models from measurements, and environment or observation faults from implementation faults. Record accept, repair, reject, or missing evidence, whether the baseline changes, and the next gate.
