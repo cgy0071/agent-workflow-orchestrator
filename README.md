@@ -92,7 +92,9 @@ Agents read this as workflow guidance. Configuration does not grant user permiss
 
 ### 2. Select the actual harness and window
 
-Choose **manual creation** (open a pane/window, enter the workspace, and start/select the harness) or **automatic creation** (a verified controller creates a pane and launches the harness with user-selected arguments). Both methods verify the actual runtime settings and session identity before binding, then use the same monitoring and review workflow. Existing available sessions can also be reused after verification. Automatic creation requires a verified launch interface; bind/preflight do not launch clients.
+Choose **manual creation** (open a window/session, enter the workspace, and start/select the harness) or **automatic creation** (a verified controller creates a session through the selected client's supported interface and launches the harness with user-selected arguments). Both methods verify the actual runtime settings and session identity before binding, then use the same monitoring and review workflow. Existing available sessions can also be reused after verification. Automatic creation requires a verified launch interface; bind/preflight do not launch clients.
+
+In this documentation, **pane** means a Herdr terminal split. The pane creation commands are Herdr-specific examples; other clients use their own verified window/session interfaces and identifiers.
 
 Read [Initialization, Window Selection, and Handoffs](references/setup-and-switching.md). It contains complete commands for initialization, live identity checks, bindings, switching, acknowledgment, review, and recovery. A role's `harness` label does not select a window. Save a verified adapter specification for each role and initialize a new state directory:
 

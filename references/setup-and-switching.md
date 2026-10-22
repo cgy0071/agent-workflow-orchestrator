@@ -6,22 +6,24 @@ English | [Chinese](setup-and-switching.zh-CN.md)
 
 Start from `examples/workflow.json`. A role's `harness` is descriptive; it does not select or launch a window. For each role, discover the actual client session through a verified interface and save its adapter specification. Any role can use any supported client.
 
+Terminology: **pane** in this guide refers specifically to a Herdr terminal split. Windows and sessions are the general concepts; other clients use their own verified interfaces and identifiers. Herdr pane commands do not apply to those clients.
+
 For Herdr, use its installed CLI's read-only discovery and identity commands. Record the executable, session, pane, actual agent kind, terminal ID, and launch directory. For another CLI/API, provide commands that return the identity/status contract in [harness-adapters.md](harness-adapters.md). Harness launch arguments must come from the user's selected runtime; see the optional provisioning recipe below.
 
 Choose either creation method below. Both lead to the same identity verification, binding, and preflight steps. An existing available session can be reused after checking its identity and current tasks.
 
 ### 1.1 Manual creation
 
-1. Open a dedicated pane/window in the selected client and enter the task workspace.
+1. Open a dedicated window/session in the selected client (a pane when using Herdr) and enter the task workspace.
 2. Start the installed harness and select the intended provider, model, and thinking level where applicable.
-3. Check the actual runtime settings, then discover the session/pane, terminal identity, and cwd through the verified adapter.
+3. Check the actual runtime settings, then discover the session identity and cwd through the verified adapter; for Herdr, also record pane and terminal identities.
 4. Save the role's adapter specification and continue with section 2. Capture the live sequence baseline immediately before dispatch.
 
 This method suits an existing interactive session or a client without a verified creation interface. A manually created session can still use automatic monitoring, notification, and authorized follow-up.
 
 ### 1.2 Automatic creation
 
-When the user authorizes creating a session and the installed client exposes a verified interface, the controller creates a dedicated pane in the task workspace, launches the harness with the selected arguments, waits for registration, and verifies the actual runtime settings and identity. For Herdr commands and bounded-wait requirements, see [section 8](#8-provision-an-executor-when-needed). This route requires a verified controller or launcher; bind and preflight do not create sessions themselves.
+When the user authorizes creating a session and the installed client exposes a verified interface, the controller creates a dedicated session in the task workspace, launches the harness with the selected arguments, waits for registration, and verifies the actual runtime settings and identity. With Herdr, this creates a pane; the Herdr-only command example and bounded-wait requirements are in [section 8](#8-provision-an-executor-when-needed). Other clients require their own verified creation interfaces. This route requires a verified controller or launcher; bind and preflight do not create sessions themselves.
 
 After either method, extract the `worker` and `reviewer` objects from your edited `request.json` into `worker.json` and `planner.json`. Remove `baseline_completion_seq` from `worker.json`; keep it in the per-task request. Keep adapter specifications otherwise identical. A Paper Lead can have another reviewer specification. Names, models, and window titles alone do not establish identity.
 
@@ -138,6 +140,8 @@ python scripts/monitor_task.py --request /absolute/task/request.json --resume --
 The old summary is retained as a history file; frozen inputs and notification attempts remain. Ready-for-review delivery cannot be resumed into a second execution. A stale `monitor.lock` needs deliberate process verification before removal. Do not reuse task IDs/directories or overwrite old evidence.
 
 ## 8. Provision an executor when needed
+
+**Herdr-only example:** this section uses Herdr panes and CLI commands. For another client, use its verified window/session creation interface.
 
 A pre-created pane is optional. Within the authorized session and workspace, an operator or verified controller can create a dedicated pane and launch an already-installed harness with the user's chosen arguments. This does not require installing providers or changing configuration. Inspect the installed CLI help first; the following primitives were reported working on Windows with Herdr 0.9.3. The same evaluation reported agent_pane_busy from agent start in idle cmd/PowerShell shells. Treat that as a version-specific compatibility report, not a universal Windows limitation. Use pane run on a newly created, verified shell pane in that environment.
 
