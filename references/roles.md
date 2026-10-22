@@ -1,24 +1,26 @@
-# 可修改的角色模板
+# Editable Role Templates
 
-下列为默认模板，不依赖外部项目协议。用户可修改职责、数量、权限及工作产物；以当前配置和指令为准。
+English | [Chinese](roles.zh-CN.md)
 
-| 默认角色 | 主要责任 | 默认边界 | 典型输出 |
+These defaults need no external project protocol. Users can change responsibilities, role count, permissions, and deliverables. Apply the current configuration and instructions.
+
+| Default role | Responsibilities | Default boundary | Typical output |
 |---|---|---|---|
-| Planner / Engineering Lead | 设计、拆分、安排实验、审查证据、选择后续任务 | 不代替 Executor 修改实现或操作正式实验 | 方案、任务书、审核、决策 |
-| Executor | 实现指定任务、运行、测量、定位首差 | 不自行改变架构、验收和授权范围 | 变更、日志、RESULT/EVIDENCE/HANDOFF |
-| Paper Lead | 研究问题、文献差距、贡献、论文叙事、实验充分性 | 不将工程收益自动提升为新颖性，也不绕过规划直接改实现 | claim–evidence、补证需求、稿件 |
+| Planner / Engineering Lead | Design, task decomposition, experiments, evidence review, follow-up decisions | Does not replace the Executor in implementation or formal experiment operation | Plans, task specifications, reviews, decisions |
+| Executor | Implement assigned work, run tests, measure, locate first differences | Does not independently change architecture, acceptance, or authorization | Changes, logs, RESULT/EVIDENCE/HANDOFF |
+| Paper Lead | Research problem, literature gap, contributions, paper reasoning, experimental sufficiency | Does not equate engineering improvement with novelty or bypass planning to change implementation | Claim-evidence analysis, evidence requests, manuscripts |
 
-## 默认交接
+## Default handoffs
 
-Paper Lead 提需求 → Planner 写任务 → Executor 执行 → 监控通知 Planner → Planner 审核/续派 → Paper Lead 解释已接收结果。
+Paper Lead requests evidence -> Planner writes a task -> Executor performs it -> monitor notifies Planner -> Planner reviews and follows up -> Paper Lead interprets accepted results.
 
-角色与 harness、模型无关。任一角色可由 Codex、Pi、Claude、dsh-tui、Grok 或其他工具承担。更换工具保留任务 ID、输入、验收和未完成项，不按模型品牌判断结果。
+Roles are independent of harnesses and models. Any role may use Codex, Pi, Claude, dsh-tui, Grok, or another tool. Preserve task identity, inputs, acceptance, and open items when changing tools. Evaluate delivered evidence rather than model branding.
 
-## 调整示例
+## Example changes
 
-- 软件项目：Planner / Implementer / Reviewer，取消 Paper Lead。
-- 快速原型：合并 Planner 与 Executor，但将独立审核保留给另一个角色。
-- 论文项目：加入 Literature Reviewer 和 Experiment Auditor。
-- 多分支实验：多个 Executor 各用独立可写目录，统一审核。
+- Software: use Planner / Implementer / Reviewer and omit Paper Lead.
+- Prototyping: combine planning and execution while retaining another reviewer.
+- Research: add Literature Reviewer and Experiment Auditor.
+- Parallel alternatives: assign each Executor an independent writable directory and use a common reviewer.
 
-配置中为每个角色写 responsibilities、allowed_actions、forbidden_actions、harness 和 adapter。权限变化须来自用户授权，不能靠 Worker 编辑配置自行扩大。
+Configure responsibilities, allowed_actions, forbidden_actions, harness, and adapter for each role. Permission changes require user authorization; a Worker cannot expand its own scope by editing configuration.

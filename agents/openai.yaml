@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent Workflow Orchestrator"
-  short_description: "可配置多角色协作、跨 Harness 监控与审核续派"
-  default_prompt: "使用 $agent-workflow-orchestrator 配置角色、架构约束和自动化规则，监控任务并在完成后通知审核角色继续已授权工作。"
+  short_description: "Configurable agent roles, monitoring, and review handoffs"
+  default_prompt: "Use $agent-workflow-orchestrator to configure roles, architecture constraints, and automation, monitor tasks, and notify the reviewer to continue authorized work."

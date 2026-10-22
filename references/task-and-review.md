@@ -1,36 +1,38 @@
-# 可修改的任务与审核合同
+# Editable Task and Review Contract
 
-## 默认任务书
+English | [Chinese](task-and-review.zh-CN.md)
+
+## Default task specification
 
 ```markdown
-# TASK-ID — 单项目标
+# TASK-ID - One bounded objective
 Owner authorization / parent task:
 Assigned role / reviewer role:
 Cwd / branch / inspected revision:
 Inputs and identity:
 
 ## Objective
-本任务要回答的问题及价值。
+The question to answer and why it matters.
 ## Allowed / forbidden changes
-具体目录、实现范围、只读输入和阶段边界。
+Writable directories, implementation scope, read-only inputs, and stage boundaries.
 ## Acceptance
-正确比较对象、检查条件、指标口径、证据复用条件。
+Reference, checks, metric definitions, and conditions for reusing existing evidence.
 ## Deliverables
-RESULT.md / EVIDENCE.md / HANDOFF.md，以及实际变更和原始日志路径。
+RESULT.md / EVIDENCE.md / HANDOFF.md, changes, and raw evidence paths.
 ## Failure and stop
-首差、环境问题、超范围时的上报、保存和停止点。
+First-difference, environment, scope, preservation, and escalation conditions.
 ```
 
-该模板可适应其他领域。并非每个任务都需要 Git、综合或论文证据；按任务设置实际需要的验收。
+Adapt the template to the domain. Git, synthesis, and paper evidence are not required for every task. Specify only the applicable acceptance checks.
 
-## 默认审核
+## Default review
 
-核验任务/身份和变更范围，读取关键原始证据，区分已执行/未执行、模型/实测、环境/观测/实现错误。写接收、返修、拒绝或缺证据结论，并注明基线是否更新和下一步门。
+Verify task/worker identity and change scope. Read the raw evidence. Distinguish executed from unexecuted work, models from measurements, and environment or observation faults from implementation faults. Record accept, repair, reject, or missing evidence, whether the baseline changes, and the next gate.
 
-比较程序不能把空文件、丢记录或双方同错当成功。必要反例针对实际风险，不扩大成无关工具开发。原始失败保留，返修复用已核验部分。
+Comparators must not accept empty files, dropped records, or matching errors on both sides. Negative tests should address the actual risk. Preserve failures and reuse already verified evidence during repairs.
 
-## 可配置的续接
+## Configurable continuation
 
-workflow.transitions 定义每个审核结论后的动作：next_task、repair_task、stop 或 owner_input。生成下一任务前检查持续执行授权、范围、预算、准入和 Worker 身份/目录。
+workflow.transitions defines the action after each review decision: next_task, repair_task, stop, or owner_input. Before creating work, check continuous-execution authorization, scope, budget, gates, worker identity, and directory ownership.
 
-新任务使用新 ID/nonce，关联父任务；不覆盖模糊投递或旧结果。收到完成通知不是新的 Owner 指令。通知/派工允许自动化，接收结论仍须由指定审核角色形成。
+A follow-up gets a new task ID and nonce linked to its parent. Do not overwrite uncertain submissions or historical results. A completion notification is not a new Owner instruction. Dispatch and notification may be automated; the assigned reviewer still forms the acceptance judgment.

@@ -220,6 +220,10 @@ class EncodingTests(unittest.TestCase):
     def test_plain_english_is_valid_without_language_expectation(self):
         self.assertEqual(check_encoding.check_bytes(b"Valid ASCII and one question?"), [])
 
+    def test_english_entry_rejects_non_ascii(self):
+        self.assertEqual(check_encoding.check_bytes(b"English entry", expect_ascii=True), [])
+        self.assertTrue(check_encoding.check_bytes("\u89d2\u8272".encode("utf-8"), expect_ascii=True))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

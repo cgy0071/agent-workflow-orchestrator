@@ -5,46 +5,48 @@ description: Configure and run multi-agent workflows with editable roles, archit
 
 # Agent Workflow Orchestrator
 
-组织可配置的多角色工作流，将任务、状态检测、交付、审核和下一步动作连接起来。技能独立于具体工程、路径、模型及 harness。Planner、Executor、Paper Lead 是默认模板，用户可以修改或替换。
+English | [Chinese](SKILL.zh-CN.md)
 
-## 读取配置
+Coordinate planning, execution, monitoring, delivery, review, and follow-up tasks. This skill is independent of any project, path, model, or harness. Planner, Executor, and Paper Lead are editable defaults.
 
-从用户指定位置读取工作流配置；未提供时，以 `examples/workflow.json` 为起点。先确认目标、角色职责、可写范围、工程约束和自动化授权。已有项目协议只在用户选择时作为输入；不依赖外部角色文档或另一个 Skill 才能工作。
+## Load the workflow
 
-配置可修改：角色数量和权限、设计约束、阶段及准入条件、调度与审核角色、轮询间隔、完成判据、异常处理、后续动作及停止条件。配置不提供新授权；当前用户指令优先。
+Read the user-selected workflow configuration. If none exists, start with `examples/workflow.json`. Establish the objective, role responsibilities, writable scope, project constraints, and automation authorization. Existing project protocols are optional inputs chosen by the user; this skill needs no external role document or other skill.
 
-## 角色和 harness 分离
+Users may change role names, count and permissions; architecture constraints; stages and admission gates; dispatch and review roles; polling intervals; completion criteria; exception handling; follow-up actions; and stop conditions. Configuration does not grant new permission. Current user instructions take precedence.
 
-默认职责见 [roles.md](references/roles.md)。它们可以重命名、合并、增加，或改为其他领域的角色；不要把默认 Planner 的限制强加给用户改设后的角色。
+## Separate roles from harnesses
 
-任一角色可用 Codex、Pi、Claude、dsh-tui、Grok 或其他 harness。角色、harness、模型、状态接口分别记录。按实际能力选用 [harness-adapters.md](references/harness-adapters.md) 的 Herdr、命令或作业回执适配，不根据昵称推断 CLI。实际工具没有可靠接口时报告适配缺口，不伪造已连接。
+Read [roles.md](references/roles.md) for the default roles. Rename, combine, add, or replace them as needed. Do not apply default Planner restrictions to a role the user has explicitly redefined.
 
-## 调度与执行
+Any role can run in Codex, Pi, Claude, dsh-tui, Grok, or another harness. Record the role, harness, model, and control interface separately. Select a verified Herdr, command, or job-receipt interface using [harness-adapters.md](references/harness-adapters.md). Do not infer CLI capabilities from a nickname. Report an unavailable interface rather than claiming a connection.
 
-1. 按配置恢复目标、当前任务、已接收结果和未关闭门，不从聊天猜测已完成工作。
-2. 写可审核任务，明确 ID、目标、目录、允许改动、冻结输入、验收、交付和停止点；模板见 [task-and-review.md](references/task-and-review.md)。任务细节可随工程调整。
-3. 重新核验目标身份和工作目录，检查当前任务与活动租约。同一可写目录串行，独立目录才并行。复用现有调度台账，避免竞争控制器。
-4. 保存唯一 task ID / nonce、目标身份、任务书及投递尝试；单次投递，确认已开始再启动监控。模糊投递先检查，不盲目补发。
-5. Executor 按配置执行并交付。默认是 RESULT / EVIDENCE / HANDOFF 三份 Markdown；其他交付形式可在任务中明确。
+## Dispatch and execution
 
-Herdr 是可选传输。在已有 Herdr 调度器环境中复用其身份/租约机制；没有 Herdr 时可用经核验的官方 CLI/API 适配。技能自身不安装或修改供应商、认证或模型设置。
+1. Recover the objective, current tasks, accepted results, and open gates from configured records. Do not infer completed work from chat alone.
+2. Write a reviewable task with an ID, objective, directory, allowed changes, frozen inputs, acceptance criteria, deliverables, and stop conditions. Adapt [task-and-review.md](references/task-and-review.md) to the project.
+3. Recheck the target identity and working directory, active tasks, and directory leases. Serialize shared writable directories; parallel tasks need independent directories. Reuse an existing dispatch ledger instead of creating competing controllers.
+4. Save a unique task ID and nonce, the verified target, task specification, and submission attempt. Submit once, confirm execution began, then start monitoring. Inspect uncertain delivery before considering any follow-up.
+5. The Executor performs the configured work and delivers the agreed evidence. RESULT, EVIDENCE, and HANDOFF Markdown files are defaults; the task may specify another format.
 
-## 状态监控与通知
+Herdr is optional. Reuse its identity and lease controls when already present; otherwise use a verified official CLI/API adapter. Do not install or alter providers, credentials, or model settings as part of dispatch.
 
-`scripts/monitor_task.py` 按请求读取状态，工作期间不反复拉取对话。默认 300 秒查询，可由配置调整；每次命令有限超时，整体默认等到完成或异常，没有一小时总上限。监控合同与启动方式见 [monitoring.md](references/monitoring.md)。同一任务不启动重复监控。
+## Monitoring and notifications
 
-完成事件必须绑定本任务、身份和新完成序列，并满足请求中的交付/标记合同。`review_ready` 表示可以审核，不是成功。记录交付哈希，在既有通知授权下，向核验后的审核角色发送一次通知；审核角色不必是 Codex，也不必叫 Planner。
+`scripts/monitor_task.py` reads status without repeatedly fetching conversations while work is running. The default interval is 300 seconds and is configurable. Each command has a finite timeout; overall monitoring continues until completion or an exception unless a total limit is configured. See [monitoring.md](references/monitoring.md). Do not start duplicate monitors for one task.
 
-异常、blocked、缺交付、身份变化和通知不确定分别保存；不回答批准框、不盲目重发。停止监控不等于停止执行进程，取消工作按配置和授权另行处理。
+Completion must match the task identity, worker identity, a fresh completion sequence, and the configured artifact/marker contract. `review_ready` means ready for review, not accepted. Record artifact hashes and, under existing notification authorization, notify the verified reviewer once. The reviewer may use any harness and need not be named Planner.
 
-## 审核与自动续接
+Record blocked states, missing delivery, changed identities, failures, and uncertain notifications separately. Never answer approval dialogs or blindly resend. Stopping the monitor does not stop the worker; handle cancellation separately under the configured authorization.
 
-审核角色收到通知后，读取冻结请求、交付、改动和原始验收证据，写明确的接收/返修/拒绝/缺证据结论，更新当前状态。仅按配置推进下一阶段；工程接收与论文贡献判断可设为独立门。
+## Review and continuation
 
-持续执行授权覆盖的范围内，可自动创建下一项或窄范围返修任务，使用新 ID / nonce 关联父任务。超出目标、预算或权限时报告具体缺口。配置的目标达成、暂停、取消或终止条件满足时停止，不为了持续运行而另造任务。
+The reviewer reads the frozen request, delivery, changes, and raw acceptance evidence; records accept, repair, reject, or missing evidence; and updates current state. Advance only through configured stages. Engineering admission and paper-contribution judgment can remain separate gates.
 
-Paper Lead 默认负责科学问题、文献差距、主贡献和 claim–evidence；工程审核结果交给它，补证需求返回规划角色。用户可将这一角色换成产品评审、质量负责人或其他职责。
+Within continuous-execution authorization, create the next task or a narrow repair with a new ID and nonce linked to the parent. Report work outside the objective, budget, or permissions. Stop when the configured goal, pause, cancellation, or termination condition is reached. Do not invent additional work just to keep the loop running.
 
-## 本地验证
+By default, Paper Lead owns the research problem, literature gap, contributions, and claim-evidence reasoning. Send reviewed engineering results to that role and route evidence requests back through planning. Users may replace this role with product review, quality review, or another responsibility.
 
-新增/修改适配先用离线响应验证身份、新完成、缺输出、blocked 和通知去重，再按授权做小范围连接验证。运行 `python scripts/test_monitor.py` 和 `python scripts/check_encoding.py`。离线通过不等于所有客户端已经完成现场连接测试。README 提供安装、配置和使用示例。
+## Local validation
+
+Before using a new or changed adapter, validate identity, fresh completion, missing output, blocked states, and notification deduplication offline. Then perform an authorized connection check. Run `python scripts/test_monitor.py` and `python scripts/check_encoding.py`. Offline tests do not establish live compatibility for every client version. README contains setup, configuration, and usage examples.
