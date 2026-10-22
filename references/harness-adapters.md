@@ -46,3 +46,16 @@ Freeze paths, identity values, commands, and session provenance in the task reco
 Window selection is separate from the harness label. Follow [setup-and-switching.md](setup-and-switching.md) for live binding and handoffs. Only copy conversation_id/branch_id if the client actually exposes them. A terminal ID is not a conversation-branch identity; use inbox_only when metadata is unavailable, or explicitly reserve a dedicated main window. Never synthesize these fields.
 
 All named harnesses share role and delivery contracts. Offline tests cover arbitrary labels, cross-harness notification, and failure paths. They do not prove live integration with every client version. At first use, verify identity, working, new completion, artifacts/nonce, one-time notification, and failure classification. Reuse verified adapters; recheck after relevant version or identity changes.
+
+## Versioned field observations
+
+These are external evaluator reports, provided as issue-0 through issue-3 and reply-0 through reply-3, not a supported-version guarantee or an independent maintainer reproduction. The original report names skill commit 84371b3, Windows build 10.0.26200, Herdr 0.9.3 (protocol 22), and Python 3.12.4. The replies report a successful full loop against 6556c34 on the same machine. Harness client versions were not supplied; original logs and response files are not bundled here.
+
+| Herdr | Harness | agent_session | agent prompt | agent start | Sequence field |
+|---|---|---|---|---|---|
+| 0.9.3 | pi; client version unreported | Reported present | Reported delivered; review gate passed | agent_pane_busy reported in idle cmd/PowerShell shells; pane run used instead | Pending raw-response confirmation |
+| 0.9.3 | dsh-tui; client version unreported | Reported absent | Reported agent_not_ready; use inbox_only in this environment | Not tested in the supplied report | Pending raw-response confirmation |
+
+The original report identifies state_change_seq as the raw Herdr field, while the follow-up quotes a receipt with sequence_source=completion_seq. Without the corresponding raw agent get response and adapter configuration, the source cannot be reconciled; a normalized completion_seq value alone does not identify the raw field. Keep the sequence column pending until those artifacts are available. There are no live findings here for Codex, Claude, Grok, or other version pairs.
+
+For future entries, retain the OS, Herdr and harness versions, skill commit, adapter configuration, raw identity/status responses, actual launch command, and delivery/review evidence. Exclude credentials. Use this table as a troubleshooting starting point, then recheck the installed version and selected session. Herdr panes and commands apply only to the Herdr adapter.

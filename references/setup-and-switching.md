@@ -143,6 +143,8 @@ The old summary is retained as a history file; frozen inputs and notification at
 
 **Herdr-only example:** this section uses Herdr panes and CLI commands. For another client, use its verified window/session creation interface.
 
+The snippet below illustrates the command sequence. It checks exit codes for pane split and pane run and validates the returned pane ID. It does not implement shell-readiness polling, registration polling, per-command timeouts, or exit-code handling for every read/query command. The comments mark steps for the operator or controller to perform; copying the snippet alone does not implement automatic provisioning. A controller must supply those waits, checks, and runtime-setting verification before binding or dispatch. Version-scoped reports are recorded in [the adapter field observations](harness-adapters.md#versioned-field-observations).
+
 A pre-created pane is optional. Within the authorized session and workspace, an operator or verified controller can create a dedicated pane and launch an already-installed harness with the user's chosen arguments. This does not require installing providers or changing configuration. Inspect the installed CLI help first; the following primitives were reported working on Windows with Herdr 0.9.3. The same evaluation reported agent_pane_busy from agent start in idle cmd/PowerShell shells. Treat that as a version-specific compatibility report, not a universal Windows limitation. Use pane run on a newly created, verified shell pane in that environment.
 
 ```powershell

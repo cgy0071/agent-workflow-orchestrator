@@ -31,6 +31,8 @@ Herdr 用户通过本机已安装版本的只读发现和身份查询，记录�
 
 完整命令示例见 [英文版第 8 节](setup-and-switching.md#8-provision-an-executor-when-needed)。各命令均显式指定授权 session。流程为：pane split --pane 已验证父窗口 --direction down --cwd 任务目录 --no-focus；保存返回的 result.pane.pane_id；只读核验新 pane 已就绪为 shell；仅执行一次 pane run；有限轮询 agent get 等待注册；读取当前运行状态核验 provider、model、thinking；再生成身份绑定和派工前序列基线。
 
+该代码片段仅展示命令顺序：检查了 pane split、pane run 的退出码及返回的 pane ID，尚未实现 shell 就绪轮询、注册轮询、单次命令超时和每条读取／查询命令的退出码处理。注释标示需要操作者或控制器完成的步骤，直接复制片段不等于实现自动创建。控制器须在绑定或派工前补齐这些等待、检查和实际运行配置核验。按版本记录的反馈见 [适配器实测表](harness-adapters.zh-CN.md#按版本记录的实测反馈)。
+
 这些命令是创建流程的原语，不是跨版本通用启动器。控制器自动执行时，每次子进程须有限超时（例如 15 秒），shell 就绪与注册等待须设截止时间（例如各 30 秒）。不能把 agent_status=unknown、进程存在或启动返回 0 当成就绪。创建或启动超时后先检查实际 pane，不盲目重复，不操作原有 pane。
 
 实际 agent kind、terminal、pane、cwd 由 agent get 核验；provider、model、thinking 必须来自 harness 当前运行状态，不能取自回显的启动命令。不可观测时记录未验证并在绑定、派工前停止。报告中的约 1.2 秒只是单次环境测量，不是性能保证或等待上限。bind 和 preflight 均不执行创建命令。

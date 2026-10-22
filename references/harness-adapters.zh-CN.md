@@ -46,3 +46,16 @@ Worker 的 `status_argv` 返回 JSON：
 ## 兼容性验收
 
 本技能对五种 harness 使用相同角色和交付合同。离线测试覆盖任意身份标签、跨 harness 通知和失败分支；这不等于五种客户端都完成了现场连接测试。每个真实适配在首次使用时验证：身份、working、新完成、文件/nonce、单次通知、异常不误判成功。既有可用适配直接复用；版本或身份改变后重新核验。
+
+## 按版本记录的实测反馈
+
+以下来自外部评测者提供的 issue-0 至 issue-3、reply-0 至 reply-3，不是受支持版本承诺，也不是维护者独立复测。原报告环境为 Skill 提交 84371b3、Windows build 10.0.26200、Herdr 0.9.3（protocol 22）、Python 3.12.4；回复称在同一机器上针对 6556c34 跑通完整闭环。未提供 harness 客户端版本，原始日志和响应文件未随本文发布。
+
+| Herdr | Harness | agent_session | agent prompt | agent start | 序列字段 |
+|---|---|---|---|---|---|
+| 0.9.3 | pi；客户端版本未提供 | 报告称存在 | 报告称实际送达，审核门通过 | 报告称在空闲 cmd/PowerShell 中返回 agent_pane_busy，改用 pane run | 待原始响应确认 |
+| 0.9.3 | dsh-tui；客户端版本未提供 | 报告称缺失 | 报告称返回 agent_not_ready；该环境采用 inbox_only | 所提供报告中未测试 | 待原始响应确认 |
+
+原报告将 state_change_seq 标为 Herdr 原始字段，后续回复却引用 sequence_source=completion_seq 的回执。缺少对应的原始 agent get 响应及适配器配置，暂无法解释这一差异；归一化后的 completion_seq 数值本身不能证明原始字段来源。因此序列字段保持待确认。这里没有 Codex、Claude、Grok 或其他版本组合的实机结论。
+
+后续记录应保留操作系统、Herdr 与 harness 版本、Skill 提交、适配器配置、原始身份及状态响应、实际启动命令和投递／审核证据，不包含凭证。此表仅作为排障起点，仍需核验当前安装版本与目标会话。Herdr 的 pane 和相关命令仅适用于 Herdr 适配器。
