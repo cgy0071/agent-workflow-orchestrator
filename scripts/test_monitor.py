@@ -9,6 +9,7 @@ import unittest
 import uuid
 
 import monitor_task as module
+import check_encoding
 
 
 class FakeTransport:
@@ -199,6 +200,25 @@ class Tests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(module.read_json(self.root / "monitor_summary.json")["status"], "review_ready")
         self.assertFalse((self.root / "notification_attempt.json").exists())
+
+
+class EncodingTests(unittest.TestCase):
+    def test_utf8_chinese_is_preserved(self):
+        text = "\u89d2\u8272\u5206\u5de5\u4e0e\u81ea\u52a8\u5316"
+        self.assertEqual(check_encoding.check_bytes(text.encode("utf-8"), expect_cjk=True), [])
+
+    def test_invalid_utf8_is_rejected(self):
+        self.assertTrue(check_encoding.check_bytes(b"\xff\xfe broken"))
+
+    def test_ascii_question_replacement_is_rejected(self):
+        self.assertTrue(check_encoding.check_bytes(b"Role: " + b"?" * 8, expect_cjk=True))
+
+    def test_replacement_and_mojibake_are_rejected(self):
+        for text in ["\ufffd", "\u951f\u65a4\u62f7", "\u00ef\u00bb\u00bf"]:
+            self.assertTrue(check_encoding.check_bytes(text.encode("utf-8")))
+
+    def test_plain_english_is_valid_without_language_expectation(self):
+        self.assertEqual(check_encoding.check_bytes(b"Valid ASCII and one question?"), [])
 
 
 if __name__ == "__main__":

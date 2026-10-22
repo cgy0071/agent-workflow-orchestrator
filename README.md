@@ -145,9 +145,12 @@ python scripts/run_job.py --job /absolute/job.json
 
 ```sh
 python scripts/test_monitor.py
+python scripts/check_encoding.py
 ```
 
 离线测试覆盖五种 harness 标签、工作中不读对话、旧完成拒绝、身份变化、缺/空交付、错误 nonce、缺标记、blocked/失败、路径越界、通知去重、不确定通知不重试，以及真实本地子进程 → 回执 → 监控闭环。测试不会连接真实 Agent 或发送真实通知。
+
+编码检查会拒绝无效 UTF-8、替换字符、连续问号造成的有损文本和常见乱码，并确认中文入口文档仍包含中文。若将文档改写为其他语言，可用 `--expect-cjk` 调整或关闭中文检查。文本统一保存为 UTF-8、无 BOM，Git 使用 LF 换行。
 
 这些结果验证接口合同与自动化行为，**不表示所有客户端版本都完成现场连接测试**。首次接入需核验当前工具版本的身份、状态与精确会话投递接口；既有可用适配可复用。
 
@@ -161,4 +164,5 @@ examples/                   可修改的工作流与任务请求示例
 scripts/monitor_task.py      状态检测与一次通知
 scripts/run_job.py           单次 CLI 作业回执
 scripts/test_monitor.py      离线行为验证
+scripts/check_encoding.py    UTF-8 与有损文本检查
 ```
