@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.env.*
+runtime/
+*.log
+monitor.lock
+*_status.json
+monitor_summary.json
+completion_receipt.json
+notification_attempt.json
+notification_result.json

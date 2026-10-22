@@ -1,0 +1,48 @@
+{
+  "task_id": "TASK-UNIQUE-ID",
+  "nonce": "REPLACE-WITH-FRESH-NONCE",
+  "cwd": "/absolute/task-workspace",
+  "dispatch_confirmed": false,
+  "authorization": {
+    "source": "Replace with current Owner authorization",
+    "notify_reviewer": false
+  },
+  "worker": {
+    "role": "executor",
+    "harness": "any-harness-verified-in-herdr",
+    "adapter": "herdr",
+    "executable": "/absolute/path/to/herdr",
+    "session": "OWNER-AUTHORIZED-SESSION",
+    "pane": "DISCOVER-LIVE-PANE",
+    "expected_identity": {
+      "kind": "ACTUAL-AGENT-KIND",
+      "terminal": "DISCOVER-LIVE-TERMINAL",
+      "launch_cwd": "/absolute/launch-directory"
+    },
+    "baseline_completion_seq": 0
+  },
+  "reviewer": {
+    "role": "planner",
+    "harness": "any-harness-verified-in-herdr",
+    "adapter": "herdr",
+    "executable": "/absolute/path/to/herdr",
+    "session": "OWNER-AUTHORIZED-SESSION",
+    "pane": "DISCOVER-REVIEWER-PANE",
+    "expected_identity": {
+      "kind": "ACTUAL-REVIEWER-KIND",
+      "terminal": "DISCOVER-REVIEWER-TERMINAL",
+      "launch_cwd": "/absolute/reviewer-directory"
+    }
+  },
+  "completion": {
+    "artifacts": ["RESULT.md", "EVIDENCE.md", "HANDOFF.md"],
+    "binding_artifact": "HANDOFF.md",
+    "marker": "TASK_DONE TASK-UNIQUE-ID REPLACE-WITH-FRESH-NONCE"
+  },
+  "monitor": {
+    "interval_seconds": 300,
+    "command_timeout_seconds": 15,
+    "settle_grace_seconds": 120,
+    "overall_timeout_seconds": null
+  }
+}

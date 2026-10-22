@@ -1,0 +1,51 @@
+{
+  "name": "three-role-default",
+  "goal": "Replace with the current user-authorized objective",
+  "roles": {
+    "planner": {
+      "responsibilities": ["design", "task planning", "evidence review", "next-task decisions"],
+      "allowed_actions": ["read evidence", "write plans", "dispatch authorized tasks"],
+      "forbidden_actions": ["implement production changes without a role change"],
+      "harness": "choose-any-supported-harness"
+    },
+    "executor": {
+      "responsibilities": ["implement or measure the assigned task", "preserve raw evidence"],
+      "allowed_actions": ["actions explicitly listed by the task"],
+      "forbidden_actions": ["expand scope or relax acceptance criteria"],
+      "harness": "choose-any-supported-harness"
+    },
+    "paper-lead": {
+      "responsibilities": ["research positioning", "literature gap", "claim-evidence review", "writing"],
+      "allowed_actions": ["request missing evidence through planner", "write manuscripts"],
+      "forbidden_actions": ["claim novelty solely from engineering improvement"],
+      "harness": "choose-any-supported-harness"
+    }
+  },
+  "architecture": {
+    "constraints": [],
+    "editable_by": ["planner"],
+    "requires_owner_approval_for": []
+  },
+  "workflow": {
+    "dispatch_role": "planner",
+    "execution_role": "executor",
+    "reviewer_role": "planner",
+    "paper_review_role": "paper-lead",
+    "stages": ["plan", "execute", "review", "next-or-stop"],
+    "transitions": {
+      "accept": "next_task_within_authorization",
+      "repair": "new_scoped_repair_task",
+      "reject": "replan_or_stop",
+      "blocked": "inspect_specific_blocker"
+    },
+    "stop_conditions": ["goal reached", "user paused or cancelled", "authorization exhausted"]
+  },
+  "automation": {
+    "continuous_execution_authorized": false,
+    "notify_reviewer_authorized": false,
+    "interval_seconds": 300,
+    "command_timeout_seconds": 15,
+    "overall_timeout_seconds": null,
+    "blind_resubmission": false
+  }
+}

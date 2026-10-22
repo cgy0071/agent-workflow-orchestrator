@@ -1,0 +1,13 @@
+{
+  "task_id": "TASK-UNIQUE-ID",
+  "nonce": "REPLACE-WITH-FRESH-NONCE",
+  "authorization": "Replace with current authorization for this exact command",
+  "cwd": "/absolute/task-workspace",
+  "output_dir": "/absolute/new-job-output-directory",
+  "identity": {
+    "kind": "ACTUAL-HARNESS",
+    "terminal": "UNIQUE-JOB-IDENTITY",
+    "launch_cwd": "/absolute/task-workspace"
+  },
+  "argv": ["/absolute/official-harness-cli", "REPLACE-WITH-VERIFIED-ONE-SHOT-ARGUMENTS"]
+}
