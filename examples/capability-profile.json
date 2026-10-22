@@ -1,0 +1,31 @@
+{
+  "harness": "unknown",
+  "harness_version": "unknown",
+  "transport": "command",
+  "transport_version": "unknown",
+  "os": "unknown",
+  "skill_commit": "unknown",
+  "operations": {
+    "spawn": {
+      "status": "unverified"
+    },
+    "attach_resume": {
+      "status": "unverified"
+    },
+    "send": {
+      "status": "unverified"
+    },
+    "status": {
+      "status": "unverified"
+    },
+    "cancel": {
+      "status": "unverified"
+    },
+    "collect": {
+      "status": "unverified"
+    },
+    "heartbeat": {
+      "status": "unverified"
+    }
+  }
+}

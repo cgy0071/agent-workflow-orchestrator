@@ -79,7 +79,7 @@ python scripts/workflow_control.py --state /absolute/workflow-state register-tas
 python scripts/monitor_task.py --request /absolute/task/request.json --notify
 ```
 
-The control tool registers tasks; it does not submit them or own external directory leases. The monitor requires an identical registered request and writes `frozen_request.json`. Follow-up registration also checks the sealed parent review. Full workflow dispatch and business review remain agent responsibilities under user authorization.
+The register-task command records work submitted through an existing controller. Alternatively, use [durable dispatch and DAG scheduling](scheduling.md) to reserve and send once, confirm execution, and enforce workspace/resource claims within the shared state database. The monitor requires an identical confirmed registered request and writes `frozen_request.json`. Follow-up registration checks the sealed parent review; DAG dependencies separately require accepted evidence. Business review remains an authorized reviewer responsibility.
 
 ## 5. Receive, acknowledge, review, and continue
 

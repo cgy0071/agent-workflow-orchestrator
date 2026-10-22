@@ -41,6 +41,10 @@
     "continuation_verdicts": ["accept", "repair"],
     "stop_conditions": ["goal reached", "user paused or cancelled", "authorization exhausted"]
   },
+  "scheduler": {
+    "max_concurrency": 1,
+    "resources": {}
+  },
   "automation": {
     "continuous_execution_authorized": false,
     "notify_reviewer_authorized": false,

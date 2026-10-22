@@ -23,6 +23,8 @@ Any role can run in Codex, Pi, Claude, dsh-tui, Grok, or another harness. Record
 
 ## Dispatch and execution
 
+For durable single-attempt submission or DAG branches/joins, read [scheduling.md](references/scheduling.md). Use its scheduler with explicit per-task dispatch authorization and verified worker commands. It persists reservations before sending, enforces shared-state workspace/resource claims, and gates dependencies on accepted evidence. Use [capabilities.md](references/capabilities.md) to record versioned operation evidence; labels alone do not establish client support.
+
 Before first dispatch or any harness/window change, read [setup-and-switching.md](references/setup-and-switching.md). Initialize role bindings, verify actual targets, and record controller instance/version. Side conversations are advisory-only. Default to inbox-only notification; exact-thread routing needs real conversation/branch metadata. A dedicated main window requires an explicit declaration. Context flags are trusted adapter/operator metadata, not automatic branch detection or authentication.
 
 1. Recover the objective, current tasks, accepted results, and open gates from configured records. Do not infer completed work from chat alone.

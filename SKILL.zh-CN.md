@@ -23,6 +23,8 @@ description: Configure and run multi-agent workflows with editable roles, archit
 
 ## 调度与执行
 
+需要持久单次派工或 DAG 分支／汇合时，读取[调度指南](references/scheduling.zh-CN.md)。按每项任务的明确授权及已核验 Worker 命令操作；调度器先保存尝试，再发送，并在共享状态库中约束目录／资源占用，以独立审核证据控制依赖。真实客户端能力按[能力证据合同](references/capabilities.zh-CN.md)记录版本与原始证据，不能由标签推断。
+
 首次派工或更换客户端/窗口前，阅读 [初始化与切换指南](references/setup-and-switching.zh-CN.md)。先建立角色绑定、核验实际目标并保存控制器 instance/version。侧对话仅提供建议；默认只写收件箱，精确路由需真实对话/分支元数据，专用主窗口需明确声明。context 是可信适配器/操作者声明，不是自动分支识别或身份认证。
 
 1. 按配置恢复目标、当前任务、已接收结果和未关闭门，不从聊天猜测已完成工作。

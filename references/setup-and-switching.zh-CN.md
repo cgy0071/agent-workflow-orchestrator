@@ -91,7 +91,7 @@ python scripts/workflow_control.py --state /absolute/workflow-state register-tas
 python scripts/monitor_task.py --request /absolute/task/request.json --notify
 ```
 
-控制脚本登记任务，不负责实际提交或外部目录租约。监控启动前要求请求与台账一致，并保存 `frozen_request.json`。续派任务还需通过父审核文件校验。任务规划、业务审核和实际派工仍由获授权的 Agent 完成。
+register-task 用于登记现有控制器已经提交的任务。也可使用[持久派工与 DAG 调度](scheduling.zh-CN.md)先登记再单次发送、核实执行，并在共享状态库中约束目录／资源占用。监控要求已确认请求与台账一致，并保存 `frozen_request.json`。续派登记检查父审核，DAG 依赖另行要求审核通过的证据；业务审核仍由获授权的审核者负责。
 
 ## 5. 收取、确认、审核与续派
 

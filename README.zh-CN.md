@@ -21,6 +21,8 @@
 - **身份绑定与交接**：选择实际会话、记录绑定版本、延后切换忙碌执行者，旧控制器自动失效。
 - **持久化审核收件箱**：先保存完成事件，再尝试通知；确认收到和审核通过分别登记，REVIEW.md 与哈希绑定。
 - **会话策略**：默认只写收件箱；真实分支元数据或用户声明的专用主窗口才允许直接通知。
+- **持久派工与 DAG**：发送前记录尝试，约束目录／资源、并发数量、经过审核的依赖及汇合。
+- **恢复与查询**：保存监控检查点、有限指数退避、补记完成事件及只读任务状态。
 
 ## 默认分工
 
@@ -151,6 +153,18 @@ python scripts/monitor_task.py --request /absolute/task/request.json --notify
 
 缺交付、blocked、身份变化、执行失败和不确定通知会单独记录。终端空闲或命令退出 0 不等于任务通过。
 
+## 持久派工与审核门控 DAG
+
+[调度指南](references/scheduling.zh-CN.md)给出派工、执行核实、旧库迁移、资源配额及 DAG load/tick 命令。请求需要明确派工授权；每次 tick 有限执行一轮就绪调度，执行核实与审核仍需显式完成。真实客户端版本及原始证据按[能力合同](references/capabilities.zh-CN.md)记录。
+
+```sh
+python scripts/workflow_control.py --state /absolute/workflow-state status
+python scripts/workflow_control.py --state /absolute/workflow-state inspect --task TASK-ID
+python -B scripts/demo_scheduler.py --directory runtime/new-demo
+```
+
+演示以真实本地 Python 子进程作为测试 Worker，执行 A/B -> JOIN，并登记测试审核，不连接供应商。生产客户端兼容性仍需对应版本的实际接入证据。
+
 ## 单次 CLI 作业
 
 如果不使用 Herdr，可按 [`examples/job.json`](examples/job.json) 提供经过确认的实际单次命令：
@@ -195,6 +209,8 @@ references/                 角色、任务、适配与监控合同
 examples/                   可修改的工作流与任务请求示例
 scripts/monitor_task.py      状态检测与一次通知
 scripts/workflow_control.py  绑定、收件箱、交接和审核门
+scripts/workflow_scheduler.py 持久派工、DAG、占用与状态
+scripts/demo_scheduler.py    可复现的本地子进程 DAG 演示
 scripts/run_job.py           单次 CLI 作业回执
 scripts/test_*.py            离线行为与集成验证
 scripts/check_encoding.py    UTF-8 与有损文本检查

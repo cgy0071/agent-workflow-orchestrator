@@ -47,6 +47,16 @@ def validate_workflow(value):
     allowed = flow.get("continuation_verdicts", ["accept", "repair"])
     if not isinstance(allowed, list) or not all(isinstance(x, str) for x in allowed):
         raise ValueError("continuation_verdicts must be a list")
+    scheduler = value.get("scheduler", {})
+    if not isinstance(scheduler, dict):
+        raise ValueError("scheduler must be an object")
+    concurrency = scheduler.get("max_concurrency", 1)
+    if type(concurrency) is not int or concurrency < 1:
+        raise ValueError("scheduler.max_concurrency must be a positive integer")
+    resources = scheduler.get("resources", {})
+    if not isinstance(resources, dict) or any(not isinstance(k, str) or not k or type(v) is not int or v < 1
+                                              for k, v in resources.items()):
+        raise ValueError("scheduler.resources must map names to positive integer capacities")
     return value
 
 
@@ -87,6 +97,8 @@ def initialize(state, config):
         """)
         con.execute("INSERT INTO meta VALUES ('config',?)", (json.dumps(config),))
         con.execute("INSERT INTO meta VALUES ('workflow_id',?)", (uuid.uuid4().hex,))
+        from workflow_scheduler import create_schema
+        create_schema(con)
         con.commit()
     finally:
         con.close()
@@ -204,9 +216,11 @@ def check_request_links(state, request):
         return {"workflow_config_sha256": digest(cfg), "reviewer_role": role}
 
 
-def register_task(state, request, actor, version, context):
+def register_task(state, request, actor, version, context, *, reservation=None):
     from monitor_task import validate_request
-    validate_request(request)
+    validate_request(request, require_dispatch=reservation is None)
+    if reservation is not None and request["dispatch_confirmed"]:
+        raise ValueError("a dispatch reservation needs an unconfirmed request")
     check_request_links(state, request)
     if request.get("parent_review"):
         parent = next_gate(state, request["parent_review"]["event_id"], actor, version, context)["parent_review"]
@@ -231,11 +245,15 @@ def register_task(state, request, actor, version, context):
             return {"status": "ALREADY_REGISTERED"}
         if con.execute("SELECT count(*) FROM tasks WHERE worker=? AND status='running'", (worker_role,)).fetchone()[0]:
             raise ValueError("role already has an active or uncertain task")
+        from workflow_scheduler import check_claim, reserve
+        check_claim(con, request, reservation)
         data = {"request": request, "request_sha256": digest(request),
                 "authorization_sha256": digest(request["authorization"]), "worker_binding": worker,
                 "controller": who, "registered_at": stamp()}
         con.execute("INSERT INTO tasks VALUES (?,?,?,?,?,?)", (request["task_id"], request["nonce"],
                     digest(request), worker_role, "running", json.dumps(data)))
+        if reservation is not None:
+            reserve(con, request, who, reservation)
         audit(con, "task_registered", data)
         return {"status": "REGISTERED", "request_sha256": digest(request)}
 
@@ -265,6 +283,8 @@ def resolve_task(state, task_id, actor, version, context, evidence):
 
 
 def publish_event(state, request, report, receipt=None):
+    if not request.get("dispatch_confirmed"):
+        raise ValueError("confirm dispatch before publishing monitor events")
     with database(state) as con:
         task = con.execute("SELECT request_hash FROM tasks WHERE id=? AND nonce=?",
                            (request["task_id"], request["nonce"])).fetchone()
@@ -273,10 +293,14 @@ def publish_event(state, request, report, receipt=None):
         event_id = digest({"request": digest(request), "status": report["status"]})
         data = {"event_id": event_id, "request_sha256": digest(request), "report": report,
                 "receipt": receipt, "created_at": stamp()}
-        con.execute("INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)", (event_id, request["task_id"],
+        inserted = con.execute("INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)", (event_id, request["task_id"],
                     request["nonce"], request["reviewer"]["role"], "pending", json.dumps(data)))
+        from workflow_scheduler import has_schema, journal
+        if inserted.rowcount and has_schema(con):
+            journal(con, request["task_id"], request.get("generation", 1), "monitor:" + digest(request),
+                    "delivery_" + report["status"], data, event_id)
         if report["status"] in ("review_ready", "failed", "exited"):
-            con.execute("UPDATE tasks SET status='finished' WHERE id=?", (request["task_id"],))
+            con.execute("UPDATE tasks SET status='finished' WHERE id=? AND status='running'", (request["task_id"],))
         return event_id
 
 
@@ -354,6 +378,11 @@ def record_review(state, event_id, actor, version, context, file, verdict):
         cfg = config_of(con)
         if verdict not in cfg.get("workflow", {}).get("transitions", {}):
             raise ValueError("verdict is not configured in workflow.transitions")
+        delivery = json.loads(event["data"])["report"]["status"]
+        if verdict == "accept" and delivery != "review_ready":
+            raise ValueError("only review_ready delivery can be accepted")
+        if verdict == "accept" and con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0] == "resolved":
+            raise ValueError("a closed task attempt cannot be accepted")
         result = {"event_id": event_id, "task_id": event["task"], "nonce": event["nonce"],
                   "path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "verdict": verdict,
                   "action": cfg["workflow"]["transitions"][verdict], "actor": who,
@@ -361,6 +390,10 @@ def record_review(state, event_id, actor, version, context, file, verdict):
         con.execute("INSERT INTO reviews VALUES (?,?)", (event_id, json.dumps(result)))
         con.execute("UPDATE events SET status='reviewed' WHERE id=?", (event_id,))
         audit(con, "review_recorded", result)
+        from workflow_scheduler import has_schema, journal
+        if has_schema(con):
+            task_data = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (event["task"],)).fetchone()[0])
+            journal(con, event["task"], task_data["request"].get("generation", 1), actor, "review_" + verdict, result)
         return result
 
 
@@ -402,6 +435,8 @@ def main():
         if name == "review": cmd.add_argument("--file", required=True); cmd.add_argument("--verdict", required=True)
     for name in ("bindings", "inbox"):
         sub.add_parser(name)
+    sub.add_parser("status")
+    inspect_cmd = sub.add_parser("inspect"); inspect_cmd.add_argument("--task", required=True)
     deliver = sub.add_parser("deliver"); deliver.add_argument("--event", required=True)
     args = parser.parse_args()
     from monitor_task import Transport, read_json
@@ -425,6 +460,9 @@ def main():
     elif args.command == "review": result = record_review(args.state, args.event, args.actor, args.version, args.context, args.file, args.verdict)
     elif args.command == "next-check": result = next_gate(args.state, args.event, args.actor, args.version, args.context)
     elif args.command == "deliver": result = deliver_event(args.state, args.event, Transport({}))
+    elif args.command in ("status", "inspect"):
+        from workflow_scheduler import snapshot
+        result = snapshot(args.state, getattr(args, "task", None))
     else:
         with database(args.state) as con:
             table = "bindings" if args.command == "bindings" else "events"

@@ -8,6 +8,7 @@ runtime/
 monitor.lock
 *_status.json
 monitor_summary.json
+monitor_checkpoint.json
 completion_receipt.json
 notification_attempt.json
 notification_result.json

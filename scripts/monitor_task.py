@@ -194,6 +194,8 @@ def validate_request(request, require_dispatch=True):
             raise ValueError("missing request field: " + key)
     if not all(isinstance(request[k], str) and request[k].strip() for k in ("task_id", "nonce", "cwd")):
         raise ValueError("task ID, nonce, and cwd must be nonempty strings")
+    if type(request.get("generation", 1)) is not int or request.get("generation", 1) < 1:
+        raise ValueError("generation must be a positive integer")
     if type(request.get("dispatch_confirmed")) is not bool or (require_dispatch and not request["dispatch_confirmed"]):
         raise ValueError("task identity and confirmed dispatch required")
     cwd = Path(request["cwd"]).resolve()
@@ -227,6 +229,7 @@ def validate_request(request, require_dispatch=True):
     number(monitor.get("command_timeout_seconds", 15), "command_timeout_seconds", maximum=3600)
     number(monitor.get("settle_grace_seconds", 120), "settle_grace_seconds", 0, True)
     number(monitor.get("retry_interval_seconds", 5), "retry_interval_seconds", maximum=86400)
+    number(monitor.get("retry_max_seconds", 60), "retry_max_seconds", maximum=86400)
     sequence(monitor.get("max_consecutive_errors", 3))
     if monitor.get("max_consecutive_errors", 3) < 1: raise ValueError("error budget must be positive")
     if monitor.get("overall_timeout_seconds") is not None:
@@ -409,21 +412,32 @@ def main():
             previous = read_json(final)
             if previous.get("task_id") != request["task_id"] or previous.get("nonce") != request["nonce"]:
                 raise ValueError("monitor directory belongs to another task")
+            if request.get("workflow_state"):
+                from workflow_control import publish_event
+                receipt_file = directory / "completion_receipt.json"
+                publish_event(request["workflow_state"], request, previous,
+                              read_json(receipt_file) if receipt_file.exists() else None)
             if args.notify and previous["status"] != "monitoring_stopped":
                 notify_once(request, previous, directory, Transport(request))
             print(json.dumps(previous, ensure_ascii=False))
             return
         transport = Transport(request)
-        started = time.monotonic()
-        idle_since = None
-        errors = 0
+        checkpoint_path = directory / "monitor_checkpoint.json"
+        checkpoint = read_json(checkpoint_path) if checkpoint_path.exists() else {}
+        if checkpoint and checkpoint.get("request_sha256") != object_hash(request):
+            raise ValueError("checkpoint belongs to another frozen request")
+        # Wall-clock deadlines survive a process restart. A clock adjustment may
+        # delay observation; it can never authorize cancellation or acceptance.
+        started = time.time() if args.resume else checkpoint.get("started_at", time.time())
+        idle_since = checkpoint.get("idle_since")
+        errors = 0 if args.resume else checkpoint.get("consecutive_errors", 0)
         config = request.get("monitor", {})
         while True:
             try:
                 if (directory / "STOP_MONITOR").exists():
                     status, detail, receipt = "monitoring_stopped", "Monitor stopped; worker not cancelled.", None
                 else:
-                    status, detail, idle_since, receipt = inspect_once(request, transport, idle_since)
+                    status, detail, idle_since, receipt = inspect_once(request, transport, idle_since, now=time.time())
                 errors = 0
             except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
                 errors += 1
@@ -432,13 +446,19 @@ def main():
             except Exception as exc:
                 status, detail, receipt = "adapter_error", str(exc)[:500], None
             report = {"task_id": request["task_id"], "nonce": request["nonce"],
-                      "status": status, "anomaly_summary": detail}
+                      "status": status, "anomaly_summary": detail, "observed_at": utc_now(),
+                      "consecutive_errors": errors, "elapsed_seconds": max(0, time.time() - started)}
+            save_json(checkpoint_path, {"request_sha256": object_hash(request), "started_at": started,
+                                       "idle_since": idle_since, "consecutive_errors": errors})
             if receipt:
                 save_json(directory / "completion_receipt.json", receipt)
             limit = config.get("overall_timeout_seconds")
-            if status in ("working", "settling", "transient_error") and limit is not None and time.monotonic() - started >= limit:
+            if status in ("working", "settling", "transient_error") and limit is not None and time.time() - started >= limit:
                 report.update(status="monitor_timeout", anomaly_summary="Configured monitor limit reached; task not cancelled or accepted.")
             save_json(directory / "monitor_status.json", report)
+            if request.get("workflow_state"):
+                from workflow_scheduler import record_observation
+                record_observation(request["workflow_state"], request, report)
             print(json.dumps(report, ensure_ascii=False), flush=True)
             if report["status"] not in ("working", "settling", "transient_error"):
                 save_json(final, report)
@@ -448,7 +468,8 @@ def main():
                 if args.notify and report["status"] != "monitoring_stopped":
                     notify_once(request, report, directory, transport)
                 return
-            time.sleep(config.get("retry_interval_seconds", 5) if status == "transient_error" else config.get("interval_seconds", 300))
+            retry = min(config.get("retry_max_seconds", 60), config.get("retry_interval_seconds", 5) * (2 ** min(max(errors - 1, 0), 16)))
+            time.sleep(retry if status == "transient_error" else config.get("interval_seconds", 300))
     finally:
         lock.unlink(missing_ok=True)
 

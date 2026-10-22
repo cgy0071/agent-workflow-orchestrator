@@ -1,0 +1,202 @@
+{
+  "nodes": [
+    {
+      "id": "A",
+      "needs": [],
+      "request": {
+        "task_id": "TASK-A",
+        "nonce": "replace-with-unique-nonce-A",
+        "generation": 1,
+        "cwd": "/absolute/delivery/A",
+        "workflow_state": "/absolute/workflow-state",
+        "worker": {
+          "role": "executor",
+          "harness": "replace-with-actual-harness",
+          "adapter": "command",
+          "expected_identity": {
+            "kind": "replace-with-actual-harness",
+            "terminal": "replace-executor",
+            "launch_cwd": "/absolute/executor-workspace"
+          },
+          "status_argv": [
+            "VERIFIED_STATUS_COMMAND"
+          ],
+          "output_argv": [
+            "VERIFIED_OUTPUT_COMMAND"
+          ],
+          "prompt_argv": [
+            "VERIFIED_PROMPT_COMMAND",
+            "{message}"
+          ],
+          "baseline_completion_seq": 0
+        },
+        "reviewer": {
+          "role": "planner",
+          "harness": "replace-with-actual-harness",
+          "adapter": "command",
+          "expected_identity": {
+            "kind": "replace-with-actual-harness",
+            "terminal": "replace-planner",
+            "launch_cwd": "/absolute/planner-workspace"
+          },
+          "identity_argv": [
+            "VERIFIED_IDENTITY_COMMAND"
+          ],
+          "prompt_argv": [
+            "VERIFIED_PROMPT_COMMAND",
+            "{message}"
+          ]
+        },
+        "dispatch_confirmed": false,
+        "authorization": {
+          "source": "replace-with-actual-authorization-source",
+          "dispatch_worker": false,
+          "notify_reviewer": false
+        },
+        "completion": {
+          "binding_artifact": "HANDOFF.md",
+          "artifacts": [
+            "RESULT.md",
+            "EVIDENCE.md"
+          ],
+          "marker_source": "artifact"
+        }
+      },
+      "message": "Task TASK-A nonce replace-with-unique-nonce-A: replace with objective, scope, acceptance, and delivery instructions.",
+      "resources": {}
+    },
+    {
+      "id": "B",
+      "needs": [],
+      "request": {
+        "task_id": "TASK-B",
+        "nonce": "replace-with-unique-nonce-B",
+        "generation": 1,
+        "cwd": "/absolute/delivery/B",
+        "workflow_state": "/absolute/workflow-state",
+        "worker": {
+          "role": "second",
+          "harness": "replace-with-actual-harness",
+          "adapter": "command",
+          "expected_identity": {
+            "kind": "replace-with-actual-harness",
+            "terminal": "replace-second",
+            "launch_cwd": "/absolute/second-workspace"
+          },
+          "status_argv": [
+            "VERIFIED_STATUS_COMMAND"
+          ],
+          "output_argv": [
+            "VERIFIED_OUTPUT_COMMAND"
+          ],
+          "prompt_argv": [
+            "VERIFIED_PROMPT_COMMAND",
+            "{message}"
+          ],
+          "baseline_completion_seq": 0
+        },
+        "reviewer": {
+          "role": "planner",
+          "harness": "replace-with-actual-harness",
+          "adapter": "command",
+          "expected_identity": {
+            "kind": "replace-with-actual-harness",
+            "terminal": "replace-planner",
+            "launch_cwd": "/absolute/planner-workspace"
+          },
+          "identity_argv": [
+            "VERIFIED_IDENTITY_COMMAND"
+          ],
+          "prompt_argv": [
+            "VERIFIED_PROMPT_COMMAND",
+            "{message}"
+          ]
+        },
+        "dispatch_confirmed": false,
+        "authorization": {
+          "source": "replace-with-actual-authorization-source",
+          "dispatch_worker": false,
+          "notify_reviewer": false
+        },
+        "completion": {
+          "binding_artifact": "HANDOFF.md",
+          "artifacts": [
+            "RESULT.md",
+            "EVIDENCE.md"
+          ],
+          "marker_source": "artifact"
+        }
+      },
+      "message": "Task TASK-B nonce replace-with-unique-nonce-B: replace with objective, scope, acceptance, and delivery instructions.",
+      "resources": {}
+    },
+    {
+      "id": "JOIN",
+      "needs": [
+        "A",
+        "B"
+      ],
+      "request": {
+        "task_id": "TASK-JOIN",
+        "nonce": "replace-with-unique-nonce-JOIN",
+        "generation": 1,
+        "cwd": "/absolute/delivery/JOIN",
+        "workflow_state": "/absolute/workflow-state",
+        "worker": {
+          "role": "executor",
+          "harness": "replace-with-actual-harness",
+          "adapter": "command",
+          "expected_identity": {
+            "kind": "replace-with-actual-harness",
+            "terminal": "replace-executor",
+            "launch_cwd": "/absolute/executor-workspace"
+          },
+          "status_argv": [
+            "VERIFIED_STATUS_COMMAND"
+          ],
+          "output_argv": [
+            "VERIFIED_OUTPUT_COMMAND"
+          ],
+          "prompt_argv": [
+            "VERIFIED_PROMPT_COMMAND",
+            "{message}"
+          ],
+          "baseline_completion_seq": 0
+        },
+        "reviewer": {
+          "role": "planner",
+          "harness": "replace-with-actual-harness",
+          "adapter": "command",
+          "expected_identity": {
+            "kind": "replace-with-actual-harness",
+            "terminal": "replace-planner",
+            "launch_cwd": "/absolute/planner-workspace"
+          },
+          "identity_argv": [
+            "VERIFIED_IDENTITY_COMMAND"
+          ],
+          "prompt_argv": [
+            "VERIFIED_PROMPT_COMMAND",
+            "{message}"
+          ]
+        },
+        "dispatch_confirmed": false,
+        "authorization": {
+          "source": "replace-with-actual-authorization-source",
+          "dispatch_worker": false,
+          "notify_reviewer": false
+        },
+        "completion": {
+          "binding_artifact": "HANDOFF.md",
+          "artifacts": [
+            "RESULT.md",
+            "EVIDENCE.md"
+          ],
+          "marker_source": "artifact"
+        }
+      },
+      "message": "Task TASK-JOIN nonce replace-with-unique-nonce-JOIN: replace with objective, scope, acceptance, and delivery instructions.",
+      "resources": {}
+    }
+  ]
+}

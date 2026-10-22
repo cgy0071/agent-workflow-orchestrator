@@ -20,6 +20,8 @@ The workflow is independent of project files, models, and clients. Planner, Exec
 - **Verified role bindings and handoffs:** select actual sessions, version bindings, defer busy Worker replacement, and retire stale controllers.
 - **Durable review inbox:** persist completion before notification; track acknowledgment and hash-bound REVIEW.md separately.
 - **Conversation policies:** inbox-only by default, with exact thread metadata or an explicitly dedicated main window for direct prompts.
+- **Durable dispatch and DAGs:** reserve before sending; enforce workspace/resource claims, concurrency limits, reviewed dependencies and fan-in joins.
+- **Recovery and status:** persisted monitor checkpoints, capped query backoff, event replay, and read-only task inspection.
 
 ## Default roles
 
@@ -148,6 +150,18 @@ After fresh completion and valid delivery, the monitor records artifact hashes a
 
 Missing delivery, blocked states, changed identities, failures, and uncertain notification are separate outcomes. An idle terminal or a zero exit code does not establish task acceptance.
 
+## Durable dispatch and reviewed DAGs
+
+Use [the scheduling guide](references/scheduling.md) for dispatch, execution confirmation, migration, resource quotas, and DAG load/tick commands. Requests require explicit dispatch authorization. Each tick makes one finite scheduling pass; reviews and execution confirmation remain explicit. Versioned capability evidence follows [this contract](references/capabilities.md).
+
+```sh
+python scripts/workflow_control.py --state /absolute/workflow-state status
+python scripts/workflow_control.py --state /absolute/workflow-state inspect --task TASK-ID
+python -B scripts/demo_scheduler.py --directory runtime/new-demo
+```
+
+The demo runs real local Python child processes as fixtures and records A/B -> JOIN with fixture reviews. It contacts no providers. Production client capabilities remain version-specific and require actual integration evidence.
+
 ## One-shot CLI jobs
 
 Without Herdr, supply a verified one-shot command using [examples/job.json](examples/job.json):
@@ -200,6 +214,8 @@ references/                       English contracts and Chinese translations
 examples/                         Editable workflow and request examples
 scripts/monitor_task.py            Status checks and one-time notification
 scripts/workflow_control.py        Bindings, inbox, handoffs, and review gates
+scripts/workflow_scheduler.py      Durable dispatch, DAG ticks, claims, and status
+scripts/demo_scheduler.py          Reproducible local subprocess DAG fixture
 scripts/run_job.py                 One-shot CLI job receipts
 scripts/test_*.py                  Offline behavioral and integration tests
 scripts/check_encoding.py          UTF-8 and language integrity checks
