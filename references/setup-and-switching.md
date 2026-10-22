@@ -6,9 +6,24 @@ English | [Chinese](setup-and-switching.zh-CN.md)
 
 Start from `examples/workflow.json`. A role's `harness` is descriptive; it does not select or launch a window. For each role, discover the actual client session through a verified interface and save its adapter specification. Any role can use any supported client.
 
-For Herdr, use its installed CLI's read-only discovery and identity commands. Record the executable, session, pane, actual agent kind, terminal ID, and launch directory. For another CLI/API, provide commands that return the identity/status contract in [harness-adapters.md](harness-adapters.md). The package does not guess provider flags or launch interactive clients.
+For Herdr, use its installed CLI's read-only discovery and identity commands. Record the executable, session, pane, actual agent kind, terminal ID, and launch directory. For another CLI/API, provide commands that return the identity/status contract in [harness-adapters.md](harness-adapters.md). Harness launch arguments must come from the user's selected runtime; see the optional provisioning recipe below.
 
-Extract the `worker` and `reviewer` objects from your edited `request.json` into `worker.json` and `planner.json`. Remove `baseline_completion_seq` from `worker.json`; keep it in the per-task request. Keep adapter specifications otherwise identical. A Paper Lead can have another reviewer specification. Names, models, and window titles alone do not establish identity.
+Choose either creation method below. Both lead to the same identity verification, binding, and preflight steps. An existing available session can be reused after checking its identity and current tasks.
+
+### 1.1 Manual creation
+
+1. Open a dedicated pane/window in the selected client and enter the task workspace.
+2. Start the installed harness and select the intended provider, model, and thinking level where applicable.
+3. Check the actual runtime settings, then discover the session/pane, terminal identity, and cwd through the verified adapter.
+4. Save the role's adapter specification and continue with section 2. Capture the live sequence baseline immediately before dispatch.
+
+This method suits an existing interactive session or a client without a verified creation interface. A manually created session can still use automatic monitoring, notification, and authorized follow-up.
+
+### 1.2 Automatic creation
+
+When the user authorizes creating a session and the installed client exposes a verified interface, the controller creates a dedicated pane in the task workspace, launches the harness with the selected arguments, waits for registration, and verifies the actual runtime settings and identity. For Herdr commands and bounded-wait requirements, see [section 8](#8-provision-an-executor-when-needed). This route requires a verified controller or launcher; bind and preflight do not create sessions themselves.
+
+After either method, extract the `worker` and `reviewer` objects from your edited `request.json` into `worker.json` and `planner.json`. Remove `baseline_completion_seq` from `worker.json`; keep it in the per-task request. Keep adapter specifications otherwise identical. A Paper Lead can have another reviewer specification. Names, models, and window titles alone do not establish identity.
 
 ## 2. Initialize and bind
 
@@ -35,6 +50,10 @@ The SQLite ledger stores configuration, versioned bindings, frozen tasks, pendin
 | `dedicated_window` | Explicit operator declaration that this window is exclusively the controlling main conversation | Direct notification after identity recheck. Do not open side conversations there. |
 
 If a client cannot expose thread and branch IDs, the Skill cannot reliably recognize side conversations from a terminal ID or title. Use `inbox_only`, or explicitly reserve a dedicated window. For direct legacy monitoring, set the request reviewer's `context_policy`; `dedicated_window` also needs `context_declaration`. For ledger delivery, use binding `--policy` and an explicit `--reason` for a dedicated window.
+
+Ledger bind/switch stores the selected policy in the adapter spec and fills a missing context_declaration from --reason for dedicated_window. The standalone request still needs its own declaration. Binding and preflight check direct Herdr targets for agent_session using read-only queries; sending rechecks identity and this prerequisite. No test prompt is sent. Presence is a capability prerequisite, not a guarantee of delivery; timeout/uncertainty rules still apply.
+
+In the reported Windows / Herdr 0.9.3 evaluation, Pi exposed agent_session and received prompts; dsh-tui did not. Use inbox_only for such a target, or a separately verified command bridge. Do not infer compatibility from harness names or the nullable name field: other versions and Codex/Claude/Grok require their own live checks.
 
 **Trust boundary:** `--context main|side|unknown` is supplied by a trusted runtime bridge or an informed operator. It is not automatic branch detection or authentication. The gate rejects declared side/unknown contexts and stale bindings. It cannot stop an arbitrary process with ledger write access from falsely declaring `main`. A bridge should pass `main` only after checking actual caller metadata against the binding. Without that capability, use inbox-only operation. Do not invent branch IDs or infer main status from pane focus.
 
@@ -117,3 +136,30 @@ python scripts/monitor_task.py --request /absolute/task/request.json --resume --
 ```
 
 The old summary is retained as a history file; frozen inputs and notification attempts remain. Ready-for-review delivery cannot be resumed into a second execution. A stale `monitor.lock` needs deliberate process verification before removal. Do not reuse task IDs/directories or overwrite old evidence.
+
+## 8. Provision an executor when needed
+
+A pre-created pane is optional. Within the authorized session and workspace, an operator or verified controller can create a dedicated pane and launch an already-installed harness with the user's chosen arguments. This does not require installing providers or changing configuration. Inspect the installed CLI help first; the following primitives were reported working on Windows with Herdr 0.9.3. The same evaluation reported agent_pane_busy from agent start in idle cmd/PowerShell shells. Treat that as a version-specific compatibility report, not a universal Windows limitation. Use pane run on a newly created, verified shell pane in that environment.
+
+```powershell
+$herdrExe = 'C:/absolute/path/to/herdr.exe'
+$workflowSession = 'OWNER-AUTHORIZED-SESSION'
+$parentPane = 'VERIFIED-PARENT-PANE'
+$taskCwd = 'E:/absolute/task-workspace'
+# Supply the exact installed CLI command and provider/model/thinking arguments selected by the user.
+$launchCommand = 'USER-SELECTED-HARNESS-AND-ARGUMENTS'
+$created = & $herdrExe --session $workflowSession pane split --pane $parentPane --direction down --cwd $taskCwd --no-focus
+if ($LASTEXITCODE -ne 0) { throw 'Pane creation failed; inspect before retrying' }
+$workerPane = ($created | ConvertFrom-Json).result.pane.pane_id
+if (-not $workerPane) { throw 'No pane identity returned; inspect session before proceeding' }
+& $herdrExe --session $workflowSession pane read $workerPane --source recent-unwrapped --lines 3
+# Confirm the new pane is an available shell before issuing the launch exactly once.
+& $herdrExe --session $workflowSession pane run $workerPane $launchCommand
+if ($LASTEXITCODE -ne 0) { throw 'Launch failed or uncertain; inspect pane, do not replay blindly' }
+& $herdrExe --session $workflowSession agent get $workerPane
+& $herdrExe --session $workflowSession pane read $workerPane --source recent-unwrapped --lines 6
+```
+
+These are provisioning primitives, not a cross-version turnkey launcher. A controller automating them must bound each subprocess (for example 15 seconds), poll shell readiness and registration with a deadline (for example 30 seconds each), and keep the returned pane ID as an owned resource. Inspect a timeout before retrying any creation or launch; leave pre-existing panes alone. Do not infer readiness from agent_status=unknown, process existence, or launch exit code.
+
+After registration, verify actual agent kind, terminal, pane, and cwd with agent get. Read the harness's current runtime status, not its echoed launch command, to check provider, model, and thinking against the user's selection. If those values cannot be observed, record unverified and stop before binding/dispatch; a successful launch is insufficient. Then build the adapter spec and capture the live sequence baseline immediately before dispatch. The reported approximately 1.2-second provisioning measurement is one environment's observation, not a timeout or performance guarantee. No provisioning command is run by bind or preflight.

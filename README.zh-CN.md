@@ -93,6 +93,8 @@ gh repo clone cgy0071/agent-workflow-orchestrator "$HOME/.codex/skills/agent-wor
 
 ### 2. 选择实际 harness 和窗口
 
+支持 **手动创建** 和 **自动创建** 两种方式：手动打开 pane 或窗口、进入工作目录并启动或选择 harness；或由已验证的控制器自动创建 pane，以用户选定参数启动 harness。两种方式都先核验实际运行配置与会话身份，再绑定角色，后续共用监控和审核流程。已有可用会话也可核验后复用。自动创建需要已验证的启动接口，bind/preflight 本身不启动客户端。
+
 完整操作见 [初始化、窗口选择与会话切换](references/setup-and-switching.zh-CN.md)，包括身份核验、初始化、绑定、切换、确认、审核和恢复命令。角色中的 `harness` 名称不会自动选择窗口，需要为每个角色保存实际核验的适配器配置。
 
 ```sh
