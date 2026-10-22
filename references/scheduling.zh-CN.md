@@ -75,6 +75,11 @@ python scripts/monitor_task.py --request confirmed.json
 `release --task TASK-ID` 加 actor/version/context 释放；DAG tick 会在选择下游前
 释放该图中仍有有效审核证据的占用。审核与交付文件需要持续保留。
 
+串行节点可以复用 Worker 及其执行目录。交付证据应使用每任务独立的 cwd，或在共享
+cwd 中为交付文件、绑定文件及审核文件设置任务专属路径。释放占用后仍需保留先前
+已验收文件，不能覆盖；依赖检查会重新计算其哈希。加载 DAG 允许共享 cwd，因为
+其中可以使用独立文件路径保留历史证据；它不会永久保留历史交付的文件名。
+
 ## 冻结 DAG、分支与汇合
 
 图的 nodes 数组中，每个节点包含 id、needs、未确认 request、包含任务 ID／nonce

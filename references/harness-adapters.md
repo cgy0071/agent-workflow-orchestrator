@@ -81,4 +81,25 @@ Its archive line counts and encoding-check count do not identify the tested
 commit. Retain the raw archive/version evidence before attributing results to a
 specific revision or upgrading any capability profile to verified.
 
+### Closing report for a000816
+
+The evaluator's reply-4 identifies a000816 and closes the reported issues. It
+reports two dependent DAG nodes accepted on the same Pi instance, with persistent
+done status and sequences 1574 then 1576, using the explicit status mapping.
+During a separate provider timeout, the worker reportedly remained working for
+about eight minutes and the scheduler refused further dispatch. The report also
+lists 89 passing tests, 40 clean encoding checks and OFFLINE_DEMO_PASS.
+
+Its first DAG attempt reused delivery filenames in one cwd; later delivery
+overwrote earlier accepted bytes and the evidence hashes correctly stopped
+counting as valid. Per-task delivery directories resolved that report. See the
+[evidence-retention guidance](scheduling.md#isolation-and-resource-quotas) for
+serial workers sharing an execution directory.
+
+These are evaluator observations, not a new maintainer live reproduction. The
+Pi client version and complete raw run artifacts remain unreported; capability
+profiles are unchanged. One historical statement in the closing summary is
+incorrect: no sys.path insertion was added. The earlier cwd claim was not
+reproduced; test_cli_runs_from_unrelated_directory verifies normal script launch.
+
 For future entries, retain the OS, Herdr and harness versions, skill commit, adapter configuration, raw identity/status responses, actual launch command, and delivery/review evidence. Exclude credentials. Use this table as a troubleshooting starting point, then recheck the installed version and selected session. Herdr panes and commands apply only to the Herdr adapter.

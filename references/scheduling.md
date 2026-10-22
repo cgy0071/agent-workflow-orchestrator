@@ -94,6 +94,14 @@ Accepted claims can be released explicitly with `release --task TASK-ID` and
 actor/version/context. A DAG tick releases its valid accepted claims before
 selecting downstream work. Review and delivery files must remain available.
 
+Serial nodes may reuse a worker and its execution directory. Keep their evidence
+in separate per-task cwd directories, or use distinct task-specific artifact,
+binding and review paths within a shared cwd. Never overwrite earlier accepted
+files: releasing a claim does not end their retention requirement, and dependency
+checks rehash those bytes. Loading a DAG allows shared cwd because separate
+artifact paths can preserve evidence there; it does not reserve permanent
+filenames for historical deliveries.
+
 ## Frozen DAGs and review gates
 
 A graph contains `nodes`; each node has `id`, `needs`, an unconfirmed `request`,
