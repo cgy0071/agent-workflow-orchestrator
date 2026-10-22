@@ -11,3 +11,9 @@ monitor_summary.json
 completion_receipt.json
 notification_attempt.json
 notification_result.json
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+frozen_request.json
+pending_event.json

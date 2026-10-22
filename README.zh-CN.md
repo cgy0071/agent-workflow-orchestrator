@@ -18,6 +18,9 @@
 - **完成后唤醒审核者**：核验身份、任务和交付，发送一次通知，由审核角色继续已有授权计划。
 - **防重复**：唯一任务/nonce、新完成序列、监控锁和通知尝试记录；不把 idle 当成功，不盲目重发。
 - **独立证据审核**：监控的 `review_ready` 只代表收到交付；是否通过由配置指定的角色判断。
+- **身份绑定与交接**：选择实际会话、记录绑定版本、延后切换忙碌执行者，旧控制器自动失效。
+- **持久化审核收件箱**：先保存完成事件，再尝试通知；确认收到和审核通过分别登记，REVIEW.md 与哈希绑定。
+- **会话策略**：默认只写收件箱；真实分支元数据或用户声明的专用主窗口才允许直接通知。
 
 ## 默认分工
 
@@ -88,13 +91,25 @@ gh repo clone cgy0071/agent-workflow-orchestrator "$HOME/.codex/skills/agent-wor
 
 配置是给 Agent 读取的工作流规则；它不会自行产生用户授权。监控脚本读取的是下面每项任务独立的 request.json，而不是自动解释整个工作流图。
 
-### 2. 写任务并派发
+### 2. 选择实际 harness 和窗口
+
+完整操作见 [初始化、窗口选择与会话切换](references/setup-and-switching.zh-CN.md)，包括身份核验、初始化、绑定、切换、确认、审核和恢复命令。角色中的 `harness` 名称不会自动选择窗口，需要为每个角色保存实际核验的适配器配置。
+
+```sh
+python scripts/workflow_control.py --state /absolute/workflow-state init --config workflow.json
+python scripts/workflow_control.py --state /absolute/workflow-state bind --role planner --spec planner.json --mode controller --policy inbox_only
+python scripts/workflow_control.py --state /absolute/workflow-state bind --role executor --spec worker.json --mode worker
+```
+
+保存控制器返回的 instance/version。侧对话仅提供建议；客户端不提供真实对话和分支标识时，无法自动可靠识别，应使用收件箱或明确指定专用主窗口。context 是可信操作者/桥接器声明，不是身份认证。
+
+### 3. 写任务并派发
 
 按 [`references/task-and-review.zh-CN.md`](references/task-and-review.zh-CN.md) 写任务：目标、目录、允许改动、输入、验收、交付和停止点。发现并核验 Worker 的真实身份，检查当前任务/目录占用，保存投递记录后单次派发。若已有调度器和共享台账，复用它们。
 
 Planner 不一定是 Codex，Executor 不一定是 Pi。昵称、模型与实际客户端分别记录；例如 Grok 可以是独立 harness，也可以是 Pi 中的模型。
 
-### 3. 配置监控请求
+### 4. 配置监控请求
 
 从 [`examples/request.herdr.json`](examples/request.herdr.json) 复制到**新的任务目录**，填写实际 session、身份、完成序列、交付与授权。默认示例不能直接投递，必须替换占位值，并在确认执行已开始后设置 `dispatch_confirmed: true`。
 
@@ -108,20 +123,27 @@ Planner 不一定是 Codex，Executor 不一定是 Pi。昵称、模型与实际
 
 审核者支持 `herdr` 或 `command` 通知，发送前核验目标身份。完整合同见 [`harness-adapters.zh-CN.md`](references/harness-adapters.zh-CN.md) 和 [`monitoring.zh-CN.md`](references/monitoring.zh-CN.md)。
 
-### 4. 开始监控
+### 5. 开始监控
 
 ```sh
 python scripts/monitor_task.py --request /absolute/task/request.json --check
+python scripts/monitor_task.py --request /absolute/task/request.json --preflight
+```
+
+使用台账时，在请求中填写 `workflow_state`。确认派工开始后，先登记最终请求再监控：
+
+```sh
+python scripts/workflow_control.py --state /absolute/workflow-state register-task --request /absolute/task/request.json --actor CONTROLLER_INSTANCE --version 1 --context main
 python scripts/monitor_task.py --request /absolute/task/request.json --notify
 ```
 
-`--check` 只检查本地请求。`--notify` 还需要请求内 `authorization.notify_reviewer: true` 及授权来源，否则不会发送消息。后台启动示例见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+`--check` 只检查本地结构；`--preflight` 只读核对身份和派工前完成序号。`--notify` 需要 `authorization.notify_reviewer: true` 及授权来源；直接通知还需要相应会话策略，默认只保存待审核事件。后台启动示例见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
 默认每 **300 秒**检查一次，整体持续到完成或异常；不要求模型持续盯着终端，也没有一小时总时限。每次外部命令都有有限超时。
 
-### 5. 自动审核与续派
+### 6. 自动审核与续派
 
-监控发现新完成及合格交付后，保存哈希并一次通知审核会话。审核角色读取冻结请求、变更和原始证据，写结论，再按工作流和已有授权安排下一任务或返修。新任务使用新 ID/nonce；通知本身不等于新用户授权。
+监控发现新完成及合格交付后，先保存哈希和事件，再按策略通知。已绑定的主审核会话确认事件、独立核查原始证据并登记 REVIEW.md；控制器执行 next-check，在新请求中引用返回的 parent_review。完整命令见初始化指南。新任务使用新 ID/nonce；通知本身不等于新用户授权。
 
 缺交付、blocked、身份变化、执行失败和不确定通知会单独记录。终端空闲或命令退出 0 不等于任务通过。
 
@@ -148,11 +170,13 @@ python scripts/run_job.py --job /absolute/job.json
 ## 测试与已验证范围
 
 ```sh
-python scripts/test_monitor.py
+python -B -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_encoding.py
 ```
 
 离线测试覆盖五种 harness 标签、工作中不读对话、旧完成拒绝、身份变化、缺/空交付、错误 nonce、缺标记、blocked/失败、路径越界、通知去重、不确定通知不重试，以及真实本地子进程 → 回执 → 监控闭环。测试不会连接真实 Agent 或发送真实通知。
+
+新增测试覆盖严格配置、有限只读重试、新完成独立宽限期、预检查、延后切换、旧控制器失效、声明为侧对话时拒绝操作、事件找回和审核哈希校验。CI 使用 Windows/Linux 和 Python 3.10/3.12。
 
 编码检查会拒绝无效 UTF-8、替换字符、连续问号造成的有损文本和常见乱码；同时确认中文翻译仍包含中文，默认英文入口不含非 ASCII 字符。可用 `--expect-cjk` 和 `--expect-ascii` 调整或关闭对应语言检查。文本统一保存为 UTF-8、无 BOM，Git 使用 LF 换行。
 
@@ -166,7 +190,8 @@ agents/openai.yaml          Skill UI 元数据
 references/                 角色、任务、适配与监控合同
 examples/                   可修改的工作流与任务请求示例
 scripts/monitor_task.py      状态检测与一次通知
+scripts/workflow_control.py  绑定、收件箱、交接和审核门
 scripts/run_job.py           单次 CLI 作业回执
-scripts/test_monitor.py      离线行为验证
+scripts/test_*.py            离线行为与集成验证
 scripts/check_encoding.py    UTF-8 与有损文本检查
 ```

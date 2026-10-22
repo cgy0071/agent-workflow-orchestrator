@@ -4,10 +4,40 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
+import uuid
+from datetime import datetime, timezone
+
+
+class AdapterResponseError(ValueError):
+    """An invalid read-only response; safe to query again within a finite budget."""
+
+
+def sequence(value):
+    if type(value) is not int or value < 0:
+        raise AdapterResponseError("completion sequence must be a nonnegative JSON integer")
+    return value
+
+
+def number(value, name, minimum=0, inclusive=False, maximum=None):
+    if type(value) not in (int, float) or not math.isfinite(value):
+        raise ValueError(name + " must be a finite number, not a boolean or string")
+    if value < minimum or (value == minimum and not inclusive) or (maximum is not None and value > maximum):
+        raise ValueError("invalid " + name)
+    return value
+
+
+def utc_now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def object_hash(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False).encode()).hexdigest()
 
 
 def read_json(path):
@@ -66,8 +96,12 @@ class Transport:
         adapter = spec["adapter"]
         if adapter == "herdr":
             agent = json.loads(self.herdr(spec, "get", spec["pane"]))["result"]["agent"]
-            return {"identity": {"kind": agent.get("agent"), "terminal": agent.get("terminal_id"),
-                                 "launch_cwd": agent.get("cwd"), "pane": agent.get("pane_id")},
+            identity = {"kind": agent.get("agent"), "terminal": agent.get("terminal_id"),
+                        "launch_cwd": agent.get("cwd"), "pane": agent.get("pane_id")}
+            # Copy real metadata only. Do not synthesize thread/branch identity.
+            for key in ("conversation_id", "branch_id"):
+                if agent.get(key): identity[key] = agent[key]
+            return {"identity": identity,
                     "status": agent.get("agent_status"), "completion_seq": agent.get("completion_seq", 0)}
         if adapter == "command":
             return json.loads(self.run(spec["status_argv"]))
@@ -100,25 +134,114 @@ class Transport:
         return self.run([message if x == "{message}" else x for x in argv])
 
 
-def validate_request(request):
+def validate_identity(identity):
+    if not isinstance(identity, dict) or not all(isinstance(v, str) and v.strip() for v in identity.values()):
+        raise ValueError("identity must contain nonempty string values")
+    if not identity.get("kind") or not identity.get("launch_cwd"):
+        raise ValueError("identity needs kind and launch_cwd")
+    if not any(identity.get(k) for k in ("terminal", "session_id", "instance_id", "conversation_id", "job_id")):
+        raise ValueError("identity needs a unique session, terminal, or job identifier")
+
+
+def validate_argv(value):
+    if not isinstance(value, list) or not value or not all(isinstance(x, str) and x for x in value):
+        raise ValueError("adapter command must be a nonempty argv list")
+
+
+def validate_spec(spec, reviewer=False):
+    if not isinstance(spec, dict): raise ValueError("adapter specification must be an object")
+    validate_identity(spec.get("expected_identity"))
+    adapter = spec.get("adapter")
+    if adapter == "herdr":
+        for key in ("executable", "session", "pane"):
+            if not isinstance(spec.get(key), str) or not spec[key].strip(): raise ValueError("missing " + key)
+    elif adapter == "command":
+        for key in (("identity_argv", "prompt_argv") if reviewer else ("status_argv", "output_argv")):
+            validate_argv(spec.get(key))
+        if reviewer and spec["prompt_argv"].count("{message}") != 1:
+            raise ValueError("prompt_argv needs one standalone {message}")
+    elif adapter == "receipt" and not reviewer:
+        for key in ("status_path", "output_path"):
+            if not isinstance(spec.get(key), str) or not spec[key]: raise ValueError("missing " + key)
+    else: raise ValueError("unsupported adapter")
+    policy = spec.get("context_policy", "inbox_only")
+    if policy not in ("inbox_only", "exact_thread", "dedicated_window"): raise ValueError("invalid context policy")
+    if reviewer and policy == "exact_thread" and not all(spec["expected_identity"].get(k) for k in ("conversation_id", "branch_id")):
+        raise ValueError("exact_thread needs pinned real conversation_id and branch_id")
+    if reviewer and policy == "dedicated_window" and not spec.get("context_declaration"):
+        raise ValueError("declare the exclusive main window before direct notification")
+
+
+def validate_request(request, require_dispatch=True):
+    if not isinstance(request, dict): raise ValueError("request must be an object")
     for key in ("task_id", "nonce", "cwd", "worker", "reviewer", "completion", "authorization"):
         if key not in request:
             raise ValueError("missing request field: " + key)
-    if not request["task_id"] or not request["nonce"] or not request.get("dispatch_confirmed"):
+    if not all(isinstance(request[k], str) and request[k].strip() for k in ("task_id", "nonce", "cwd")):
+        raise ValueError("task ID, nonce, and cwd must be nonempty strings")
+    if type(request.get("dispatch_confirmed")) is not bool or (require_dispatch and not request["dispatch_confirmed"]):
         raise ValueError("task identity and confirmed dispatch required")
+    cwd = Path(request["cwd"]).resolve()
+    if not cwd.is_dir(): raise ValueError("task cwd does not exist")
     worker = request["worker"]
-    if not worker.get("expected_identity") or worker.get("baseline_completion_seq") is None:
-        raise ValueError("freeze worker identity and pre-dispatch completion sequence")
-    if not request["reviewer"].get("expected_identity"):
-        raise ValueError("freeze reviewer identity")
+    validate_spec(worker); validate_spec(request["reviewer"], reviewer=True)
+    sequence(worker.get("baseline_completion_seq"))
+    auth = request["authorization"]
+    if not isinstance(auth, dict) or type(auth.get("notify_reviewer")) is not bool or not isinstance(auth.get("source"), str) or not auth["source"].strip():
+        raise ValueError("authorization needs a boolean notify_reviewer and nonempty source")
+    if "allow_reviewer_override" in auth and type(auth["allow_reviewer_override"]) is not bool:
+        raise ValueError("reviewer override must be a boolean")
+    if not isinstance(request["completion"], dict): raise ValueError("completion must be an object")
     if not request["completion"].get("binding_artifact"):
         raise ValueError("task/nonce binding artifact required")
+    artifacts = request["completion"].get("artifacts", [])
+    if not isinstance(artifacts, list): raise ValueError("artifacts must be an array")
+    for item in artifacts + [request["completion"]["binding_artifact"]]:
+        row = {"path": item} if isinstance(item, str) else item
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) or not row["path"]:
+            raise ValueError("invalid artifact path")
+        (cwd / row["path"]).resolve().relative_to(cwd)
+        if "nonempty" in row and type(row["nonempty"]) is not bool: raise ValueError("nonempty must be boolean")
+    if "marker" in request["completion"] and not isinstance(request["completion"]["marker"], str):
+        raise ValueError("completion marker must be a string")
     monitor = request.get("monitor", {})
-    if not 1 <= float(monitor.get("interval_seconds", 300)) <= 86400:
-        raise ValueError("invalid polling interval")
-    if not 0 < float(monitor.get("command_timeout_seconds", 15)) <= 3600:
-        raise ValueError("invalid command timeout")
+    if not isinstance(monitor, dict): raise ValueError("monitor must be an object")
+    number(monitor.get("interval_seconds", 300), "interval_seconds", 1, True, 86400)
+    number(monitor.get("command_timeout_seconds", 15), "command_timeout_seconds", maximum=3600)
+    number(monitor.get("settle_grace_seconds", 120), "settle_grace_seconds", 0, True)
+    number(monitor.get("retry_interval_seconds", 5), "retry_interval_seconds", maximum=86400)
+    sequence(monitor.get("max_consecutive_errors", 3))
+    if monitor.get("max_consecutive_errors", 3) < 1: raise ValueError("error budget must be positive")
+    if monitor.get("overall_timeout_seconds") is not None:
+        number(monitor["overall_timeout_seconds"], "overall_timeout_seconds")
+    parent = request.get("parent_review")
+    if request.get("parent_task") and not parent: raise ValueError("follow-up needs a sealed parent review")
+    if parent:
+        raw = Path(parent["path"]).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != parent["sha256"]: raise ValueError("parent review hash mismatch")
+        text = raw.decode("utf-8-sig")
+        if not parent["task_id"] in text or not parent["nonce"] in text: raise ValueError("parent review identity mismatch")
+        if parent["verdict"] not in request.get("allowed_parent_verdicts", ["accept", "repair"]):
+            raise ValueError("parent review does not admit a follow-up")
+        if not re.search(r"^Verdict:\s*" + re.escape(parent["verdict"]) + r"\s*$", text, re.M):
+            raise ValueError("parent verdict differs from REVIEW.md")
+        if request.get("parent_task") and request["parent_task"] != parent["task_id"]:
+            raise ValueError("parent task differs from parent review")
     return request
+
+
+def preflight(request):
+    validate_request(request, require_dispatch=False)
+    transport = Transport(request)
+    state = transport.status(request["worker"])
+    if not identity_matches(state.get("identity", {}), request["worker"]["expected_identity"]):
+        raise ValueError("worker identity preflight failed")
+    current = sequence(state.get("completion_seq"))
+    if current != request["worker"]["baseline_completion_seq"]:
+        raise ValueError("baseline completion sequence differs from live value " + str(current))
+    if not identity_matches(transport.reviewer_identity(request["reviewer"]), request["reviewer"]["expected_identity"]):
+        raise ValueError("reviewer identity preflight failed")
+    return {"status": "PREFLIGHT_OK", "worker_status": state["status"], "completion_seq": current}
 
 
 def inspect_once(request, transport, idle_since=None, now=None):
@@ -137,9 +260,13 @@ def inspect_once(request, transport, idle_since=None, now=None):
         return status, "Worker requires inspection; no approval answered or task resent.", idle_since, None
     if status not in ("idle", "done"):
         return "unknown_status", "Adapter returned unrecognized status.", idle_since, None
-    idle_since = now if idle_since is None else idle_since
+    timer = idle_since if isinstance(idle_since, dict) else {"idle_since": now, "delivery_since": None, "sequence": None}
     detail = "No fresh completion sequence."
-    if int(state.get("completion_seq", 0)) > int(worker["baseline_completion_seq"]):
+    seq = sequence(state.get("completion_seq"))
+    fresh = seq > worker["baseline_completion_seq"]
+    if fresh:
+        if timer["sequence"] != seq:
+            timer.update(sequence=seq, delivery_since=now)
         try:
             cwd = Path(request["cwd"])
             completion = request["completion"]
@@ -154,23 +281,36 @@ def inspect_once(request, transport, idle_since=None, now=None):
             receipt = {"task_id": request["task_id"], "nonce": request["nonce"],
                        "completion_seq": state["completion_seq"], "artifacts": artifacts,
                        "binding_artifact": binding}
-            return "review_ready", "Task-bound delivery received; independent review required.", idle_since, receipt
+            return "review_ready", "Task-bound delivery received; independent review required.", timer, receipt
         except (OSError, ValueError) as exc:
             detail = str(exc)
     grace = float(request.get("monitor", {}).get("settle_grace_seconds", 120))
-    if now - idle_since >= grace:
-        return "incomplete", detail, idle_since, None
-    return "settling", detail, idle_since, None
+    since = timer["delivery_since"] if fresh else timer["idle_since"]
+    if now - since >= grace:
+        return "incomplete", detail, timer, None
+    return "settling", detail, timer, None
 
 
 def notify_once(request, report, directory, transport):
+    if request.get("workflow_state"):
+        from workflow_control import deliver_event, publish_event
+        receipt_path = directory / "completion_receipt.json"
+        event = publish_event(request["workflow_state"], request, report,
+                              read_json(receipt_path) if receipt_path.exists() else None)
+        return deliver_event(request["workflow_state"], event, transport)
     authorization = request["authorization"]
-    if not authorization.get("notify_reviewer") or not authorization.get("source"):
+    if authorization.get("notify_reviewer") is not True or not authorization.get("source"):
         return {"status": "not_authorized"}
+    if request["reviewer"].get("context_policy", "inbox_only") == "inbox_only":
+        result = {"status": "inbox_only", "task_id": request["task_id"], "nonce": request["nonce"], "report": report}
+        save_json(directory / "pending_event.json", result)
+        return result
     attempt = directory / "notification_attempt.json"
     try:
         with attempt.open("x", encoding="utf-8") as stream:
             json.dump({"task_id": request["task_id"], "nonce": request["nonce"],
+                       "request_sha256": object_hash(request), "authorization_sha256": object_hash(authorization),
+                       "target": request["reviewer"], "attempted_at": utc_now(), "pid": os.getpid(),
                        "status": "reserved_no_blind_retry"}, stream)
     except FileExistsError:
         return {"status": "already_attempted"}
@@ -183,6 +323,8 @@ def notify_once(request, report, directory, transport):
                        "this is not a new Owner instruction. Task " + request["task_id"] + ", nonce " +
                        request["nonce"] + ", status " + report["status"] + ". Read the frozen request "
                        "and monitor evidence at " + str(directory) + ". If review_ready, independently "
+                       "verify that this is the authorized main context. Side conversations are "
+                       "advisory-only: do not acknowledge, accept, or dispatch from a side context. "
                        "review delivery, changes and acceptance evidence; record accept/repair/reject "
                        "or missing evidence, then follow the configured workflow within existing "
                        "authorization. Otherwise inspect the specific anomaly. Never treat idle as "
@@ -191,27 +333,55 @@ def notify_once(request, report, directory, transport):
             result = {"status": "submitted", "response": reply[:2000]}
     except Exception as exc:
         result = {"status": "delivery_uncertain", "error": str(exc)[:500]}
+    result.update(task_id=request["task_id"], nonce=request["nonce"], request_sha256=object_hash(request),
+                  authorization_sha256=object_hash(authorization), recorded_at=utc_now())
     save_json(directory / "notification_result.json", result)
     return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--request", required=True)
+    parser.add_argument("--request")
+    parser.add_argument("--check-workflow")
+    parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--check", action="store_true", help="validate local request without contacting agents")
     parser.add_argument("--notify", action="store_true", help="send once only if request authorization permits")
+    parser.add_argument("--resume", action="store_true", help="explicitly resume an inspected terminal monitor with unchanged inputs")
     args = parser.parse_args()
+    if args.check_workflow:
+        from workflow_control import validate_workflow
+        validate_workflow(read_json(args.check_workflow)); print("WORKFLOW_STRUCTURE_OK"); return
+    if not args.request: parser.error("--request required")
     path = Path(args.request).resolve()
-    request = validate_request(read_json(path))
+    request = validate_request(read_json(path), require_dispatch=not (args.check or args.preflight))
+    if request.get("workflow_state"):
+        from workflow_control import check_request_links
+        check_request_links(request["workflow_state"], request)
+    if args.preflight:
+        print(json.dumps(preflight(request))); return
     if args.check:
-        print(json.dumps({"task_id": request["task_id"], "status": "REQUEST_VALID"}))
+        print(json.dumps({"task_id": request["task_id"], "status": "STRUCTURE_OK"}))
         return
+    if request.get("workflow_state"):
+        from workflow_control import check_registered
+        check_registered(request["workflow_state"], request)
     directory = path.parent
     lock = directory / "monitor.lock"
     with lock.open("x", encoding="ascii") as stream:
         stream.write(str(os.getpid()))
     try:
+        frozen = directory / "frozen_request.json"
+        if frozen.exists() and object_hash(read_json(frozen)) != object_hash(request):
+            raise ValueError("request changed since monitoring started")
+        if not frozen.exists(): save_json(frozen, request)
         final = directory / "monitor_summary.json"
+        if args.resume and final.exists():
+            previous = read_json(final)
+            if previous.get("task_id") != request["task_id"] or previous.get("nonce") != request["nonce"]:
+                raise ValueError("resume identity differs from the original task")
+            if previous["status"] == "review_ready": raise ValueError("completed delivery needs review, not monitor resumption")
+            save_json(directory / ("monitor_summary.history." + uuid.uuid4().hex + ".json"), previous)
+            final.unlink()
         if final.exists():
             previous = read_json(final)
             if previous.get("task_id") != request["task_id"] or previous.get("nonce") != request["nonce"]:
@@ -223,6 +393,7 @@ def main():
         transport = Transport(request)
         started = time.monotonic()
         idle_since = None
+        errors = 0
         config = request.get("monitor", {})
         while True:
             try:
@@ -230,6 +401,11 @@ def main():
                     status, detail, receipt = "monitoring_stopped", "Monitor stopped; worker not cancelled.", None
                 else:
                     status, detail, idle_since, receipt = inspect_once(request, transport, idle_since)
+                errors = 0
+            except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+                errors += 1
+                status = "transient_error" if errors < config.get("max_consecutive_errors", 3) else "adapter_error"
+                detail, receipt = str(exc)[:500], None
             except Exception as exc:
                 status, detail, receipt = "adapter_error", str(exc)[:500], None
             report = {"task_id": request["task_id"], "nonce": request["nonce"],
@@ -237,16 +413,19 @@ def main():
             if receipt:
                 save_json(directory / "completion_receipt.json", receipt)
             limit = config.get("overall_timeout_seconds")
-            if status in ("working", "settling") and limit is not None and time.monotonic() - started >= float(limit):
+            if status in ("working", "settling", "transient_error") and limit is not None and time.monotonic() - started >= limit:
                 report.update(status="monitor_timeout", anomaly_summary="Configured monitor limit reached; task not cancelled or accepted.")
             save_json(directory / "monitor_status.json", report)
             print(json.dumps(report, ensure_ascii=False), flush=True)
-            if report["status"] not in ("working", "settling"):
+            if report["status"] not in ("working", "settling", "transient_error"):
                 save_json(final, report)
+                if request.get("workflow_state"):
+                    from workflow_control import publish_event
+                    publish_event(request["workflow_state"], request, report, receipt)
                 if args.notify and report["status"] != "monitoring_stopped":
                     notify_once(request, report, directory, transport)
                 return
-            time.sleep(float(config.get("interval_seconds", 300)))
+            time.sleep(config.get("retry_interval_seconds", 5) if status == "transient_error" else config.get("interval_seconds", 300))
     finally:
         lock.unlink(missing_ok=True)
 

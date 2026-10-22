@@ -22,6 +22,7 @@
     "baseline_completion_seq": 0
   },
   "reviewer": {
+    "context_policy": "inbox_only",
     "role": "planner",
     "harness": "any-harness-verified-in-herdr",
     "adapter": "herdr",
@@ -43,6 +44,8 @@
     "interval_seconds": 300,
     "command_timeout_seconds": 15,
     "settle_grace_seconds": 120,
+    "max_consecutive_errors": 3,
+    "retry_interval_seconds": 5,
     "overall_timeout_seconds": null
   }
 }

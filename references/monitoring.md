@@ -4,6 +4,8 @@ English | [Chinese](monitoring.zh-CN.md)
 
 The monitor checks lifecycle and delivery, then notifies a reviewer. It does not create tasks, approve prototypes, or read project-specific files. Business acceptance remains with the configured reviewer.
 
+For initialization, actual window selection, conversation policies, handoffs, and review gates, use [setup-and-switching.md](setup-and-switching.md). Set workflow_state in the request for ledger-backed operation. A harness label never selects the target. The final request is frozen at registration/monitoring startup; reviewer handoffs use versioned bindings without editing old requests.
+
 ## Request file
 
 Start with `examples/request.herdr.json`. Use a new directory for each task. Freeze the request before submission, then record dispatch_confirmed after the Worker starts, retaining the real pre-dispatch completion sequence. The monitor writes monitor_status, monitor_summary, completion_receipt, and notification_attempt/result; it does not overwrite task delivery.
@@ -20,9 +22,13 @@ All adapters use task_id, nonce, cwd, worker, reviewer, completion, and authoriz
 | monitor.interval_seconds | Default 300; configurable from 1 to 86400 seconds |
 | monitor.command_timeout_seconds | Timeout for each adapter command; default 15 seconds |
 | monitor.settle_grace_seconds | Grace for delivery after idle/done; default 120 seconds |
+| monitor.max_consecutive_errors | Consecutive read-only query error budget; default 3, positive integer |
+| monitor.retry_interval_seconds | Delay between read-only retries; default 5 seconds |
 | monitor.overall_timeout_seconds | Default null: wait until completion/exception; optionally impose a total monitor limit |
 | status_map | Map adapter states to working/idle/done/blocked/exited/failed |
 | authorization.notify_reviewer | Existing user authorization to notify once; source must also be nonempty |
+| reviewer.context_policy | Default inbox_only; direct policies need verified context evidence |
+| workflow_state | Optional absolute directory of an initialized workflow ledger |
 
 Change the default three Markdown deliverables if needed. Without expected output hashes, the monitor records actual hashes but does not judge business correctness.
 
@@ -30,10 +36,11 @@ Change the default three Markdown deliverables if needed. Without expected outpu
 
 ```sh
 python scripts/monitor_task.py --request /absolute/task/request.json --check
+python scripts/monitor_task.py --request /absolute/task/request.json --preflight
 python scripts/monitor_task.py --request /absolute/task/request.json --notify
 ```
 
---check contacts no agents. --notify also requires request authorization. Monitoring depends on the local process, reviewer session, and transport remaining available; network, quota, and session failures are recorded as exceptions.
+--check contacts no agents and returns STRUCTURE_OK. --preflight queries live identities and the baseline sequence without sending. Ledger requests must be registered before monitoring. --notify requires authorization and the appropriate context policy. Monitoring depends on the local process, reviewer session, and transport; network, quota, and session failures are exceptions.
 
 Windows background example; replace paths with verified local paths:
 
@@ -49,9 +56,13 @@ Use an authorized execution context without changing system policy or answering 
 
 ## Completion and continuation
 
-While working, query status only. After a fresh completion and complete delivery, read bounded output for the marker, save a receipt, and notify the verified reviewer once. The message requests independent review, a decision, and continuation within existing authorization; it explicitly is not a new Owner instruction.
+While working, query status only. After fresh completion and valid delivery, read bounded output for the marker and save a receipt. A new completion sequence gets its own delivery grace; working clears old idle timers. Invalid sequence values are response errors, never truncated.
+
+Ledger mode persists inbox events before optional notification, even without --notify. Default inbox_only sends no prompt; standalone mode writes pending_event.json when --notify is authorized. Direct notifications recheck identity/context policy. Sending is not acknowledgment or acceptance. The setup guide explains acknowledgment, REVIEW.md registration, and continuation gates. Messages are not new Owner instructions.
 
 An exclusive notification-attempt file is written before sending. Delivery timeouts do not trigger automatic retries. Inspect the actual session after delivery_uncertain. monitor.lock prevents duplicate monitors. If a crash leaves the lock, inspect the process before deliberate recovery. Never reuse a monitor directory for a different task.
+
+Ledger mode records attempts transactionally in SQLite instead of a task-local attempt file. Each attempt binds the target, request/authorization hashes, and UTC time. Read-only query failures have bounded retries; identity changes, blocked states, unknown states, and failures stop for inspection. After inspection, --resume preserves the old summary as history and resumes unchanged frozen inputs. It never retries a previously attempted prompt or resumes review-ready delivery into new execution.
 
 ## Other adapters
 

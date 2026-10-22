@@ -43,4 +43,6 @@ Freeze paths, identity values, commands, and session provenance in the task reco
 
 ## Compatibility checks
 
+Window selection is separate from the harness label. Follow [setup-and-switching.md](setup-and-switching.md) for live binding and handoffs. Only copy conversation_id/branch_id if the client actually exposes them. A terminal ID is not a conversation-branch identity; use inbox_only when metadata is unavailable, or explicitly reserve a dedicated main window. Never synthesize these fields.
+
 All named harnesses share role and delivery contracts. Offline tests cover arbitrary labels, cross-harness notification, and failure paths. They do not prove live integration with every client version. At first use, verify identity, working, new completion, artifacts/nonce, one-time notification, and failure classification. Reuse verified adapters; recheck after relevant version or identity changes.

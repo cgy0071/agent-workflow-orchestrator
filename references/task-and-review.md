@@ -33,6 +33,8 @@ Comparators must not accept empty files, dropped records, or matching errors on 
 
 ## Configurable continuation
 
+For an enforceable local record, use the ledger-backed [setup and review commands](setup-and-switching.md). REVIEW.md must contain the task ID, nonce, and an exact `Verdict: accept` (or configured verdict) line. Acknowledge the event, register the review, and seal the returned parent_review into follow-up requests. File hashes prevent silently replacing a recorded judgment; they do not prove the judgment is correct or authenticate user authorization.
+
 workflow.transitions defines the action after each review decision: next_task, repair_task, stop, or owner_input. Before creating work, check continuous-execution authorization, scope, budget, gates, worker identity, and directory ownership.
 
 A follow-up gets a new task ID and nonce linked to its parent. Do not overwrite uncertain submissions or historical results. A completion notification is not a new Owner instruction. Dispatch and notification may be automated; the assigned reviewer still forms the acceptance judgment.

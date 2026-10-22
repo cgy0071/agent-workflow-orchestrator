@@ -55,6 +55,11 @@ class Tests(unittest.TestCase):
             "completion": {"artifacts": ["RESULT.md", "EVIDENCE.md", "HANDOFF.md"],
                            "binding_artifact": "HANDOFF.md", "marker": "DONE TASK-TEST unique-nonce"},
             "monitor": {"settle_grace_seconds": 0}}
+        self.request["worker"].update(status_argv=[sys.executable, "-c", "print('{}')"],
+                                      output_argv=[sys.executable, "-c", "print('DONE')"])
+        self.request["reviewer"].update(identity_argv=[sys.executable, "-c", "print('{}')"],
+                                        prompt_argv=[sys.executable, "-c", "print('queued')", "{message}"],
+                                        context_policy="dedicated_window", context_declaration="exclusive offline test window")
         for name in self.request["completion"]["artifacts"]:
             (self.root / name).write_text("TASK-TEST unique-nonce\n", encoding="utf-8")
 
@@ -152,6 +157,39 @@ class Tests(unittest.TestCase):
         self.request["monitor"]["interval_seconds"] = 1
         module.validate_request(self.request)
         self.assertEqual(module.inspect_once(self.request, FakeTransport(self.request, "finished"))[0], "review_ready")
+
+    def test_strict_configuration(self):
+        for field, value in [("overall_timeout_seconds", "bad"), ("overall_timeout_seconds", 0),
+                             ("overall_timeout_seconds", float("nan")), ("settle_grace_seconds", -1),
+                             ("interval_seconds", True)]:
+            req = copy.deepcopy(self.request); req["monitor"][field] = value
+            with self.assertRaises(ValueError): module.validate_request(req)
+        for value in [None, "17 ", 17.0, 17.9, True]:
+            with self.assertRaises(ValueError): module.sequence(value)
+        self.request["authorization"]["notify_reviewer"] = "false"
+        with self.assertRaises(ValueError): module.validate_request(self.request)
+
+    def test_new_completion_gets_its_own_delivery_grace(self):
+        self.request["monitor"]["settle_grace_seconds"] = 120
+        first = module.inspect_once(self.request, FakeTransport(self.request, seq=10), now=0)
+        (self.root / "RESULT.md").unlink()
+        second = module.inspect_once(self.request, FakeTransport(self.request, seq=11), first[2], now=300)
+        self.assertEqual(second[0], "settling")
+        (self.root / "RESULT.md").write_text("delivered")
+        self.assertEqual(module.inspect_once(self.request, FakeTransport(self.request, seq=11), second[2], now=350)[0], "review_ready")
+
+    def test_kind_only_identity_and_escaping_path_fail_early(self):
+        req = copy.deepcopy(self.request); req["worker"]["expected_identity"] = {"kind": "pi"}
+        with self.assertRaises(ValueError): module.validate_request(req)
+        self.request["completion"]["artifacts"] = ["../outside"]
+        with self.assertRaises(ValueError): module.validate_request(self.request)
+
+    def test_unregistered_context_queues_without_prompt(self):
+        self.request["reviewer"]["context_policy"] = "inbox_only"
+        client = FakeTransport(self.request)
+        self.assertEqual(module.notify_once(self.request, {"status": "review_ready"}, self.root, client)["status"], "inbox_only")
+        self.assertEqual(client.sends, 0)
+        self.assertTrue((self.root / "pending_event.json").exists())
 
     def test_real_command_adapter_and_notification(self):
         state = FakeTransport(self.request).status(None)

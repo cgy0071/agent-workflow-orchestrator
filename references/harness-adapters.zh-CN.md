@@ -2,6 +2,8 @@
 
 [English](harness-adapters.md) | Chinese
 
+窗口选择与 harness 标签是两件事，绑定和切换命令见 [初始化与切换指南](setup-and-switching.zh-CN.md)。只有客户端实际提供时才记录 conversation_id/branch_id；终端 ID 不能证明对话分支。元数据不足时使用 inbox_only，或明确预留专用主窗口，不编造标识。
+
 ## 独立记录四种身份
 
 ```text

@@ -33,6 +33,8 @@ RESULT.md / EVIDENCE.md / HANDOFF.md，以及实际变更和原始日志路径�
 
 ## 可配置的续接
 
+需要脚本约束本地记录时，使用 [初始化与审核命令](setup-and-switching.zh-CN.md)。REVIEW.md 包含任务 ID、nonce 和独立一行 `Verdict: accept`（或配置允许的其他结论）。先确认事件，再登记审核，将返回的 parent_review 封入续派请求。文件哈希防止静默替换已登记的结论，不能证明判断本身正确，也不认证用户授权。
+
 workflow.transitions 定义每个审核结论后的动作：next_task、repair_task、stop 或 owner_input。生成下一任务前检查持续执行授权、范围、预算、准入和 Worker 身份/目录。
 
 新任务使用新 ID/nonce，关联父任务；不覆盖模糊投递或旧结果。收到完成通知不是新的 Owner 指令。通知/派工允许自动化，接收结论仍须由指定审核角色形成。

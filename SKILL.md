@@ -23,6 +23,8 @@ Any role can run in Codex, Pi, Claude, dsh-tui, Grok, or another harness. Record
 
 ## Dispatch and execution
 
+Before first dispatch or any harness/window change, read [setup-and-switching.md](references/setup-and-switching.md). Initialize role bindings, verify actual targets, and record controller instance/version. Side conversations are advisory-only. Default to inbox-only notification; exact-thread routing needs real conversation/branch metadata. A dedicated main window requires an explicit declaration. Context flags are trusted adapter/operator metadata, not automatic branch detection or authentication.
+
 1. Recover the objective, current tasks, accepted results, and open gates from configured records. Do not infer completed work from chat alone.
 2. Write a reviewable task with an ID, objective, directory, allowed changes, frozen inputs, acceptance criteria, deliverables, and stop conditions. Adapt [task-and-review.md](references/task-and-review.md) to the project.
 3. Recheck the target identity and working directory, active tasks, and directory leases. Serialize shared writable directories; parallel tasks need independent directories. Reuse an existing dispatch ledger instead of creating competing controllers.
@@ -37,11 +39,15 @@ Herdr is optional. Reuse its identity and lease controls when already present; o
 
 Completion must match the task identity, worker identity, a fresh completion sequence, and the configured artifact/marker contract. `review_ready` means ready for review, not accepted. Record artifact hashes and, under existing notification authorization, notify the verified reviewer once. The reviewer may use any harness and need not be named Planner.
 
+With workflow_state enabled, register the frozen request before monitoring and persist events before notification. On a handoff, recover pending inbox events through the new verified role binding. A sent prompt is not acknowledgment. Query failures have a finite retry budget; uncertain prompt delivery is never automatically retried. Resume inspected anomalies explicitly with unchanged inputs.
+
 Record blocked states, missing delivery, changed identities, failures, and uncertain notifications separately. Never answer approval dialogs or blindly resend. Stopping the monitor does not stop the worker; handle cancellation separately under the configured authorization.
 
 ## Review and continuation
 
 The reviewer reads the frozen request, delivery, changes, and raw acceptance evidence; records accept, repair, reject, or missing evidence; and updates current state. Advance only through configured stages. Engineering admission and paper-contribution judgment can remain separate gates.
+
+For ledger-backed workflows, acknowledge the event, record a task/nonce-bound REVIEW.md, run next-check, and seal the returned parent_review into the follow-up request. Stale controllers and declared side/unknown contexts cannot perform these operations. Worker switches wait for old execution to end and require a fresh identity check; monitoring failure alone does not establish termination.
 
 Within continuous-execution authorization, create the next task or a narrow repair with a new ID and nonce linked to the parent. Report work outside the objective, budget, or permissions. Stop when the configured goal, pause, cancellation, or termination condition is reached. Do not invent additional work just to keep the loop running.
 
@@ -49,4 +55,4 @@ By default, Paper Lead owns the research problem, literature gap, contributions,
 
 ## Local validation
 
-Before using a new or changed adapter, validate identity, fresh completion, missing output, blocked states, and notification deduplication offline. Then perform an authorized connection check. Run `python scripts/test_monitor.py` and `python scripts/check_encoding.py`. Offline tests do not establish live compatibility for every client version. README contains setup, configuration, and usage examples.
+Before using a new or changed adapter, validate identity, fresh completion, missing output, blocked states, and notification deduplication offline. Then perform an authorized connection check. Run `python -B -m unittest discover -s scripts -p "test_*.py" -v` and `python scripts/check_encoding.py`. Offline tests do not establish live compatibility for every client version. README contains setup, configuration, and usage examples.

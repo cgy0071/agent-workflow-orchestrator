@@ -38,6 +38,7 @@
       "reject": "replan_or_stop",
       "blocked": "inspect_specific_blocker"
     },
+    "continuation_verdicts": ["accept", "repair"],
     "stop_conditions": ["goal reached", "user paused or cancelled", "authorization exhausted"]
   },
   "automation": {
