@@ -41,14 +41,32 @@ def object_hash(value):
 
 
 def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    # Windows can briefly deny opening a file during atomic replacement.
+    # Retry only this read; permanent access errors still surface promptly.
+    for attempt in range(10):
+        try:
+            return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+        except PermissionError:
+            if os.name != "nt" or attempt == 9: raise
+            time.sleep(min(.005 * 2 ** attempt, .05))
 
 
 def save_json(path, data):
     path = Path(path)
-    tmp = path.with_name(path.name + "." + str(os.getpid()) + ".tmp")
+    tmp = path.with_name(path.name + "." + str(os.getpid()) + "." + uuid.uuid4().hex + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    # Windows readers may briefly hold a handle without FILE_SHARE_DELETE.
+    # Replacing our own unchanged temporary file is idempotent; sending a task is not.
+    try:
+        for attempt in range(10):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                if os.name != "nt" or attempt == 9: raise
+                time.sleep(min(.005 * 2 ** attempt, .05))
+    finally:
+        if tmp.exists(): tmp.unlink()
 
 
 def norm_path(value):
@@ -232,6 +250,15 @@ def validate_request(request, require_dispatch=True):
         raise ValueError("completion marker must be a string")
     if request["completion"].get("marker_source", "output") not in ("output", "artifact", "both"):
         raise ValueError("marker_source must be output, artifact, or both")
+    if request.get("review_path"):
+        review = Path(request["review_path"])
+        if not review.is_absolute():
+            raise ValueError("review_path must be absolute")
+        review.resolve().relative_to(cwd)
+        for item in artifacts + [request["completion"]["binding_artifact"]]:
+            name = item if isinstance(item, str) else item["path"]
+            if (cwd / name).resolve() == review.resolve():
+                raise ValueError("review_path must differ from delivery files")
     mapped_status(request, {})  # Validate optional mapping before any adapter query.
     monitor = request.get("monitor", {})
     if not isinstance(monitor, dict): raise ValueError("monitor must be an object")

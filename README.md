@@ -6,6 +6,17 @@ A configurable multi-agent Skill for **planning -> execution -> status monitorin
 
 The workflow is independent of project files, models, and clients. Planner, Executor, and Paper Lead are defaults that can be replaced for software, product, or research work.
 
+## Run the local demo
+
+With Python 3.10+ installed, run from the repository root:
+
+```sh
+python -B scripts/demo_scheduler.py --directory runtime/first-run
+python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
+```
+
+The first command prints `OFFLINE_DEMO_PASS`; the status view shows A, B, and JOIN as `accepted`. Use a new directory for each run. This demo uses local Python child processes and needs no agent account. To run with a real client, configure and verify its adapter and credentials first; the demo does not establish live-client compatibility.
+
 ## Features
 
 - **Editable roles:** change role names, count, responsibilities, permissions, and deliverables.
@@ -94,7 +105,7 @@ Agents read this as workflow guidance. Configuration does not grant user permiss
 
 ### 2. Select the actual harness and window
 
-Choose **manual creation** (open a window/session, enter the workspace, and start/select the harness) or **automatic creation** (a verified controller creates a session through the selected client's supported interface and launches the harness with user-selected arguments). Both methods verify the actual runtime settings and session identity before binding, then use the same monitoring and review workflow. Existing available sessions can also be reused after verification. Automatic creation requires a verified launch interface; bind/preflight do not launch clients.
+Open or select a client window/session, enter the workspace, and start the harness. Verify its runtime settings and identity before binding the role. Existing available sessions can be reused after verification. The included bind and preflight commands do not launch clients.
 
 In this documentation, **pane** means a Herdr terminal split. The pane creation commands are Herdr-specific examples; other clients use their own verified window/session interfaces and identifiers.
 
@@ -163,6 +174,10 @@ python -B scripts/demo_scheduler.py --directory runtime/new-demo
 The demo runs real local Python child processes as fixtures and records A/B -> JOIN with fixture reviews. It contacts no providers. Production client capabilities remain version-specific and require actual integration evidence.
 
 ## One-shot CLI jobs
+
+Task-specific evidence paths can be generated with `workflow_scheduler.py
+prepare-dag`. `workflow_control.py --state STATE status --summary --format text`
+shows adapter-neutral next roles/actions and observation-age warnings.
 
 Without Herdr, supply a verified one-shot command using [examples/job.json](examples/job.json):
 

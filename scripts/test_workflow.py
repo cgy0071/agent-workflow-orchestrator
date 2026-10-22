@@ -205,6 +205,9 @@ class WorkflowTests(unittest.TestCase):
         broken["parent_review"]["event_id"] = "not-a-reviewed-event"
         with self.assertRaises(ValueError):
             control.register_task(self.state, broken, *self.actor())
+        with self.assertRaisesRegex(ValueError, "evidence path"):
+            control.register_task(self.state, next_req, *self.actor())
+        next_req["completion"] = {"binding_artifact": "TASK-TWO/HANDOFF.md", "artifacts": ["TASK-TWO/RESULT.md"]}
         self.assertEqual(control.register_task(self.state, next_req, *self.actor())["status"], "REGISTERED")
 
     def test_registration_rejects_edited_frozen_request(self):

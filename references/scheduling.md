@@ -25,6 +25,13 @@ notifications, observations, retry counts, journal, claims, DAG dependencies,
 and the latest scheduling deferral. Observations are timestamped snapshots,
 not proof that a disconnected process has stopped.
 
+Use `status --summary --format text` (or `inspect --task TASK-ID --format text`)
+for adapter-neutral phase, harness/adapter/identity, next role/action, observation
+age and warnings. JSON summaries use `--summary`. `--stale-after 900` controls
+the observation warning; it does not infer failure, cancellation or heartbeat.
+Queued DAG nodes are included before registration. Summary reads contact no
+adapter and work with Command, Receipt and optional Herdr bindings.
+
 ## Single-attempt dispatch
 
 Bind the real worker with a verified `command` or `herdr` interface. A command
@@ -99,8 +106,24 @@ in separate per-task cwd directories, or use distinct task-specific artifact,
 binding and review paths within a shared cwd. Never overwrite earlier accepted
 files: releasing a claim does not end their retention requirement, and dependency
 checks rehash those bytes. Loading a DAG allows shared cwd because separate
-artifact paths can preserve evidence there; it does not reserve permanent
-filenames for historical deliveries.
+artifact paths can preserve evidence there. Loading rejects overlaps among
+planned evidence files. Registration permanently reserves registered delivery,
+binding and review paths in the shared ledger, including after release or
+termination. Old requests receive the same collision checks. This protects
+ledger-mediated allocation; it is not an OS write barrier or cross-ledger lock.
+
+Generate task-specific paths before freezing a new graph:
+
+```sh
+python scripts/workflow_scheduler.py prepare-dag --file draft-dag.json --root /absolute/new-delivery --output prepared-dag.json
+```
+
+The allocator creates exclusive `task-<hash-of-id-and-nonce>/` directories, pins
+REVIEW.md and preserves relative delivery paths. Message placeholders
+`{task_cwd}`, `{review_path}` and `{marker}` are replaced before graph loading.
+Existing directories/output files are not overwritten. Inspect the generated
+message and bind any changed execution directory before dispatch. Never relocate
+a registered request.
 
 ## Frozen DAGs and review gates
 

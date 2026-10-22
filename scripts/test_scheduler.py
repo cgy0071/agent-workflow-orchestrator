@@ -92,7 +92,10 @@ class SchedulerTests(unittest.TestCase):
     def finish(self, req, verdict="accept"):
         req = self.confirm(req)
         for name in ("HANDOFF.md", "RESULT.md"):
-            (Path(req["cwd"]) / name).write_text(self.message(req), encoding="utf-8")
+            text = self.message(req)
+            if name == "HANDOFF.md" and req["completion"].get("marker"):
+                text += "\n" + req["completion"]["marker"]
+            (Path(req["cwd"]) / name).write_text(text, encoding="utf-8")
         class Done:
             def status(inner, spec):
                 return {"identity": spec["expected_identity"], "status": "done", "completion_seq": 11}

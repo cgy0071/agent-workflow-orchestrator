@@ -373,6 +373,12 @@ def record_review(state, event_id, actor, version, context, file, verdict):
             raise ValueError("acknowledge this role's event before recording a review")
         if event["task"] not in text or event["nonce"] not in text:
             raise ValueError("REVIEW.md must bind the task ID and nonce")
+        task_data = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (event["task"],)).fetchone()[0])
+        declared = task_data["request"].get("review_path")
+        if declared and Path(declared).resolve() != path:
+            raise ValueError("review file differs from the frozen review_path")
+        from workflow_evidence import check_review_path
+        check_review_path(con, event["task"], path)
         if not re.search(r"^Verdict:\s*" + re.escape(verdict) + r"\s*$", text, re.M):
             raise ValueError("REVIEW.md Verdict must match the declared verdict")
         cfg = config_of(con)
@@ -435,8 +441,12 @@ def main():
         if name == "review": cmd.add_argument("--file", required=True); cmd.add_argument("--verdict", required=True)
     for name in ("bindings", "inbox"):
         sub.add_parser(name)
-    sub.add_parser("status")
+    status_cmd = sub.add_parser("status")
     inspect_cmd = sub.add_parser("inspect"); inspect_cmd.add_argument("--task", required=True)
+    for cmd in (status_cmd, inspect_cmd):
+        cmd.add_argument("--summary", action="store_true")
+        cmd.add_argument("--format", choices=("json", "text"), default="json")
+        cmd.add_argument("--stale-after", type=float, default=900)
     deliver = sub.add_parser("deliver"); deliver.add_argument("--event", required=True)
     args = parser.parse_args()
     from monitor_task import Transport, read_json
@@ -462,14 +472,20 @@ def main():
     elif args.command == "deliver": result = deliver_event(args.state, args.event, Transport({}))
     elif args.command in ("status", "inspect"):
         from workflow_scheduler import snapshot
-        result = snapshot(args.state, getattr(args, "task", None))
+        if args.summary or args.format == "text":
+            from workflow_status import summarize
+            result = summarize(args.state, getattr(args, "task", None), args.stale_after)
+        else: result = snapshot(args.state, getattr(args, "task", None))
     else:
         with database(args.state) as con:
             table = "bindings" if args.command == "bindings" else "events"
             result = [dict(row) for row in con.execute("SELECT * FROM " + table)]
             for item in result:
                 item["data"] = json.loads(item["data"])
-    print(json.dumps(result, ensure_ascii=True, indent=2))
+    if args.command in ("status", "inspect") and args.format == "text":
+        from workflow_status import format_text
+        print(format_text(result))
+    else: print(json.dumps(result, ensure_ascii=True, indent=2))
 
 
 if __name__ == "__main__":

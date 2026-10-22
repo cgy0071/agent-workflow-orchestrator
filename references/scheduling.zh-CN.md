@@ -21,6 +21,12 @@ status/inspect 使用只读 SQLite 事务，不迁移数据库、不查询真实
 绑定、执行状态、派工尝试、交付、通知、审核、最近观测、错误次数、事件记录、
 目录／资源占用、依赖及最近一次延后调度原因。观测时间戳不能证明失联进程已经结束。
 
+使用 `status --summary --format text` 或 `inspect --task TASK-ID --format text`
+查看通用阶段、harness／adapter／identity、下一角色／动作、观测年龄和告警。
+JSON 摘要使用 --summary；--stale-after 900 控制观测过期提醒，不推断失败、取消或
+原生心跳。尚未登记的 DAG 节点也会显示；摘要不查询 Adapter，支持 Command、Receipt
+及可选 Herdr 绑定。
+
 ## 单次派工与核实
 
 先核验并绑定真实 Worker。支持 `command` 和 `herdr` 发送接口；command Worker
@@ -78,7 +84,19 @@ python scripts/monitor_task.py --request confirmed.json
 串行节点可以复用 Worker 及其执行目录。交付证据应使用每任务独立的 cwd，或在共享
 cwd 中为交付文件、绑定文件及审核文件设置任务专属路径。释放占用后仍需保留先前
 已验收文件，不能覆盖；依赖检查会重新计算其哈希。加载 DAG 允许共享 cwd，因为
-其中可以使用独立文件路径保留历史证据；它不会永久保留历史交付的文件名。
+其中可以使用独立文件路径保留历史证据。加载时拒绝图内计划证据文件路径重叠；登记时
+在共享台账内永久保留交付、绑定及审核路径，即使释放占用或终止也不解除文件名保护。
+旧请求适用同样检查。这保护经台账进行的分配，不是操作系统写保护或跨台账锁。
+
+在冻结新图之前生成任务专属路径：
+
+```sh
+python scripts/workflow_scheduler.py prepare-dag --file draft-dag.json --root /absolute/new-delivery --output prepared-dag.json
+```
+
+分配器独占创建 task-<任务ID与nonce哈希>/ 目录，固定 REVIEW.md，保留相对交付路径，
+加载前替换消息中的 {task_cwd}、{review_path}、{marker}。已有目录／输出文件不覆盖。
+派工前检查生成消息；若执行目录改变，重新核验绑定。不能迁移已经登记的请求。
 
 ## 冻结 DAG、分支与汇合
 

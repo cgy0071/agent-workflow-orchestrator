@@ -17,18 +17,9 @@ Binding an identity does not resume a harness conversation. A status observation
 timestamp is not a native worker heartbeat. Unsupported operations raise errors;
 the scheduler does not guess provider commands or provision sessions.
 
-| Harness | spawn | attach/resume | send | status | cancel | collect | heartbeat |
-|---|---|---|---|---|---|---|---|
-| Codex | unverified | unverified | unverified | unverified | unverified | unverified | unverified |
-| Pi | unverified | unverified | unverified | unverified | unverified | unverified | unverified |
-| Claude | unverified | unverified | unverified | unverified | unverified | unverified | unverified |
-| dsh-tui | unverified | unverified | unverified | unverified | unverified | unverified | unverified |
-| Grok | unverified | unverified | unverified | unverified | unverified | unverified | unverified |
-
-The older [field reports](harness-adapters.md#versioned-field-observations) remain
-external reports with missing harness versions/raw responses. They do not upgrade
-these entries to independently verified claims. The Python-child demo verifies
-local command transport behavior and fixture review, not these clients.
+The local Python-child demo verifies command transport and fixture review. For a
+real client, create a profile for the installed version after checking its actual
+identity, command responses, and task delivery. No client is preconfigured.
 
 Before marking an operation verified, record OS, harness and transport versions,
 source commit, exact reproduction argv arrays and nonempty raw evidence files

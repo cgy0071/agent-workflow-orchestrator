@@ -10,34 +10,18 @@
 
 Herdr 用户通过本机已安装版本的只读发现和身份查询，记录可执行文件、session、pane、实际 agent kind、terminal ID 和启动目录。其他 CLI/API 按 [适配器说明](harness-adapters.zh-CN.md) 提供身份与状态查询命令。启动参数取自用户选择的运行配置。
 
-可以选择下面任一种创建方式，两种方式创建后都进入相同的身份核验、绑定和 preflight 流程。已有可用会话也可以在核查身份和当前任务后复用。
+打开或选择客户端会话，核查身份和当前任务后再绑定。
 
-### 1.1 手动创建
+### 打开并核验会话
 
 1. 在选定客户端中手动打开专用窗口或会话（使用 Herdr 时为 pane），进入任务工作目录。
 2. 启动已安装的 harness，按需选择 provider、model 和 thinking。
 3. 核对实际运行配置，通过已验证的适配器读取会话身份及 cwd；Herdr 还需记录 pane、terminal 标识。
 4. 保存角色适配器配置，继续第 2 节的绑定流程；派工前再记录实际序列基线。
 
-适合复用交互会话，或客户端尚无已验证创建接口的情况。手动创建后，同样可以自动监控、发送通知及执行已授权的后续流程。
+已核验的交互会话绑定后可以监控、通知和执行已授权的后续流程。
 
-### 1.2 自动创建
-
-用户已授权创建会话且客户端提供已验证接口时，由控制器在任务目录创建专用会话，以选定参数启动 harness，等待注册并核验实际运行配置与身份。Herdr 对应创建 pane；其他客户端使用各自已验证的创建接口。自动创建需要控制器或启动器执行；bind 和 preflight 本身不创建会话。
-
-**以下为 Herdr 专用示例**，使用 Herdr 的 pane 和 CLI 命令。
-
-不必先人工准备 pane。在已授权 session 和工作目录内，操作者或已验证的控制器可以新建专用 pane，以用户选择的参数启动已安装的 harness，无需安装供应商或修改配置。先核对本机 CLI 帮助。报告在 Windows / Herdr 0.9.3 上验证了 pane split --cwd 与 pane run；同一环境的 agent start 在空闲 cmd、PowerShell 中返回 agent_pane_busy。这是版本相关的兼容报告，不代表所有 Windows 环境必然失败。
-
-完整命令示例见 [英文版第 8 节](setup-and-switching.md#8-provision-an-executor-when-needed)。各命令均显式指定授权 session。流程为：pane split --pane 已验证父窗口 --direction down --cwd 任务目录 --no-focus；保存返回的 result.pane.pane_id；只读核验新 pane 已就绪为 shell；仅执行一次 pane run；有限轮询 agent get 等待注册；读取当前运行状态核验 provider、model、thinking；再生成身份绑定和派工前序列基线。
-
-该代码片段仅展示命令顺序：检查了 pane split、pane run 的退出码及返回的 pane ID，尚未实现 shell 就绪轮询、注册轮询、单次命令超时和每条读取／查询命令的退出码处理。注释标示需要操作者或控制器完成的步骤，直接复制片段不等于实现自动创建。控制器须在绑定或派工前补齐这些等待、检查和实际运行配置核验。按版本记录的反馈见 [适配器实测表](harness-adapters.zh-CN.md#按版本记录的实测反馈)。
-
-这些命令是创建流程的原语，不是跨版本通用启动器。控制器自动执行时，每次子进程须有限超时（例如 15 秒），shell 就绪与注册等待须设截止时间（例如各 30 秒）。不能把 agent_status=unknown、进程存在或启动返回 0 当成就绪。创建或启动超时后先检查实际 pane，不盲目重复，不操作原有 pane。
-
-实际 agent kind、terminal、pane、cwd 由 agent get 核验；provider、model、thinking 必须来自 harness 当前运行状态，不能取自回显的启动命令。不可观测时记录未验证并在绑定、派工前停止。报告中的约 1.2 秒只是单次环境测量，不是性能保证或等待上限。bind 和 preflight 均不执行创建命令。
-
-两种方式创建完成后，将填写后的 `request.json` 中 `worker`、`reviewer` 对象分别保存为 `worker.json`、`planner.json`。`worker.json` 删除 `baseline_completion_seq`，该字段保留在每份任务请求中；其余适配器字段保持一致。Paper Lead 可以使用另一份 reviewer 配置。昵称、模型名和窗口标题都不能代替真实身份。
+核验后，将填写后的 `request.json` 中 `worker`、`reviewer` 对象分别保存为 `worker.json`、`planner.json`。`worker.json` 删除 `baseline_completion_seq`，该字段保留在每份任务请求中；其余适配器字段保持一致。Paper Lead 可以使用另一份 reviewer 配置。昵称、模型名和窗口标题都不能代替真实身份。
 
 ## 2. 初始化并绑定角色
 

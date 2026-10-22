@@ -107,6 +107,8 @@ def check_claim(con, request, reservation=None):
         if task != request["task_id"] and any(overlap(first, second)
                 for first in value["workspaces"] for second in requested_paths):
             raise ValueError("workspace is claimed by task " + task)
+    from workflow_evidence import check_paths
+    check_paths(con, request)
     if reservation is None:
         return
     resources = reservation["resources"]
@@ -340,6 +342,8 @@ def validate_dag(graph):
 def load_dag(state, run, graph, actor, version, context):
     from monitor_task import validate_request
     validate_dag(graph)
+    from workflow_evidence import check_graph_paths
+    check_graph_paths(graph)
     for node in graph["nodes"]:
         validate_request(node["request"], require_dispatch=False)
         if Path(node["request"].get("workflow_state", "")).resolve() != Path(state).resolve():
@@ -504,6 +508,8 @@ def snapshot(state, task=None):
             value = {"task_id": row["id"], "nonce": row["nonce"], "execution": row["status"],
                      "worker": data["worker_binding"], "registered_at": data["registered_at"],
                      "request_sha256": row["request_hash"], "cwd": data["request"]["cwd"]}
+            value.update(controller_role=data["controller"]["role"], reviewer_role=data["request"]["reviewer"]["role"],
+                         acceptance_valid=bool(acceptance(con, row["id"])))
             value["events"] = [dict(item, data=json.loads(item["data"])) for item in con.execute("SELECT * FROM events WHERE task=?", (row["id"],))]
             value["reviews"] = [json.loads(item[0]) for item in con.execute("SELECT r.data FROM reviews r JOIN events e ON r.event=e.id WHERE e.task=?", (row["id"],))]
             value["notifications"] = [json.loads(item[0]) for item in con.execute("SELECT n.data FROM notifications n JOIN events e ON n.event=e.id WHERE e.task=?", (row["id"],))]
@@ -522,7 +528,17 @@ def snapshot(state, task=None):
             blocks = {row["task"]: json.loads(row["data"]) for row in con.execute("SELECT * FROM scheduling_blocks")}
             for row in con.execute("SELECT id FROM dag_runs ORDER BY id"):
                 graph, states = _dag_view(con, row[0])
-                dags[row[0]] = {"nodes": states, "dependencies": {node["id"]: node.get("needs", []) for node in graph["nodes"]}}
+                cfg = control.config_of(con)
+                controller_role = cfg.get("workflow", {}).get("dispatch_role", "planner")
+                active_controller = con.execute("SELECT role FROM bindings WHERE mode='controller' AND status='active'").fetchone()
+                if active_controller: controller_role = active_controller[0]
+                dags[row[0]] = {"nodes": states, "dependencies": {node["id"]: node.get("needs", []) for node in graph["nodes"]},
+                               "tasks": {node["id"]: {"task_id": node["request"]["task_id"],
+                                           "worker_role": node["request"]["worker"]["role"],
+                                           "adapter": node["request"]["worker"]["adapter"],
+                                           "harness": node["request"]["worker"].get("harness", "unknown"),
+                                           "identity": node["request"]["worker"]["expected_identity"],
+                                           "controller_role": controller_role} for node in graph["nodes"]}}
         return {"tasks": tasks, "dags": dags, "scheduling_blocks": blocks,
                 "resources": control.config_of(con).get("scheduler", {}).get("resources", {}),
                 "claims": [{"task_id": task_id, "workspaces": value["workspaces"], "resources": value["resources"]}
@@ -534,6 +550,12 @@ def main():
     parser.add_argument("--state")
     sub = parser.add_subparsers(dest="command", required=True)
     status = sub.add_parser("status"); status.add_argument("--task")
+    status.add_argument("--summary", action="store_true")
+    status.add_argument("--format", choices=("json", "text"), default="json")
+    status.add_argument("--stale-after", type=float, default=900)
+    prepare = sub.add_parser("prepare-dag")
+    prepare.add_argument("--file", required=True); prepare.add_argument("--root", required=True)
+    prepare.add_argument("--output", required=True)
     caps = sub.add_parser("capabilities"); caps.add_argument("--file", required=True)
     for name in ("migrate", "dispatch", "reconcile", "dag-load", "tick", "release"):
         cmd = sub.add_parser(name)
@@ -552,13 +574,21 @@ def main():
         if name == "release":
             cmd.add_argument("--task", required=True)
     args = parser.parse_args()
-    if args.command == "capabilities":
+    if args.command == "prepare-dag":
+        from workflow_evidence import prepare_graph
+        result = prepare_graph(read_json(args.file), args.root)
+        with Path(args.output).open("x", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(result, ensure_ascii=True, indent=2) + "\n")
+    elif args.command == "capabilities":
         result = validate_capabilities(read_json(args.file), Path(args.file).resolve().parent)
     else:
         if not args.state:
             parser.error("--state required")
         if args.command == "status":
-            result = snapshot(args.state, args.task)
+            if args.summary or args.format == "text":
+                from workflow_status import summarize
+                result = summarize(args.state, args.task, args.stale_after)
+            else: result = snapshot(args.state, args.task)
         else:
             who = (args.actor, args.version, args.context)
             if args.command == "migrate": result = migrate(args.state, *who)
@@ -573,7 +603,10 @@ def main():
             elif args.command == "dag-load": result = load_dag(args.state, args.run, read_json(args.file), *who)
             elif args.command == "tick": result = tick(args.state, args.run, *who)
             else: result = release(args.state, args.task, *who)
-    print(json.dumps(result, ensure_ascii=True, indent=2))
+    if args.command == "status" and args.format == "text":
+        from workflow_status import format_text
+        print(format_text(result))
+    else: print(json.dumps(result, ensure_ascii=True, indent=2))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,19 @@
 
 独立于具体工程、模型和客户端。默认提供 **Planner / Executor / Paper Lead**，也可替换为软件开发、产品交付、研究实验等角色组合。
 
+## 直接运行本地演示
+
+安装 Python 3.10+ 后，在仓库根目录执行：
+
+```sh
+python -B scripts/demo_scheduler.py --directory runtime/first-run
+python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
+```
+
+第一条命令输出 `OFFLINE_DEMO_PASS`，状态视图中 A、B、JOIN 均为 `accepted`。
+每次运行使用新目录。演示只启动本地 Python 子进程，不需要 Agent 账号；接入真实客户端前，
+需配置并核验其适配器和凭证。本地演示不证明真实客户端兼容。
+
 ## 功能
 
 - **可改角色**：调整角色名称、数量、职责、权限及交付物，不将角色绑定到模型。
@@ -95,7 +108,7 @@ gh repo clone cgy0071/agent-workflow-orchestrator "$HOME/.codex/skills/agent-wor
 
 ### 2. 选择实际 harness 和窗口
 
-支持 **手动创建** 和 **自动创建** 两种方式：手动打开窗口或会话、进入工作目录并启动或选择 harness；或由已验证的控制器通过所选客户端支持的接口创建会话，以用户选定参数启动 harness。两种方式都先核验实际运行配置与会话身份，再绑定角色，后续共用监控和审核流程。已有可用会话也可核验后复用。自动创建需要已验证的启动接口，bind/preflight 本身不启动客户端。
+打开或选择客户端窗口／会话，进入工作目录并启动 harness。绑定角色前核验实际运行配置与会话身份；已有可用会话核验后也可复用。仓库中的 bind 和 preflight 命令不会启动客户端。
 
 本文中的 **pane 特指 Herdr 的终端分屏单元**。pane 创建命令是 Herdr 专用示例；其他客户端使用各自已验证的窗口或会话接口及标识。
 
@@ -176,6 +189,10 @@ python scripts/run_job.py --job /absolute/job.json
 脚本以参数数组启动命令，输出状态文件、真实返回码和 output.log；receipt 适配据此监控。它不猜测 Codex、Pi、Claude、dsh-tui 或 Grok 的参数，不用于无单次模式的交互 TUI。交互 TUI 需可靠的状态事件桥接，未验证前标 `ADAPTER_NOT_VERIFIED`。
 
 ## 配置分层
+
+`workflow_scheduler.py prepare-dag` 可预先生成任务专属证据路径；
+`workflow_control.py --state STATE status --summary --format text` 显示跨 Adapter
+的下一角色／动作及观测过期提醒。
 
 | 层 | 可改内容 | 谁读取 |
 |---|---|---|
