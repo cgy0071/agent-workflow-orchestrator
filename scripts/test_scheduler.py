@@ -284,6 +284,129 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(req["worker"]["baseline_completion_seq"], 41)
         self.assertEqual(req["dag_binding"]["template_sha256"], control.digest(graph["nodes"][2]["request"]))
 
+    def test_done_status_mapping_applies_to_both_admission_checks(self):
+        req = self.request()
+        req["status_map"] = {"done": "idle"}
+        self.fake.status = lambda spec: {"identity": spec["expected_identity"], "status": "done", "completion_seq": 10}
+        self.assertEqual(self.send(req)["status"], "SUBMITTED")
+        self.assertEqual(len(self.fake.messages), 1)
+
+    def test_herdr_done_label_mapping_with_state_change_sequence(self):
+        spec = {"role": "executor", "adapter": "herdr", "harness": "pi", "executable": "offline-herdr",
+                "session": "offline-session", "pane": "p1",
+                "expected_identity": dict(self.specs["executor"]["expected_identity"], kind="pi", pane="p1")}
+        control.bind(self.state, "executor", spec, spec["expected_identity"], reason="verified offline Herdr fixture")
+        req = self.request()
+        req["worker"] = dict(spec, baseline_completion_seq=10)
+        req["status_map"] = {"done": "idle"}
+        identity = spec["expected_identity"]
+        agent = {"agent": "pi", "terminal_id": identity["terminal"], "cwd": identity["launch_cwd"], "pane_id": "p1",
+                 "agent_status": "done", "state_change_seq": 10, "agent_session": {"kind": "path", "value": "offline"}}
+        sends = []
+        def run(argv, cwd=None):
+            if argv[4] == "get": return json.dumps({"result": {"agent": agent}})
+            self.assertEqual(argv[4], "prompt")
+            sends.append(argv[-1])
+            return "submitted"
+        with patch.object(monitor.Transport, "run", side_effect=run):
+            result = scheduler.dispatch(self.state, req, self.message(req), *self.actor())
+        self.assertEqual(result["status"], "SUBMITTED")
+        self.assertEqual(sends, [self.message(req)])
+
+    def test_invalid_status_map_fails_before_contacting_the_adapter(self):
+        for mapping in (None, [], {"done": None}, {1: "idle"}):
+            with self.subTest(mapping=mapping):
+                req = self.request()
+                req["status_map"] = mapping
+                with patch.object(self.fake, "status", side_effect=AssertionError("no adapter query")):
+                    with self.assertRaisesRegex(ValueError, "status_map"):
+                        self.send(req)
+
+    def test_done_status_requires_an_explicit_mapping(self):
+        req = self.request()
+        self.fake.status = lambda spec: {"identity": spec["expected_identity"], "status": "done", "completion_seq": 10}
+        with self.assertRaises(ValueError): self.send(req)
+        self.assertEqual(self.fake.messages, [])
+        self.assertEqual(scheduler.snapshot(self.state)["tasks"], [])
+
+    def test_busy_or_failed_status_cannot_be_mapped_to_idle(self):
+        for raw in ("working", "blocked", "exited", "failed"):
+            with self.subTest(status=raw):
+                req = self.request("BUSY-" + raw)
+                req["status_map"] = {raw: "idle"}
+                self.fake.status = lambda spec: {"identity": spec["expected_identity"], "status": raw, "completion_seq": 10}
+                with self.assertRaises(ValueError): self.send(req)
+        self.assertEqual(self.fake.messages, [])
+
+    def test_mapping_does_not_skip_the_final_busy_check(self):
+        req = self.request()
+        req["status_map"] = {"done": "idle", "working": "idle"}
+        identity = req["worker"]["expected_identity"]
+        statuses = [{"identity": identity, "status": name, "completion_seq": 10} for name in ("done", "working")]
+        with patch.object(self.fake, "status", side_effect=statuses):
+            self.assertEqual(self.send(req)["status"], "DISPATCH_UNCERTAIN")
+        self.assertEqual(self.fake.messages, [])
+        self.assertTrue(scheduler.snapshot(self.state)["tasks"][0]["claim_held"])
+
+    def test_done_mapping_preserves_final_identity_and_sequence_checks(self):
+        for changed in ("identity", "sequence"):
+            with self.subTest(changed=changed):
+                req = self.request("CHANGED-" + changed)
+                req["status_map"] = {"done": "idle"}
+                observed = {"identity": req["worker"]["expected_identity"], "status": "done", "completion_seq": 10}
+                final = copy.deepcopy(observed)
+                if changed == "identity": final["identity"]["terminal"] = "different-terminal"
+                else: final["completion_seq"] = 11
+                with patch.object(self.fake, "status", side_effect=[observed, final]):
+                    self.assertEqual(self.send(req)["status"], "DISPATCH_UNCERTAIN")
+                self.confirm(req, "not_sent")
+        self.assertEqual(self.fake.messages, [])
+
+    def test_done_mapping_does_not_release_an_unreviewed_workspace(self):
+        first, second = self.request(), self.request("TASK-B")
+        first["status_map"] = second["status_map"] = {"done": "idle"}
+        self.fake.status = lambda spec: {"identity": spec["expected_identity"], "status": "done", "completion_seq": 10}
+        self.send(first)
+        with self.assertRaisesRegex(ValueError, "active or uncertain"):
+            self.send(second)
+        first = self.confirm(first)
+        control.publish_event(self.state, first, {"status": "review_ready"})
+        with self.assertRaisesRegex(ValueError, "workspace"):
+            self.send(second)
+        self.assertEqual(len(self.fake.messages), 1)
+
+    def test_public_dag_view_accepts_a_state_path_and_is_read_only(self):
+        graph = self.graph("view")
+        scheduler.load_dag(self.state, "view", graph, *self.actor())
+        path = self.state / "workflow.sqlite3"
+        before = path.read_bytes()
+        with patch.object(control, "database", side_effect=AssertionError("read view must not take a write lock")), \
+                patch.object(scheduler, "Transport", side_effect=AssertionError("read view must not query clients")):
+            saved_graph, states = scheduler.dag_view(self.state, "view")
+            self.assertEqual(saved_graph, graph)
+            self.assertEqual(states, {"a": "ready", "b": "ready", "join": "waiting"})
+            self.assertEqual(scheduler.snapshot(self.state)["dags"]["view"]["nodes"], states)
+            with self.assertRaisesRegex(ValueError, "unknown DAG"):
+                scheduler.dag_view(self.state, "missing")
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_example_markers_are_required_in_artifacts_before_review_ready(self):
+        example = Path(scheduler.__file__).resolve().parents[1] / "examples" / "dag.json"
+        for node in json.loads(example.read_text(encoding="utf-8"))["nodes"]:
+            with self.subTest(node=node["id"]):
+                req = self.request("EXAMPLE-" + node["id"])
+                req.update(task_id=node["request"]["task_id"], nonce=node["request"]["nonce"],
+                           completion=copy.deepcopy(node["request"]["completion"]), monitor={"settle_grace_seconds": 0})
+                text = req["task_id"] + " " + req["nonce"]
+                for name in ("HANDOFF.md", "RESULT.md", "EVIDENCE.md"):
+                    (Path(req["cwd"]) / name).write_text(text, encoding="utf-8")
+                class Done:
+                    def status(inner, spec):
+                        return {"identity": spec["expected_identity"], "status": "done", "completion_seq": 11}
+                self.assertEqual(monitor.inspect_once(req, Done())[0], "incomplete")
+                (Path(req["cwd"]) / "HANDOFF.md").write_text(text + "\n" + req["completion"]["marker"], encoding="utf-8")
+                self.assertEqual(monitor.inspect_once(req, Done())[0], "review_ready")
+
     def test_real_subprocess_dag_cli_three_runs(self):
         script = Path(scheduler.__file__).with_name("demo_scheduler.py")
         shapes = []
@@ -297,6 +420,23 @@ class SchedulerTests(unittest.TestCase):
             self.assertEqual(result["snapshot"]["claims"], [])
             shapes.append([[item["node"] for item in report["results"]] for report in result["passes"]])
         self.assertEqual(shapes, [[["A", "B"], ["JOIN"], []]] * 3)
+
+    def test_real_subprocess_dag_reuses_a_sticky_done_worker(self):
+        script = Path(scheduler.__file__).with_name("demo_scheduler.py")
+        directory = self.root / "sticky-done-demo"
+        proc = subprocess.run([sys.executable, "-B", str(script), "--directory", str(directory), "--completion-status", "done"],
+                              cwd=self.root, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        result = json.loads((directory / "demo-result.json").read_text(encoding="utf-8"))
+        self.assertEqual(result["status"], "OFFLINE_DEMO_PASS")
+        tasks = {item["task_id"]: item for item in result["snapshot"]["tasks"]}
+        self.assertEqual(tasks["A"]["worker"]["instance_id"], tasks["JOIN"]["worker"]["instance_id"])
+        status = json.loads((directory / "executor-workspace" / "worker_status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["status"], "done")
+        self.assertEqual(status["completion_seq"], 2)
+        confirmed = json.loads((directory / "delivery" / "JOIN" / "request.json").read_text(encoding="utf-8"))
+        self.assertEqual(confirmed["worker"]["baseline_completion_seq"], 1)
+        self.assertEqual(result["snapshot"]["dags"]["demo"]["nodes"], {"A": "accepted", "B": "accepted", "JOIN": "accepted"})
 
     def test_changed_evidence_rejection_and_duplicate_events_block_fanin(self):
         graph = self.graph("tamper")

@@ -60,4 +60,25 @@ These are external evaluator reports, provided as issue-0 through issue-3 and re
 
 The original report identifies state_change_seq as the raw Herdr field, while the follow-up quotes a receipt with sequence_source=completion_seq. Without the corresponding raw agent get response and adapter configuration, the source cannot be reconciled; a normalized completion_seq value alone does not identify the raw field. Keep the sequence column pending until those artifacts are available. There are no live findings here for Codex, Claude, Grok, or other version pairs.
 
+### Subsequent DAG feedback
+
+The evaluator's next report used a 2026-10-22 main archive without a commit SHA,
+on Windows 10.0.26200 / Herdr 0.9.3 / Python 3.12.4. The Pi client version was
+not recorded; its model label is not a client version. The evaluator reports a
+turn ending in persistent `done`, with later prompts still accepted and the
+sequence advancing. The idle-only scheduler check is independently reproducible
+in source and offline fixtures. Requests can now explicitly map that verified
+between-turn label with `"status_map": {"done": "idle"}`; see [scheduling.md](scheduling.md).
+Raw busy/failed states, identity checks, completion baselines and ledger claims
+remain enforced. Local subprocess and mocked Herdr-response tests cover this
+path; they do not independently establish live Pi compatibility.
+
+The report also identified the public dag_view signature inconsistency and
+missing markers in the DAG template. Both have regression coverage. Its claim
+that the previous demo reset workers between passes does not match the source:
+the binding and sequence persist, while the old fixture always reported idle.
+Its archive line counts and encoding-check count do not identify the tested
+commit. Retain the raw archive/version evidence before attributing results to a
+specific revision or upgrading any capability profile to verified.
+
 For future entries, retain the OS, Herdr and harness versions, skill commit, adapter configuration, raw identity/status responses, actual launch command, and delivery/review evidence. Exclude credentials. Use this table as a troubleshooting starting point, then recheck the installed version and selected session. Herdr panes and commands apply only to the Herdr adapter.

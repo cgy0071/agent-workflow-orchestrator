@@ -59,10 +59,11 @@
             "RESULT.md",
             "EVIDENCE.md"
           ],
+          "marker": "TASK_DONE TASK-A replace-with-unique-nonce-A",
           "marker_source": "artifact"
         }
       },
-      "message": "Task TASK-A nonce replace-with-unique-nonce-A: replace with objective, scope, acceptance, and delivery instructions.",
+      "message": "Task TASK-A nonce replace-with-unique-nonce-A: replace with objective, scope, acceptance, and delivery instructions. Write the exact marker line TASK_DONE TASK-A replace-with-unique-nonce-A in HANDOFF.md.",
       "resources": {}
     },
     {
@@ -124,10 +125,11 @@
             "RESULT.md",
             "EVIDENCE.md"
           ],
+          "marker": "TASK_DONE TASK-B replace-with-unique-nonce-B",
           "marker_source": "artifact"
         }
       },
-      "message": "Task TASK-B nonce replace-with-unique-nonce-B: replace with objective, scope, acceptance, and delivery instructions.",
+      "message": "Task TASK-B nonce replace-with-unique-nonce-B: replace with objective, scope, acceptance, and delivery instructions. Write the exact marker line TASK_DONE TASK-B replace-with-unique-nonce-B in HANDOFF.md.",
       "resources": {}
     },
     {
@@ -192,10 +194,11 @@
             "RESULT.md",
             "EVIDENCE.md"
           ],
+          "marker": "TASK_DONE TASK-JOIN replace-with-unique-nonce-JOIN",
           "marker_source": "artifact"
         }
       },
-      "message": "Task TASK-JOIN nonce replace-with-unique-nonce-JOIN: replace with objective, scope, acceptance, and delivery instructions.",
+      "message": "Task TASK-JOIN nonce replace-with-unique-nonce-JOIN: replace with objective, scope, acceptance, and delivery instructions. Write the exact marker line TASK_DONE TASK-JOIN replace-with-unique-nonce-JOIN in HANDOFF.md.",
       "resources": {}
     }
   ]

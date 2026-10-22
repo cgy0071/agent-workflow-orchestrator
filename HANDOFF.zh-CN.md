@@ -15,6 +15,17 @@
 - 旧状态库通过调度器的 `migrate` 显式增量升级。所有共享源码／资源的控制器必须使用同一状态库；系统权限隔离及工作树创建由操作者负责。
 - 本轮发布使用现有 origin/main；具体提交与远端状态以实际 Git 查询为准。
 
+## 后续测试反馈处理
+
+在 `65683ab` 基线上读取本机 issue-0 至 issue-7 和 reply-0 至 reply-3 后，已核实并修复本轮三项问题：
+
+- 调度器两次准入查询共用监控的 status_map；经核验的持续 done 状态可显式映射为 idle，原始 working／blocked／exited／failed 仍拒绝。身份、完成基线、占用和审核门保留。
+- 公开 `dag_view(state, run)` 改为只读状态目录接口；连接参数版本为事务内私有 `_dag_view`。已补库调用示例。
+- DAG 模板和子进程演示明确提供文件 marker；文档说明 marker_source 只选择位置，省略 marker 时仍维持既有兼容行为。
+- 新增持续 done 的真实本地子进程复用回归、模拟 Herdr 响应、发送前状态／身份／序列变化、目录占用、只读查询及示例 marker 行为验证。
+- 实际结果为 89 项测试通过，40 个文本文件编码检查、Skill quick_validate、git diff --check 与本地 Markdown 链接检查通过。
+- 外部报告未提供本轮源码提交 SHA／完整 Pi 客户端版本，未据此升级能力声明。旧演示并未逐轮重置 Worker，漏测原因是它始终返回 idle。原始测试意见文件未改动，本轮未运行真实外部 Agent。
+
 ## 1. 接手位置与当前授权
 
 - 唯一后续源码工作目录：`E:\github\agent-workflow-orchestrator`。

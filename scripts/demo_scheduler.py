@@ -18,13 +18,17 @@ def worker(directory, message=None):
             raise ValueError("fixture refuses duplicate task submission")
         output = Path(task["cwd"])
         for name in ("HANDOFF.md", "RESULT.md"):
-            (output / name).write_text(task["task_id"] + " " + task["nonce"] + "\nOffline fixture result.\n", encoding="utf-8")
-        status.update(task_id=task["task_id"], nonce=task["nonce"], completion_seq=status["completion_seq"] + 1)
+            text = task["task_id"] + " " + task["nonce"] + "\nOffline fixture result.\n"
+            if name == "HANDOFF.md" and task.get("marker"):
+                text += task["marker"] + "\n"
+            (output / name).write_text(text, encoding="utf-8")
+        status.update(task_id=task["task_id"], nonce=task["nonce"], completion_seq=status["completion_seq"] + 1,
+                      status=task.get("completion_status", "idle"))
         save_json(path, status)
     print(json.dumps(status))
 
 
-def demo(directory):
+def demo(directory, completion_status="idle"):
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=False)
     state = root / "state"
@@ -55,9 +59,13 @@ def demo(directory):
                "workflow_state": str(state), "worker": dict(specs[role], baseline_completion_seq=baseline),
                "reviewer": specs["planner"], "dispatch_confirmed": False,
                "authorization": {"source": "local Python-child fixture only", "dispatch_worker": True, "notify_reviewer": False},
-               "completion": {"binding_artifact": "HANDOFF.md", "artifacts": ["RESULT.md"], "marker_source": "artifact"}}
+               "completion": {"binding_artifact": "HANDOFF.md", "artifacts": ["RESULT.md"],
+                              "marker": "TASK_DONE " + name + " nonce-" + name, "marker_source": "artifact"}}
+        if completion_status == "done":
+            req["status_map"] = {"done": "idle"}
         nodes.append({"id": name, "needs": deps, "request": req,
-                      "message": json.dumps({"task_id": name, "nonce": req["nonce"], "cwd": str(cwd)})})
+                      "message": json.dumps({"task_id": name, "nonce": req["nonce"], "cwd": str(cwd),
+                                             "marker": req["completion"]["marker"], "completion_status": completion_status})})
     graph = {"nodes": nodes}
     save_json(root / "dag.json", graph)
     scheduler.load_dag(state, "demo", graph, *who)
@@ -102,12 +110,14 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--directory", help="new output directory; existing paths are refused")
     group.add_argument("--worker", help=argparse.SUPPRESS)
+    parser.add_argument("--completion-status", choices=("idle", "done"), default="idle",
+                        help="fixture worker's persistent status after a turn")
     parser.add_argument("--message", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.worker:
         worker(args.worker, args.message)
     else:
-        demo(args.directory)
+        demo(args.directory, args.completion_status)
 
 
 if __name__ == "__main__":

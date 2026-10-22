@@ -63,6 +63,15 @@ def identity_matches(actual, expected):
                 else actual.get(k) == v) for k, v in expected.items())
 
 
+def mapped_status(request, state):
+    """Use the same explicit adapter labels for monitoring and dispatch admission."""
+    mapping = request.get("status_map", {})
+    if not isinstance(mapping, dict) or any(not isinstance(k, str) or not k or not isinstance(v, str) or not v
+                                            for k, v in mapping.items()):
+        raise ValueError("status_map must map nonempty status strings to nonempty strings")
+    return mapping.get(state.get("status"), state.get("status"))
+
+
 def checked_artifact(cwd, item):
     item = {"path": item} if isinstance(item, str) else item
     path = (cwd / item["path"]).resolve()
@@ -223,6 +232,7 @@ def validate_request(request, require_dispatch=True):
         raise ValueError("completion marker must be a string")
     if request["completion"].get("marker_source", "output") not in ("output", "artifact", "both"):
         raise ValueError("marker_source must be output, artifact, or both")
+    mapped_status(request, {})  # Validate optional mapping before any adapter query.
     monitor = request.get("monitor", {})
     if not isinstance(monitor, dict): raise ValueError("monitor must be an object")
     number(monitor.get("interval_seconds", 300), "interval_seconds", 1, True, 86400)
@@ -273,7 +283,7 @@ def inspect_once(request, transport, idle_since=None, now=None):
     if worker["adapter"] == "receipt" and (state.get("task_id") != request["task_id"]
                                             or state.get("nonce") != request["nonce"]):
         return "identity_changed", "Receipt belongs to another task/nonce.", idle_since, None
-    status = request.get("status_map", {}).get(state.get("status"), state.get("status"))
+    status = mapped_status(request, state)
     if status == "working":
         # State-change counters can oscillate while one delivery is pending.
         timer = idle_since if state.get("sequence_source") == "state_change_seq" else None

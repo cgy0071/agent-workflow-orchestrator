@@ -39,13 +39,22 @@ by loading a graph or choosing a harness label.
 python scripts/workflow_scheduler.py --state STATE dispatch --request request.json --message-file task.md --actor INSTANCE --version 1 --context main
 ```
 
-The controller queries identity, idle status and completion baseline, then
+The controller queries identity, mapped idle status and completion baseline, then
 atomically registers the unconfirmed request and reserves workspace/resources.
 It rechecks the controller and target before one bounded send. The final query
 and send share a SQLite write transaction, serializing handoffs and submissions.
 A successful send records `submitted`; execution still needs confirmation.
 A crash leaves `reserved`; errors after reservation record `uncertain`. Neither
 state can be automatically resent. The worker and its claims remain occupied.
+
+Both admission queries apply the request's `status_map`, as does monitoring.
+If the verified client/version reports `done` as a reusable between-turn state,
+set `"status_map": {"done": "idle"}` before freezing requests or loading a DAG.
+Without this explicit mapping, dispatch still requires `idle`; the package does
+not assume every harness's `done` state is reusable. Raw `working`, `blocked`,
+`exited` and `failed` remain ineligible even if mapped to `idle`. Identity,
+completion baseline, ledger occupancy, review gates and resource claims still
+apply, including the final check immediately before sending.
 
 Independently inspect the actual session. Write a note containing the exact task
 ID, nonce, `Outcome: running`, and evidence that execution began (it may already
@@ -92,7 +101,15 @@ a task/nonce-bound `message`, and optional resource units. IDs are unique,
 dependencies must exist, and cycles are rejected. All task requests and messages
 are frozen when loaded; run IDs cannot be overwritten or share task IDs.
 See `examples/dag.json` for the graph structure. Replace all placeholders and
-bind the actual roles before loading it.
+bind the actual roles before loading it. The template uses a second Worker role;
+declare that role and set the desired concurrency before initializing the state.
+
+Each template node provides a task/nonce-bound `marker` and instructs the worker
+to place it in HANDOFF.md. `marker_source` selects where to search; only a
+nonempty `marker` enables that additional check. Marker-free requests remain
+valid for compatibility and still require the normal file/identity/nonce checks.
+A file marker constrains delivery content; it does not authenticate its author
+or establish task acceptance. Independent review remains required.
 
 ```sh
 python scripts/workflow_scheduler.py --state STATE dag-load --run RUN-ID --file dag.json --actor INSTANCE --version 1 --context main
@@ -120,6 +137,21 @@ recording reviews or recovering an anomaly. It never creates agent sessions,
 automatically supplies a review verdict, or retries an uncertain send. For
 rework, load a new scoped run with fresh task identities.
 
+Controllers with `scripts/` on their Python import path can use the same state
+directory APIs directly:
+
+```python
+from workflow_scheduler import dag_view, snapshot, tick
+
+graph, node_states = dag_view(state, "RUN-ID")
+status = snapshot(state)
+result = tick(state, "RUN-ID", actor, version, "main")
+```
+
+`dag_view(state, run)` and `snapshot(state)` are read-only and contact no clients.
+`dag_view` returns the frozen graph and the node-state dictionary. The private
+`_dag_view(connection, run)` is used only inside existing transactions.
+
 ## Monitor recovery
 
 `monitor_checkpoint.json` persists the request hash, start time, delivery grace
@@ -139,6 +171,7 @@ or dispatch permission.
 
 ```sh
 python -B scripts/demo_scheduler.py --directory runtime/new-demo
+python -B scripts/demo_scheduler.py --directory runtime/new-done-demo --completion-status done
 python -B -m unittest discover -s scripts -p "test_*.py" -v
 ```
 
@@ -148,3 +181,8 @@ records fixture reviews and writes `dag.json`, `demo-result.json` and the ledger
 It creates no external agents and sends no external notifications. These results
 establish local orchestration behavior; record actual client compatibility using
 the [capability contract](capabilities.md).
+
+The second demo leaves the same fixture worker at `done` after each turn and
+uses the explicit mapping to reuse its binding for A and JOIN. It never resets
+the worker between passes. This regression fixture does not establish live Pi
+compatibility; the corresponding external report is version-scoped.

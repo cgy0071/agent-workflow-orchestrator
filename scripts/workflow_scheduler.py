@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -11,7 +12,7 @@ import subprocess
 import uuid
 
 import workflow_control as control
-from monitor_task import Transport, identity_matches, norm_path, read_json, sequence, validate_argv
+from monitor_task import Transport, identity_matches, mapped_status, norm_path, read_json, sequence, validate_argv, validate_request
 
 
 OPERATIONS = ("spawn", "attach_resume", "send", "status", "cancel", "collect", "heartbeat")
@@ -35,6 +36,25 @@ def create_schema(con):
 
 def has_schema(con):
     return bool(con.execute("SELECT 1 FROM sqlite_master WHERE name='dispatches'").fetchone())
+
+
+@contextmanager
+def _read_database(state):
+    path = Path(state).resolve() / "workflow.sqlite3"
+    con = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=15)
+    con.row_factory = sqlite3.Row
+    try:
+        con.execute("BEGIN")
+        yield con
+    finally:
+        con.close()
+
+
+def _worker_quiescent(request, state):
+    # A configured alternate label (e.g. done -> idle) must not turn a known
+    # active, blocked or terminated state into a reusable worker.
+    return (state.get("status") not in ("working", "blocked", "exited", "failed")
+            and mapped_status(request, state) == "idle")
 
 
 def journal(con, task, generation, actor, kind, data, event_id=None):
@@ -128,6 +148,7 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
              transport=None):
     """Persist a reservation before the sole side effect. Never retry a reserved ID."""
     request = copy.deepcopy(request)
+    validate_request(request, require_dispatch=False)
     if request.get("dispatch_confirmed") is not False:
         raise ValueError("dispatch requires dispatch_confirmed=false")
     auth = request.get("authorization", {})
@@ -170,7 +191,7 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
                 raise ValueError("request differs from the frozen DAG template")
         request["dag_binding"] = {"run": run, "node": node, "template_sha256": control.digest(request)}
         spec["baseline_completion_seq"] = sequence(observed.get("completion_seq"))
-    if observed.get("status") != "idle" or sequence(observed.get("completion_seq")) != spec["baseline_completion_seq"]:
+    if not _worker_quiescent(request, observed) or sequence(observed.get("completion_seq")) != spec["baseline_completion_seq"]:
         raise ValueError("worker is not idle at the frozen completion baseline")
     if spec["adapter"] == "herdr":
         Transport.check_prompt_available(observed)
@@ -193,7 +214,7 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
                 raise ValueError("worker binding changed after reservation")
             live = transport.status(spec)
             if (not identity_matches(live.get("identity", {}), spec["expected_identity"])
-                    or live.get("status") != "idle"
+                    or not _worker_quiescent(request, live)
                     or sequence(live.get("completion_seq")) != spec["baseline_completion_seq"]):
                 raise ValueError("worker identity or availability changed before send")
             response = transport.send(spec, message)
@@ -387,7 +408,7 @@ def node_state(con, node):
     return dispatch_row[0] if dispatch_row else "running"
 
 
-def dag_view(con, run):
+def _dag_view(con, run):
     row = con.execute("SELECT data FROM dag_runs WHERE id=?", (run,)).fetchone()
     if not row:
         raise ValueError("unknown DAG run")
@@ -404,8 +425,14 @@ def dag_view(con, run):
     return graph, states
 
 
+def dag_view(state, run):
+    """Return (frozen graph, node states) in a read-only transaction, without polling."""
+    with _read_database(state) as con:
+        return _dag_view(con, run)
+
+
 def assert_ready(con, run, node_id, request):
-    graph, states = dag_view(con, run)
+    graph, states = _dag_view(con, run)
     node = next((item for item in graph["nodes"] if item["id"] == node_id), None)
     normalized = copy.deepcopy(request)
     binding = normalized.pop("dag_binding", None)
@@ -426,7 +453,7 @@ def tick(state, run, actor, version, context, *, transport=None):
     # One bounded pass. Polling/restarts are safe: reserved task IDs cannot resend.
     with control.database(state) as con:
         control.guard(con, actor, version, context, "dispatch")
-        graph, states = dag_view(con, run)
+        graph, states = _dag_view(con, run)
         for node in graph["nodes"]:
             if states[node["id"]] == "accepted":
                 task = node["request"]["task_id"]
@@ -469,11 +496,7 @@ def release(state, task, actor, version, context):
 
 def snapshot(state, task=None):
     """Read-only, single-transaction view; never migrates, polls, or contacts clients."""
-    path = Path(state).resolve() / "workflow.sqlite3"
-    con = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=15)
-    con.row_factory = sqlite3.Row
-    try:
-        con.execute("BEGIN")
+    with _read_database(state) as con:
         tasks = []
         query, params = ("SELECT * FROM tasks WHERE id=?", (task,)) if task else ("SELECT * FROM tasks ORDER BY id", ())
         for row in con.execute(query, params):
@@ -498,14 +521,12 @@ def snapshot(state, task=None):
         if has_schema(con):
             blocks = {row["task"]: json.loads(row["data"]) for row in con.execute("SELECT * FROM scheduling_blocks")}
             for row in con.execute("SELECT id FROM dag_runs ORDER BY id"):
-                graph, states = dag_view(con, row[0])
+                graph, states = _dag_view(con, row[0])
                 dags[row[0]] = {"nodes": states, "dependencies": {node["id"]: node.get("needs", []) for node in graph["nodes"]}}
         return {"tasks": tasks, "dags": dags, "scheduling_blocks": blocks,
                 "resources": control.config_of(con).get("scheduler", {}).get("resources", {}),
                 "claims": [{"task_id": task_id, "workspaces": value["workspaces"], "resources": value["resources"]}
                            for task_id, value in claims(con)], "scheduler_schema": 1 if has_schema(con) else None}
-    finally:
-        con.close()
 
 
 def main():

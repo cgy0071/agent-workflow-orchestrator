@@ -38,6 +38,12 @@ python scripts/workflow_scheduler.py --state STATE dispatch --request request.js
 交接与派工。发送返回后记录 submitted，执行仍需核实；进程崩溃留下 reserved，
 发送结果不确定则记录 uncertain。这两种状态均不自动重发，也不释放执行者与占用。
 
+两次派工准入查询与监控均使用请求中的 status_map。已核验的客户端／版本如果以
+done 表示轮次结束后仍可接收新任务，应在冻结请求或加载 DAG 前明确填写
+`"status_map": {"done": "idle"}`。没有映射时仍只接受 idle，不把所有 Harness 的
+done 一概视为可复用。原始 working、blocked、exited、failed 即使映射为 idle 也不能
+获得派工资格。身份、序列基线、任务占用、审核门及资源检查仍然生效，发送前再次核对。
+
 独立查看真实会话后，写 EXECUTION.md：包含实际任务 ID、nonce、单独一行
 `Outcome: running`，以及已经开始执行的证据；此时执行也可能已经完成。
 
@@ -76,6 +82,12 @@ python scripts/monitor_task.py --request confirmed.json
 会被拒绝。加载后图与消息冻结，run ID 不覆盖，多个图不能复用任务 ID。
 结构见 `examples/dag.json`；先替换占位值并绑定真实角色。
 
+模板使用第二个 Worker 角色；初始化前在配置中声明该角色及所需并发数。
+每个节点都明确给出绑定任务／nonce 的 marker，并要求 Worker 将其写入 HANDOFF.md。
+marker_source 仅选择搜索位置；非空 marker 才启用这项附加检查。为兼容现有请求，
+仍允许省略 marker，此时保留正常的文件、身份及 nonce 检查。文件 marker 约束交付
+内容，不认证作者，也不证明验收通过；独立审核仍然必要。
+
 ```sh
 python scripts/workflow_scheduler.py --state STATE dag-load --run RUN-ID --file dag.json --actor INSTANCE --version 1 --context main
 python scripts/workflow_scheduler.py --state STATE tick --run RUN-ID --actor INSTANCE --version 1 --context main
@@ -95,6 +107,19 @@ tick 是有限的一轮操作；控制器在记录审核或处理异常后再次
 它不创建真实 Agent、不自动给出审核结论、不重试不确定的发送。
 返工使用新的限定范围图及新的任务身份。
 
+当 scripts/ 已位于 Python 导入路径时，控制器可直接使用同样的状态目录接口：
+
+```python
+from workflow_scheduler import dag_view, snapshot, tick
+
+graph, node_states = dag_view(state, "RUN-ID")
+status = snapshot(state)
+result = tick(state, "RUN-ID", actor, version, "main")
+```
+
+dag_view(state, run) 和 snapshot(state) 均只读且不查询客户端；前者返回冻结图与
+节点状态字典。私有 _dag_view(connection, run) 仅供已有事务内部调用。
+
 ## 监控恢复
 
 monitor_checkpoint.json 持久保存请求哈希、起始时间、交付宽限及连续读取错误数。
@@ -110,6 +135,7 @@ retry_max_seconds 默认 60 秒；此策略不重试发送操作。
 
 ```sh
 python -B scripts/demo_scheduler.py --directory runtime/new-demo
+python -B scripts/demo_scheduler.py --directory runtime/new-done-demo --completion-status done
 python -B -m unittest discover -s scripts -p "test_*.py" -v
 ```
 
@@ -117,3 +143,7 @@ python -B -m unittest discover -s scripts -p "test_*.py" -v
 逐字节核对结果并登记测试审核，生成 dag.json、demo-result.json 和台账。
 没有创建外部 Agent 或发送外部通知。真实客户端兼容性按
 [能力证据合同](capabilities.zh-CN.md) 单独记录。
+
+第二条演示让同一个测试 Worker 在每轮完成后持续保持 done，通过显式映射复用
+A 与 JOIN 的同一绑定，不在轮次间重置 Worker。这是离线回归；相关 Pi 外部报告
+仅适用于报告中的版本环境。
