@@ -2,236 +2,256 @@
 
 English | [Chinese](README.zh-CN.md)
 
-A configurable multi-agent Skill for **planning -> execution -> status monitoring -> completion notification -> independent review -> authorized follow-up**.
+Let several AI coding agents work as a team: one plans and reviews, another implements, and a small Python script watches the work in between so nobody has to babysit terminals.
 
-The workflow is independent of project files, models, and clients. Planner, Executor, and Paper Lead are defaults that can be replaced for software, product, or research work.
+## What problem does it solve?
 
-## Run the local demo
+A typical setup without this tool: Claude plans in one window, Codex implements in another, and you keep switching between them, copying results back and forth, checking whether the work is "really" done, and deciding what to send next.
 
-With Python 3.10+ installed, run from the repository root:
+With this tool:
+
+1. The **Planner** agent writes a task (objective, scope, acceptance criteria) and dispatches it once to the **Executor** agent.
+2. A script polls the Executor's *status* every 5 minutes. It does not ask a model to reread the conversation, so monitoring costs almost nothing.
+3. When the Executor finishes and the expected files (for example `RESULT.md`, `HANDOFF.md`) pass validation, the script records one completion event for the reviewer. Direct prompting is optional.
+4. The reviewer checks the raw evidence, records `accept`, `repair`, or `reject`, and, if you authorized it, dispatches the next task.
+
+The repository contains two parts:
+
+- **The Skill** (`SKILL.md`): instructions that an agent loads so it knows how to plan, dispatch, review, and continue.
+- **The scripts** (`scripts/`): standard-library Python tools for state, dispatch, monitoring, and review gates. The agent playing the controller usually runs them; you can also run them yourself.
+
+```mermaid
+flowchart LR
+    U[You: goal and authorization] --> P[Planner: write task]
+    P --> E[Executor: implement and test]
+    E --> M[Script: poll status, check files]
+    M --> N[One inbox event]
+    N --> R[Reviewer: accept / repair / reject]
+    R -->|next or repair task| P
+```
+
+Roles are not tied to tools. The Planner can run in Codex, the Executor in Claude, or any other combination.
+
+## Try it in 30 seconds
+
+Requires Python 3.10+. No agent account or network access is needed. From the repository root:
 
 ```sh
 python -B scripts/demo_scheduler.py --directory runtime/first-run
 python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
 ```
 
-The first command prints `OFFLINE_DEMO_PASS`; the status view shows A, B, and JOIN as `accepted`. Use a new directory for each run. This demo uses local Python child processes and needs no agent account. To run with a real client, configure and verify its adapter and credentials first; the demo does not establish live-client compatibility.
+The demo builds a small task graph: independent tasks **A** and **B** become eligible together on two fake workers (local Python child processes). **JOIN** becomes eligible only after both are reviewed and accepted. The first command prints `OFFLINE_DEMO_PASS`; the status view shows A, B, and JOIN as `accepted`. Use a new directory for each run.
 
-## Features
+The demo checks scheduling, one-time dispatch, delivery validation, and review gates. It does not exercise a background polling loop, direct notifications, or compatibility with a real client (Codex, Claude, ...).
 
-- **Editable roles:** change role names, count, responsibilities, permissions, and deliverables.
-- **Editable architecture rules:** define project constraints, allowed changes, and admission stages in configuration.
-- **Harness-independent roles:** any role can use Codex, Pi, Claude, dsh-tui, Grok, or another tool.
-- **Configurable automation:** choose polling intervals, timeouts, completion criteria, reviewer, follow-up actions, and stop conditions.
-- **Low-cost monitoring:** query status while work runs instead of repeatedly asking a model to read conversations.
-- **Reviewer notification:** verify task identity and delivery, then send one message so the reviewer can continue an authorized plan.
-- **Duplicate protection:** use unique task IDs/nonces, fresh completion sequences, monitor locks, and notification-attempt records.
-- **Independent acceptance:** review_ready means delivery is ready for review, not that the task or design passed.
-- **English defaults:** the Skill entry point, UI metadata, and English documentation are ASCII-only; Chinese translations remain available.
-- **Verified role bindings and handoffs:** select actual sessions, version bindings, defer busy Worker replacement, and retire stale controllers.
-- **Durable review inbox:** persist completion before notification; track acknowledgment and hash-bound REVIEW.md separately.
-- **Conversation policies:** inbox-only by default, with exact thread metadata or an explicitly dedicated main window for direct prompts.
-- **Durable dispatch and DAGs:** reserve before sending; enforce workspace/resource claims, concurrency limits, reviewed dependencies and fan-in joins.
-- **Recovery and status:** persisted monitor checkpoints, capped query backoff, event replay, and read-only task inspection.
+## Key concepts
 
-## Default roles
+| Term | Meaning |
+|---|---|
+| Role | A job in the workflow, such as Planner or Executor. Names, count, and permissions are editable. |
+| Harness | The actual agent client running a role: Codex, Claude, Pi, dsh-tui, Grok, and so on. |
+| Adapter | How the scripts talk to a harness: `herdr`, `command` (a verified CLI/API bridge), or `receipt` (status files written by a one-shot job). |
+| Herdr | An optional terminal multiplexer for agent sessions. A **pane** is one Herdr terminal split. Not required. |
+| Controller | The single active binding that can dispatch tasks; usually the Planner. A separately bound reviewer can record reviews. |
+| Binding | A verified record that "role X is this exact session". Bindings are versioned; an old version loses authority after a switch. |
+| State directory | A private SQLite ledger of bindings, tasks, events, and reviews. Created by `init`. |
+| Task ID / nonce | Unique values per task that bind the dispatch message, request, and completion evidence; stale results are rejected. |
+| Completion sequence | A counter reported by the worker. Only an increase after dispatch counts as fresh completion. |
+| review_ready | Delivery files are present and valid. It means "ready to review", not "accepted". |
+| Inbox | Where completion events wait. By default the reviewer is not prompted directly; it reads the inbox. |
 
-| Role | Responsibilities | Typical output |
-|---|---|---|
-| Planner / Engineering Lead | Analysis, design, task decomposition, evidence review, next decisions | Plans, tasks, reviews, decisions |
-| Executor | Implementation, experiments, tests, measurement, first-difference diagnosis | RESULT / EVIDENCE / HANDOFF, changes, logs |
-| Paper Lead | Research problem, literature gap, novelty, argument, experimental sufficiency | Claim-evidence analysis, evidence requests, manuscripts |
+## Who runs what?
 
-These are templates. Remove Paper Lead, add Reviewer, or combine planning with implementation while retaining independent acceptance. Roles are separate from harnesses.
-
-```mermaid
-flowchart LR
-    U[User goal and authorization] --> P[Planning role: task specification]
-    P --> E[Execution role: implement and measure]
-    E --> M[Script: status and delivery checks]
-    M --> N[One completion or exception notice]
-    N --> R[Review role: independent acceptance]
-    R -->|Accept or scoped repair| P
-    R --> L[Optional paper or product review]
-```
+| Step | Usually done by |
+|---|---|
+| Edit `workflow.json`, give authorization | You |
+| Open agent windows and start the clients | You |
+| Load the Skill into the controller agent | You |
+| `init`, `bind`, writing tasks, dispatch, review commands | The controller agent, following `SKILL.md` (or you, manually) |
+| Polling status and recording one completion event | `monitor_task.py`, running in the background |
 
 ## Installation
 
-Requires Python **3.10+**. The scripts use only the standard library. Live integration also requires a verified automation interface for the selected client. Herdr is optional.
+Clone the repository into your client's Skill directory. Examples:
 
-### Codex Skill
-
-Clone this public repository into your Skill directory:
-
-```powershell
+```sh
+# Codex
 git clone https://github.com/cgy0071/agent-workflow-orchestrator.git "$HOME/.codex/skills/agent-workflow-orchestrator"
+# Claude Code
+git clone https://github.com/cgy0071/agent-workflow-orchestrator.git "$HOME/.claude/skills/agent-workflow-orchestrator"
 ```
 
-Use your client's actual Skill directory if different. Refresh or reopen the session, then invoke:
+For other clients (Pi, dsh-tui, Grok, ...), load `SKILL.md` through the client's own Skill or context mechanism, or paste it as instructions. Skill directories and flags depend on the client version. This repository never changes client configuration, credentials, or model settings.
+
+In Codex, ask the controller agent to use `$agent-workflow-orchestrator`. In Claude Code, invoke `/agent-workflow-orchestrator`. Then give it the goal, `workflow.json`, and the scope of your authorization.
 
 ```text
-Use $agent-workflow-orchestrator.
 Read workflow.json and follow its roles and stages for the current goal.
 You may dispatch, monitor, review, and continue tasks within the authorized scope.
 ```
 
-### Pi / Claude / dsh-tui / Grok
+## First real workflow: one Planner, one Executor
 
-Load SKILL.md through the client's supported Skill/context mechanism, or provide it as workflow instructions together with the configuration path. Discovery directories and CLI flags depend on the installed client version. This repository does not change client configuration, authentication, or model settings.
+The steps below show the order of operations. Run commands from the repository root; replace every `/abs/...`, `INSTANCE`, `TASK-ID`, and `EVENT_ID` with actual values. Use absolute paths for files outside the repository. Full commands and options are in [Initialization, Window Selection, and Handoffs](references/setup-and-switching.md).
 
-## Quick start
+### 1. Describe the team (`workflow.json`)
 
-### 1. Configure roles and workflow
+Copy [examples/workflow.json](examples/workflow.json) and edit roles, goal, and automation. Delete `paper-lead` if you do not need a research reviewer. A minimal shape:
 
-Copy and edit [examples/workflow.json](examples/workflow.json):
+```sh
+cp examples/workflow.json workflow.json
+```
 
 ```json
 {
+  "goal": "Add pagination to the /users endpoint",
   "roles": {
     "planner": {"harness": "claude", "responsibilities": ["plan", "review"]},
-    "executor": {"harness": "codex", "responsibilities": ["implement", "measure"]},
-    "paper-lead": {"harness": "pi", "responsibilities": ["research", "write"]}
+    "executor": {"harness": "codex", "responsibilities": ["implement", "test"]}
   },
-  "architecture": {"constraints": ["retain public interfaces"]},
-  "workflow": {
-    "reviewer_role": "planner",
-    "transitions": {"accept": "next_task_within_authorization", "repair": "new_scoped_repair_task"}
-  },
-  "automation": {"continuous_execution_authorized": true, "interval_seconds": 300}
+  "workflow": {"dispatch_role": "planner", "execution_role": "executor", "reviewer_role": "planner"},
+  "automation": {"continuous_execution_authorized": false, "interval_seconds": 300}
 }
 ```
 
-Agents read this as workflow guidance. Configuration does not grant user permission. The monitor consumes a separate per-task request.json; it does not execute the entire workflow graph itself.
+`harness` is only a label. It does not open or select a window.
 
-### 2. Select the actual harness and window
+### 2. Open the agents and describe how to reach them
 
-Open or select a client window/session, enter the workspace, and start the harness. Verify its runtime settings and identity before binding the role. Existing available sessions can be reused after verification. The included bind and preflight commands do not launch clients.
-
-In this documentation, **pane** means a Herdr terminal split. The pane creation commands are Herdr-specific examples; other clients use their own verified window/session interfaces and identifiers.
-
-Read [Initialization, Window Selection, and Handoffs](references/setup-and-switching.md). It contains complete commands for initialization, live identity checks, bindings, switching, acknowledgment, review, and recovery. A role's `harness` label does not select a window. Save a verified adapter specification for each role and initialize a new state directory:
+Open one window/session per role, start the client, and pick the model. This command extracts starter binding specs from the example request; replace every placeholder with verified live identity and adapter settings before binding:
 
 ```sh
-python scripts/workflow_control.py --state /absolute/workflow-state init --config workflow.json
-python scripts/workflow_control.py --state /absolute/workflow-state bind --role planner --spec planner.json --mode controller --policy inbox_only
-python scripts/workflow_control.py --state /absolute/workflow-state bind --role executor --spec worker.json --mode worker
+python -B -c "import json; r=json.load(open('examples/request.herdr.json')); r['worker'].pop('baseline_completion_seq'); json.dump(r['worker'],open('worker.json','w')); json.dump(r['reviewer'],open('planner.json','w'))"
 ```
 
-Record the returned controller instance/version. Side conversations are advisory-only. Without real thread/branch metadata, the package cannot automatically identify them; use inbox-only or declare a dedicated main window. Context declarations are trusted operator/adapter inputs, not authentication.
+`worker.json` comes from `worker`; `planner.json` comes from `reviewer`. The example uses optional Herdr. Prefer a verified native command bridge when available; its fields and the one-shot receipt alternative are in [harness-adapters.md](references/harness-adapters.md). A receipt worker cannot receive a scheduler dispatch; launch its job through the documented runner instead.
 
-### 3. Specify and dispatch a task
+### 3. Create state and bind roles
 
-Use [task-and-review.md](references/task-and-review.md) to define the objective, directory, scope, inputs, acceptance, delivery, and stop conditions. Discover and verify the Worker, check active tasks and directory ownership, record the submission attempt, and submit once. Reuse an existing scheduler and shared ledger when available.
+```sh
+python scripts/workflow_control.py --state /abs/state init --config workflow.json
+python scripts/workflow_control.py --state /abs/state bind --role planner --spec planner.json --mode controller --policy inbox_only
+python scripts/workflow_control.py --state /abs/state bind --role executor --spec worker.json --mode worker
+```
 
-Planner need not run in Codex, and Executor need not run in Pi. Record nicknames, models, and actual clients separately. Grok, for example, may be a standalone harness or a model inside Pi.
+`bind` queries the live session and refuses a mismatched identity. Save the controller `instance_id` and `version` it prints; later commands pass them as `--actor` and `--version`.
 
-### 4. Configure a monitoring request
+### 4. Write the task and its request
 
-Copy [examples/request.herdr.json](examples/request.herdr.json) into a **new task directory**. Fill in the real session, identity, completion sequence, artifacts, and authorization. Replace placeholders and set dispatch_confirmed to true only after execution is confirmed.
+Start the task request in a new task directory:
 
-| Worker adapter | Status source | Use case |
+```sh
+python -B -c "from pathlib import Path; Path('/abs/task').mkdir(parents=True, exist_ok=False)"
+cp examples/request.herdr.json /abs/task/request.json
+```
+
+- `task.md`: what the Executor should do. Include the exact task ID and nonce; use the [task template](references/task-and-review.md).
+- `request.json`: what the monitor should check. Replace the example's `worker` and `reviewer` objects with the exact bound specs; add the Worker's observed `baseline_completion_seq`. Set a unique `task_id` and `nonce`, actual `cwd`, expected delivery files and marker, and `workflow_state` pointing at your state directory. Keep `dispatch_confirmed: false` until reconciliation.
+
+Validate it without contacting any agent, then do a read-only identity check:
+
+```sh
+python scripts/monitor_task.py --request /abs/task/request.json --check
+python scripts/monitor_task.py --request /abs/task/request.json --preflight
+```
+
+### 5. Dispatch once
+
+Set `authorization.dispatch_worker` to `true` with a real authorization `source`. Set `authorization.notify_reviewer` to `true` only if you authorize direct prompting when the reviewer policy permits it. Ensure `task.md` contains the same task ID and nonce as `request.json`, then:
+
+```sh
+python scripts/workflow_scheduler.py --state /abs/state dispatch --request /abs/task/request.json --message-file task.md --actor INSTANCE --version 1 --context main
+```
+
+After you confirm the Executor actually started, write `EXECUTION.md` (task ID, nonce, `Outcome: running`, and what you observed), then produce a confirmed request:
+
+```sh
+python scripts/workflow_scheduler.py --state /abs/state reconcile --task TASK-ID --outcome running --evidence /abs/task/EXECUTION.md --request-out /abs/task/confirmed.json --actor INSTANCE --version 1 --context main
+```
+
+If you sent the task through another interface instead, use `register-task` as described in the setup guide. Details: [scheduling.md](references/scheduling.md).
+
+### 6. Monitor
+
+```sh
+python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
+```
+
+The monitor polls every 300 seconds by default and runs until completion or an exception. There is no default overall time limit, but each status query has a timeout. With `workflow_state`, `--notify` records an inbox event even when `authorization.notify_reviewer` is false. With `inbox_only`, it never prompts the reviewer directly. Background startup and the full status contract: [monitoring.md](references/monitoring.md).
+
+### 7. Review and continue
+
+```sh
+python scripts/workflow_control.py --state /abs/state inbox
+python scripts/workflow_control.py --state /abs/state ack --event EVENT_ID --actor INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /abs/state review --event EVENT_ID --file /abs/task/REVIEW.md --verdict accept --actor INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /abs/state next-check --event EVENT_ID --actor INSTANCE --version 1 --context main
+```
+
+The reviewer reads the raw evidence and writes `REVIEW.md` with the task ID, nonce, and verdict. `next-check` returns a `parent_review` record; put it in the next task's request to link the follow-up. Without `continuous_execution_authorized`, the controller stops here and reports back to you.
+
+At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action.
+
+## Configuration files at a glance
+
+| File | Contains | Read by |
 |---|---|---|
-| herdr | Native agent get/read | Sessions that Herdr can identify reliably |
-| command | Verified command returning canonical JSON | An official CLI/API bridge |
-| receipt | Task-bound job status files | A harness with verified one-shot noninteractive execution |
+| `workflow.json` | Roles, architecture constraints, stages, transitions, automation policy | Agents (as guidance) and `init` |
+| `planner.json`, `worker.json` | How to reach each role's live session | `bind` |
+| `task.md` | Objective, directory, allowed changes, acceptance, stop conditions | Executor and reviewer |
+| `request.json` | One task's identities, delivery checks, polling, notification | Monitor and scheduler |
 
-Reviewers support herdr or command notification with identity checks. See [harness-adapters.md](references/harness-adapters.md) and [monitoring.md](references/monitoring.md) for the complete contract.
+## Safety model and limits
 
-### 5. Start monitoring
+- **Configuration is not permission.** Dispatch, notification, and continuous execution each need explicit authorization from you. A notification is not new authorization.
+- **Done means reviewed.** An idle terminal, a zero exit code, or `review_ready` never counts as acceptance. Only a recorded review does.
+- **No blind retries.** Each task is sent once. If a send or notification is uncertain, it is recorded and left for inspection.
+- **One controller.** Old bindings lose authority after a switch. Side conversations can advise but cannot acknowledge, review, or dispatch.
+- **Stopping the monitor does not stop the worker.** Cancel work separately.
+- **Context flags are trusted input.** `--context main` is declared by the operator or a bridge; it is not authentication.
+- **Live compatibility is not assumed.** Verify each real client's identity, status, and delivery interface the first time you use it. If an interface cannot be verified, report `ADAPTER_NOT_VERIFIED` instead of guessing.
+- Keep credentials out of tasks, command arguments, and the repository.
 
-```sh
-python scripts/monitor_task.py --request /absolute/task/request.json --check
-python scripts/monitor_task.py --request /absolute/task/request.json --preflight
-```
+## More guides
 
-For ledger-backed operation, add `workflow_state` to the request. After dispatch is confirmed, register its final contents before monitoring:
+| Topic | Guide |
+|---|---|
+| Default roles and how to change them | [roles.md](references/roles.md) |
+| Setup, bindings, conversation policies, switching windows, recovery | [setup-and-switching.md](references/setup-and-switching.md) |
+| Adapter contracts (Herdr, command, receipt) | [harness-adapters.md](references/harness-adapters.md) |
+| Monitor behavior, outcomes, background runs | [monitoring.md](references/monitoring.md) |
+| Single-attempt dispatch, parallel DAGs, resource claims | [scheduling.md](references/scheduling.md) |
+| Task states and events | [task-state-machine.md](references/task-state-machine.md) |
+| Task and review templates | [task-and-review.md](references/task-and-review.md) |
+| Versioned client capability evidence | [capabilities.md](references/capabilities.md) |
 
-```sh
-python scripts/workflow_control.py --state /absolute/workflow-state register-task --request /absolute/task/request.json --actor CONTROLLER_INSTANCE --version 1 --context main
-python scripts/monitor_task.py --request /absolute/task/request.json --notify
-```
+**Without Herdr:** a client with a verified one-shot (non-interactive) command can run through `scripts/run_job.py --job job.json` (see [examples/job.json](examples/job.json)). The runner records status, the real exit code, and `output.log` for the `receipt` adapter. Interactive TUIs need a verified bridge instead.
 
---check validates local structure without contacting agents; --preflight queries identities and the pre-dispatch completion sequence without sending. --notify requires authorization.notify_reviewer=true and a nonempty source. Direct prompts additionally require a verified context policy; the default persists an inbox event. See [monitoring.md](references/monitoring.md) for background startup.
-
-The default polling interval is **300 seconds**. Overall monitoring continues until completion or an exception unless a limit is configured. There is no default one-hour cap; each external command still has a finite timeout.
-
-### 6. Review and continue
-
-After fresh completion and valid delivery, the monitor records artifact hashes and persists an event before optional notification. The registered main reviewer acknowledges the event, independently checks raw evidence, and records a hash-bound REVIEW.md. The controller runs next-check and includes its parent_review record in a new task request. Full commands are in the setup guide. A notification is not new user authorization.
-
-Missing delivery, blocked states, changed identities, failures, and uncertain notification are separate outcomes. An idle terminal or a zero exit code does not establish task acceptance.
-
-## Durable dispatch and reviewed DAGs
-
-Use [the scheduling guide](references/scheduling.md) for dispatch, execution confirmation, migration, resource quotas, and DAG load/tick commands. Requests require explicit dispatch authorization. Each tick makes one finite scheduling pass; reviews and execution confirmation remain explicit. Versioned capability evidence follows [this contract](references/capabilities.md).
-
-```sh
-python scripts/workflow_control.py --state /absolute/workflow-state status
-python scripts/workflow_control.py --state /absolute/workflow-state inspect --task TASK-ID
-python -B scripts/demo_scheduler.py --directory runtime/new-demo
-```
-
-The demo runs real local Python child processes as fixtures and records A/B -> JOIN with fixture reviews. It contacts no providers. Production client capabilities remain version-specific and require actual integration evidence.
-
-## One-shot CLI jobs
-
-Task-specific evidence paths can be generated with `workflow_scheduler.py
-prepare-dag`. `workflow_control.py --state STATE status --summary --format text`
-shows adapter-neutral next roles/actions and observation-age warnings.
-
-Without Herdr, supply a verified one-shot command using [examples/job.json](examples/job.json):
-
-```sh
-python scripts/run_job.py --job /absolute/job.json
-```
-
-The runner uses an argument array and records status, the real exit code, and output.log for the receipt adapter. It does not guess provider arguments or treat an interactive TUI as a one-shot job. A TUI without reliable lifecycle events needs a verified bridge; until then, report ADAPTER_NOT_VERIFIED.
-
-## Configuration layers
-
-| Layer | Editable content | Consumer |
-|---|---|---|
-| workflow.json | Roles, architecture, stages, transitions, authorization scope | Collaborating agents |
-| task.md | Objective, directory, inputs, acceptance, stop conditions | Executor and reviewer |
-| request.json | Live identities, adapters, delivery checks, polling, notification | Monitor script |
-
-Workers cannot expand their authorization by replacing task identities or configuration. Keep credentials out of tasks, argv, and the repository. STOP_MONITOR stops only monitoring; cancel actual work through the authorized scheduler.
-
-## Languages and encoding
-
-- English defaults: README.md, SKILL.md, agents/openai.yaml, and references/*.md without the zh-CN suffix. These files use ASCII characters only and remain valid UTF-8.
-- Chinese translations: README.zh-CN.md, SKILL.zh-CN.md, and references/*.zh-CN.md. They use UTF-8 without BOM.
-- English and Chinese documents have language-switch links. Examples and runtime scripts are shared.
-- Git normalizes text to LF. Encoding checks detect invalid UTF-8, replacement characters, lossy question-mark sequences, common mojibake, and unexpected non-ASCII in English entry points.
-
-If changing documentation languages, adjust the checker using --expect-cjk and --expect-ascii. An empty option list disables that specific language check.
-
-## Tests and verified scope
+## Development
 
 ```sh
 python -B -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_encoding.py
 ```
 
-Offline tests cover the five harness labels, no conversation reads while working, stale completion rejection, changed identity, missing/empty delivery, wrong nonce, missing marker, blocked/failed states, path escape, notification deduplication, uncertain delivery, and a real local child-process/receipt/monitor chain. Tests contact no live agents and send no real notifications.
+Tests are offline: they use fake transports and local child processes, and never contact real agents or send notifications. CI runs on Windows and Linux with Python 3.10 and 3.12.
 
-Additional tests cover strict configuration, bounded status retries, independent delivery grace, preflight, deferred handoffs, stale controllers, declared side-context rejection, pending-event recovery, and review hash gates. CI runs on Windows/Linux with Python 3.10/3.12.
+English entry points (`README.md`, `SKILL.md`, `agents/openai.yaml`, `references/*.md`) must be ASCII-only. Chinese translations live in `*.zh-CN.md`; update both languages together. Text is UTF-8 without BOM with LF line endings.
 
-These tests validate contracts and automation behavior, not live integration with every client version. Verify the actual client's identity, status, and precise session-delivery interface at first use. Reuse already verified adapters.
-
-## Files
+## Repository layout
 
 ```text
-SKILL.md / SKILL.zh-CN.md          Skill instructions
-README.md / README.zh-CN.md        Setup and usage
-agents/openai.yaml                English Skill UI metadata
-references/                       English contracts and Chinese translations
-examples/                         Editable workflow and request examples
-scripts/monitor_task.py            Status checks and one-time notification
-scripts/workflow_control.py        Bindings, inbox, handoffs, and review gates
-scripts/workflow_scheduler.py      Durable dispatch, DAG ticks, claims, and status
-scripts/demo_scheduler.py          Reproducible local subprocess DAG fixture
-scripts/run_job.py                 One-shot CLI job receipts
-scripts/test_*.py                  Offline behavioral and integration tests
-scripts/check_encoding.py          UTF-8 and language integrity checks
+SKILL.md / SKILL.zh-CN.md          Instructions loaded by the agent
+README.md / README.zh-CN.md        This guide
+agents/openai.yaml                 Skill UI metadata
+references/                        Detailed guides and contracts
+examples/                          workflow.json, request.herdr.json, dag.json, job.json
+scripts/workflow_control.py        State, bindings, inbox, review gates, status
+scripts/workflow_scheduler.py      Dispatch, DAGs, resource claims
+scripts/monitor_task.py            Status polling and one-time notification
+scripts/run_job.py                 One-shot CLI jobs with receipts
+scripts/demo_scheduler.py          Offline demo
+scripts/check_encoding.py          Encoding and language checks
+scripts/test_*.py                  Offline tests
 ```

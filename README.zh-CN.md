@@ -2,233 +2,256 @@
 
 [English](README.md) | Chinese
 
-默认 README、Skill 入口、界面元数据和英文参考文档现为纯 ASCII 英文。中文版本以 `.zh-CN.md` 保存，配置示例和运行脚本由两种语言共用。
+让多个 AI 编程 Agent 像团队一样协作：一个负责规划和审核，一个负责实现，中间由一个小型 Python 脚本盯着进度，你不必守在各个终端前。
 
-可配置的多角色 Agent 工作流 Skill：**任务规划 → 执行 → 脚本监控 → 完成通知 → 独立审核 → 继续派工**。
+## 解决什么问题？
 
-独立于具体工程、模型和客户端。默认提供 **Planner / Executor / Paper Lead**，也可替换为软件开发、产品交付、研究实验等角色组合。
+没有这个工具时的典型情况：Claude 在一个窗口里做规划，Codex 在另一个窗口里写代码，你要来回切换、复制结果、判断任务是否“真的”完成，再决定下一步发什么。
 
-## 直接运行本地演示
+使用本工具后：
 
-安装 Python 3.10+ 后，在仓库根目录执行：
+1. **Planner** Agent 写好任务（目标、范围、验收标准），向 **Executor** Agent 只派发一次。
+2. 脚本每 5 分钟查询一次 Executor 的*状态*。它不会让模型反复重读对话，所以监控几乎不消耗成本。
+3. Executor 完成且约定的交付文件（如 `RESULT.md`、`HANDOFF.md`）通过校验后，脚本为审核者记录一次完成事件；直接发送提示是可选的。
+4. 审核者检查原始证据，记录 `accept`、`repair` 或 `reject`；如果你已授权，再派发下一个任务。
+
+仓库由两部分组成：
+
+- **Skill**（`SKILL.md`）：Agent 加载的指令，告诉它如何规划、派发、审核和继续。
+- **脚本**（`scripts/`）：仅依赖标准库的 Python 工具，负责状态、派发、监控和审核关卡。通常由担任控制者的 Agent 运行，你也可以手动运行。
+
+```mermaid
+flowchart LR
+    U[你：目标与授权] --> P[Planner：编写任务]
+    P --> E[Executor：实现与测试]
+    E --> M[脚本：轮询状态、检查文件]
+    M --> N[一条收件箱事件]
+    N --> R[审核者：接受 / 返修 / 拒绝]
+    R -->|下一个或返修任务| P
+```
+
+角色与工具无关。Planner 可以运行在 Codex 中，Executor 可以运行在 Claude 中，任意组合均可。
+
+## 30 秒试用
+
+需要 Python 3.10+，不需要 Agent 账号或网络。在仓库根目录执行：
 
 ```sh
 python -B scripts/demo_scheduler.py --directory runtime/first-run
 python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
 ```
 
-第一条命令输出 `OFFLINE_DEMO_PASS`，状态视图中 A、B、JOIN 均为 `accepted`。
-每次运行使用新目录。演示只启动本地 Python 子进程，不需要 Agent 账号；接入真实客户端前，
-需配置并核验其适配器和凭证。本地演示不证明真实客户端兼容。
+演示会构建一个小型任务图：独立的任务 **A** 和 **B** 同时具备派发条件，交给两个模拟 Worker（本地 Python 子进程）；**JOIN** 要等两者都审核通过后才具备派发条件。第一条命令输出 `OFFLINE_DEMO_PASS`；状态视图中 A、B、JOIN 均为 `accepted`。每次运行请使用新目录。
 
-## 功能
+演示检查调度、单次派发、交付校验和审核关卡；它没有运行后台轮询循环、直接通知，也不能证明某个真实客户端（Codex、Claude 等）兼容。
 
-- **可改角色**：调整角色名称、数量、职责、权限及交付物，不将角色绑定到模型。
-- **可改架构约束**：在配置中定义项目约束、允许的改动和准入阶段，不内置某个工程规则。
-- **跨 harness**：任一角色可使用 Codex、Pi、Claude、dsh-tui、Grok 或其他工具。
-- **可改自动化策略**：轮询间隔、超时、完成判据、审核者、审核后动作和停止条件均可配置。
-- **低成本监控**：工作期间只查状态，不反复用模型读取完整对话。
-- **完成后唤醒审核者**：核验身份、任务和交付，发送一次通知，由审核角色继续已有授权计划。
-- **防重复**：唯一任务/nonce、新完成序列、监控锁和通知尝试记录；不把 idle 当成功，不盲目重发。
-- **独立证据审核**：监控的 `review_ready` 只代表收到交付；是否通过由配置指定的角色判断。
-- **身份绑定与交接**：选择实际会话、记录绑定版本、延后切换忙碌执行者，旧控制器自动失效。
-- **持久化审核收件箱**：先保存完成事件，再尝试通知；确认收到和审核通过分别登记，REVIEW.md 与哈希绑定。
-- **会话策略**：默认只写收件箱；真实分支元数据或用户声明的专用主窗口才允许直接通知。
-- **持久派工与 DAG**：发送前记录尝试，约束目录／资源、并发数量、经过审核的依赖及汇合。
-- **恢复与查询**：保存监控检查点、有限指数退避、补记完成事件及只读任务状态。
+## 核心概念
 
-## 默认分工
+| 术语 | 含义 |
+|---|---|
+| 角色（Role） | 工作流中的一个职位，例如 Planner 或 Executor。名称、数量和权限均可修改。 |
+| Harness | 实际运行某个角色的 Agent 客户端：Codex、Claude、Pi、dsh-tui、Grok 等。 |
+| 适配器（Adapter） | 脚本与 harness 通信的方式：`herdr`、`command`（经核验的 CLI/API 桥接）或 `receipt`（一次性作业写出的状态文件）。 |
+| Herdr | 可选的 Agent 会话终端复用工具。**pane** 指 Herdr 的一个终端分屏。不是必需的。 |
+| 控制者（Controller） | 唯一持有派发权限的有效绑定，通常是 Planner；单独绑定的审核者也可登记审核。 |
+| 绑定（Binding） | 经核验的“角色 X 就是这个会话”的记录。绑定有版本号，切换后旧版本失去权限。 |
+| 状态目录 | 私有的 SQLite 账本，保存绑定、任务、事件和审核记录，由 `init` 创建。 |
+| 任务 ID / nonce | 每个任务唯一的值，用来关联派发消息、请求和完成证据；过期结果会被拒绝。 |
+| 完成序列 | Worker 报告的计数器。只有派发之后出现的递增才算新的完成。 |
+| review_ready | 交付文件存在且有效，表示“可以审核”，不表示“已通过”。 |
+| 收件箱（Inbox） | 完成事件等待处理的地方。默认不直接提示审核者，由审核者读取收件箱。 |
 
-| 角色 | 主要工作 | 默认交付 |
-|---|---|---|
-| Planner / Engineering Lead | 分析、设计、任务拆分、审核、后续决策 | 方案、任务书、审核和决策 |
-| Executor | 实现、实验、测试、测量和首差定位 | RESULT / EVIDENCE / HANDOFF、变更和日志 |
-| Paper Lead | 科学问题、相关工作、创新判断、论证和稿件 | claim–evidence、补证请求、论文稿 |
+## 谁来执行哪一步？
 
-这些是模板，不是固定组织结构。可以删去 Paper Lead、加入 Reviewer，或合并规划与实现，同时保留独立验收。角色职责与使用哪个 harness 无关。
-
-```mermaid
-flowchart LR
-    U[用户目标与授权] --> P[规划角色：任务书]
-    P --> E[执行角色：实现与测量]
-    E --> M[脚本：状态与交付检测]
-    M --> N[一次完成或异常通知]
-    N --> R[审核角色：独立验收]
-    R -->|接收或窄范围返修| P
-    R --> L[可选：论文或产品评审]
-```
+| 步骤 | 通常由谁完成 |
+|---|---|
+| 编辑 `workflow.json`、给出授权 | 你 |
+| 打开 Agent 窗口并启动客户端 | 你 |
+| 在控制者 Agent 中加载 Skill | 你 |
+| `init`、`bind`、编写任务、派发、审核命令 | 控制者 Agent 按 `SKILL.md` 执行（也可由你手动执行） |
+| 轮询状态并记录一次完成事件 | 在后台运行的 `monitor_task.py` |
 
 ## 安装
 
-需要 Python **3.10+**，脚本只用标准库。实际 Agent 接入还需要相应客户端及其已核验的自动化接口。Herdr 是可选项，不是角色协议的依赖。
+把仓库克隆到客户端的 Skill 目录，例如：
 
-### Codex Skill
-
-将公开仓库克隆到 Skill 目录：
-
-```powershell
-gh repo clone cgy0071/agent-workflow-orchestrator "$HOME/.codex/skills/agent-workflow-orchestrator"
+```sh
+# Codex
+git clone https://github.com/cgy0071/agent-workflow-orchestrator.git "$HOME/.codex/skills/agent-workflow-orchestrator"
+# Claude Code
+git clone https://github.com/cgy0071/agent-workflow-orchestrator.git "$HOME/.claude/skills/agent-workflow-orchestrator"
 ```
 
-也可放到当前客户端实际使用的 Skill 目录。刷新/重新打开会话后调用：
+其他客户端（Pi、dsh-tui、Grok 等）请通过各自的 Skill 或上下文机制加载 `SKILL.md`，或把它作为指令粘贴进去。Skill 目录和命令行参数取决于客户端版本。本仓库不会修改客户端配置、凭证或模型设置。
+
+在 Codex 中让控制者 Agent 使用 `$agent-workflow-orchestrator`；在 Claude Code 中调用 `/agent-workflow-orchestrator`。随后提供目标、`workflow.json` 和你的授权范围。
 
 ```text
-使用 $agent-workflow-orchestrator。
-按 workflow.json 的角色和阶段推进当前目标。
-允许在该目标及已给定范围内自动派工、监控、审核和继续执行。
+Read workflow.json and follow its roles and stages for the current goal.
+You may dispatch, monitor, review, and continue tasks within the authorized scope.
 ```
 
-### Pi / Claude / dsh-tui / Grok
+## 第一个真实工作流：一个 Planner，一个 Executor
 
-通过该客户端支持的 Skill/上下文加载机制载入 `SKILL.md`，或将其作为会话工作流指令，并提供配置路径。各客户端的自动发现目录和 CLI 参数可能不同，以实际版本为准；此仓库不改动客户端配置、认证或模型设置。
+以下步骤展示操作顺序。请在仓库根目录运行命令，把所有 `/abs/...`、`INSTANCE`、`TASK-ID` 和 `EVENT_ID` 换成真实值；仓库外的文件使用绝对路径。完整命令和选项见[初始化、窗口选择与交接](references/setup-and-switching.zh-CN.md)。
 
-## 快速使用
+### 1. 描述团队（`workflow.json`）
 
-### 1. 配置角色与流程
+复制 [examples/workflow.json](examples/workflow.json)，修改角色、目标和自动化策略。不需要研究评审时删除 `paper-lead`。最小结构：
 
-复制并修改 [`examples/workflow.json`](examples/workflow.json)：
+```sh
+cp examples/workflow.json workflow.json
+```
 
 ```json
 {
+  "goal": "Add pagination to the /users endpoint",
   "roles": {
     "planner": {"harness": "claude", "responsibilities": ["plan", "review"]},
-    "executor": {"harness": "codex", "responsibilities": ["implement", "measure"]},
-    "paper-lead": {"harness": "pi", "responsibilities": ["research", "write"]}
+    "executor": {"harness": "codex", "responsibilities": ["implement", "test"]}
   },
-  "architecture": {"constraints": ["retain public interfaces"]},
-  "workflow": {
-    "reviewer_role": "planner",
-    "transitions": {"accept": "next_task_within_authorization", "repair": "new_scoped_repair_task"}
-  },
-  "automation": {"continuous_execution_authorized": true, "interval_seconds": 300}
+  "workflow": {"dispatch_role": "planner", "execution_role": "executor", "reviewer_role": "planner"},
+  "automation": {"continuous_execution_authorized": false, "interval_seconds": 300}
 }
 ```
 
-配置是给 Agent 读取的工作流规则；它不会自行产生用户授权。监控脚本读取的是下面每项任务独立的 request.json，而不是自动解释整个工作流图。
+`harness` 只是标签，不会打开或选择窗口。
 
-### 2. 选择实际 harness 和窗口
+### 2. 打开 Agent，并描述如何连接它们
 
-打开或选择客户端窗口／会话，进入工作目录并启动 harness。绑定角色前核验实际运行配置与会话身份；已有可用会话核验后也可复用。仓库中的 bind 和 preflight 命令不会启动客户端。
-
-本文中的 **pane 特指 Herdr 的终端分屏单元**。pane 创建命令是 Herdr 专用示例；其他客户端使用各自已验证的窗口或会话接口及标识。
-
-完整操作见 [初始化、窗口选择与会话切换](references/setup-and-switching.zh-CN.md)，包括身份核验、初始化、绑定、切换、确认、审核和恢复命令。角色中的 `harness` 名称不会自动选择窗口，需要为每个角色保存实际核验的适配器配置。
+为每个角色打开一个窗口/会话，启动客户端并选择模型。以下命令从示例请求中提取初始绑定规格；绑定前须把所有占位符改成核验过的真实身份和适配器配置：
 
 ```sh
-python scripts/workflow_control.py --state /absolute/workflow-state init --config workflow.json
-python scripts/workflow_control.py --state /absolute/workflow-state bind --role planner --spec planner.json --mode controller --policy inbox_only
-python scripts/workflow_control.py --state /absolute/workflow-state bind --role executor --spec worker.json --mode worker
+python -B -c "import json; r=json.load(open('examples/request.herdr.json')); r['worker'].pop('baseline_completion_seq'); json.dump(r['worker'],open('worker.json','w')); json.dump(r['reviewer'],open('planner.json','w'))"
 ```
 
-保存控制器返回的 instance/version。侧对话仅提供建议；客户端不提供真实对话和分支标识时，无法自动可靠识别，应使用收件箱或明确指定专用主窗口。context 是可信操作者/桥接器声明，不是身份认证。
+`worker.json` 来自 `worker`，`planner.json` 来自 `reviewer`。示例使用可选的 Herdr；如果有经核验的原生命令桥接，应优先使用。字段和一次性作业的回执方案见 [harness-adapters.zh-CN.md](references/harness-adapters.zh-CN.md)。回执 Worker 不能接受调度器派发；应按文档使用运行器启动作业。
 
-### 3. 写任务并派发
+### 3. 创建状态并绑定角色
 
-按 [`references/task-and-review.zh-CN.md`](references/task-and-review.zh-CN.md) 写任务：目标、目录、允许改动、输入、验收、交付和停止点。发现并核验 Worker 的真实身份，检查当前任务/目录占用，保存投递记录后单次派发。若已有调度器和共享台账，复用它们。
+```sh
+python scripts/workflow_control.py --state /abs/state init --config workflow.json
+python scripts/workflow_control.py --state /abs/state bind --role planner --spec planner.json --mode controller --policy inbox_only
+python scripts/workflow_control.py --state /abs/state bind --role executor --spec worker.json --mode worker
+```
 
-Planner 不一定是 Codex，Executor 不一定是 Pi。昵称、模型与实际客户端分别记录；例如 Grok 可以是独立 harness，也可以是 Pi 中的模型。
+`bind` 会查询实时会话，身份不符时拒绝绑定。请保存它输出的控制者 `instance_id` 和 `version`，后续命令通过 `--actor` 和 `--version` 传入。
 
-### 4. 配置监控请求
+### 4. 编写任务及其请求
 
-从 [`examples/request.herdr.json`](examples/request.herdr.json) 复制到**新的任务目录**，填写实际 session、身份、完成序列、交付与授权。默认示例不能直接投递，必须替换占位值，并在确认执行已开始后设置 `dispatch_confirmed: true`。
+先在新的任务目录中建立请求：
 
-监控支持三类 Worker：
+```sh
+python -B -c "from pathlib import Path; Path('/abs/task').mkdir(parents=True, exist_ok=False)"
+cp examples/request.herdr.json /abs/task/request.json
+```
 
-| 适配 | 状态来源 | 使用场景 |
+- `task.md`：Executor 要做什么，须包含准确的任务 ID 和 nonce。模板见 [task-and-review.zh-CN.md](references/task-and-review.zh-CN.md)。
+- `request.json`：监控脚本要检查什么。把示例中的 `worker` 和 `reviewer` 对象替换为已绑定的规格，并加入 Worker 实测的 `baseline_completion_seq`。设置唯一的 `task_id` 和 `nonce`、实际的 `cwd`、预期交付文件和标记，让 `workflow_state` 指向状态目录。在对账前保持 `dispatch_confirmed: false`。
+
+先在不联系任何 Agent 的情况下校验，再做只读身份检查：
+
+```sh
+python scripts/monitor_task.py --request /abs/task/request.json --check
+python scripts/monitor_task.py --request /abs/task/request.json --preflight
+```
+
+### 5. 只派发一次
+
+把 `authorization.dispatch_worker` 设为 `true`，填写真实的授权来源 `source`。仅在允许审核者策略下直接发消息时才把 `authorization.notify_reviewer` 设为 `true`。确保 `task.md` 与 `request.json` 中的任务 ID 和 nonce 一致，然后执行：
+
+```sh
+python scripts/workflow_scheduler.py --state /abs/state dispatch --request /abs/task/request.json --message-file task.md --actor INSTANCE --version 1 --context main
+```
+
+确认 Executor 确实已开始执行后，编写 `EXECUTION.md`（任务 ID、nonce、`Outcome: running` 以及你观察到的情况），再生成已确认的请求：
+
+```sh
+python scripts/workflow_scheduler.py --state /abs/state reconcile --task TASK-ID --outcome running --evidence /abs/task/EXECUTION.md --request-out /abs/task/confirmed.json --actor INSTANCE --version 1 --context main
+```
+
+如果任务是通过其他接口发送的，请按设置指南使用 `register-task`。详见 [scheduling.zh-CN.md](references/scheduling.zh-CN.md)。
+
+### 6. 监控
+
+```sh
+python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
+```
+
+监控默认每 300 秒轮询一次，直到完成或出现异常为止。默认没有总时长上限，但每次状态查询都有超时。设置了 `workflow_state` 后，即使 `authorization.notify_reviewer` 为 false，`--notify` 仍会记录收件箱事件；在 `inbox_only` 策略下绝不直接提示审核者。后台启动方式和完整的状态约定见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+
+### 7. 审核并继续
+
+```sh
+python scripts/workflow_control.py --state /abs/state inbox
+python scripts/workflow_control.py --state /abs/state ack --event EVENT_ID --actor INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /abs/state review --event EVENT_ID --file /abs/task/REVIEW.md --verdict accept --actor INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /abs/state next-check --event EVENT_ID --actor INSTANCE --version 1 --context main
+```
+
+审核者阅读原始证据，编写包含任务 ID、nonce 和结论的 `REVIEW.md`。`next-check` 返回一条 `parent_review` 记录，把它写入下一个任务的请求以关联后续任务。未授权 `continuous_execution_authorized` 时，控制者到此停止并向你汇报。
+
+任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。
+
+## 配置文件一览
+
+| 文件 | 内容 | 读取者 |
 |---|---|---|
-| `herdr` | 原生 agent get/read | Herdr 能准确识别的会话 |
-| `command` | 经核验命令返回规范 JSON | 任意官方 CLI/API 外层适配 |
-| `receipt` | 独立作业的任务绑定状态文件 | 任意支持单次非交互运行的 harness |
+| `workflow.json` | 角色、架构约束、阶段、流转、自动化策略 | Agent（作为指引）和 `init` |
+| `planner.json`、`worker.json` | 如何连接各角色的实时会话 | `bind` |
+| `task.md` | 目标、目录、允许的改动、验收、停止条件 | Executor 和审核者 |
+| `request.json` | 单个任务的身份、交付检查、轮询、通知 | 监控脚本和调度器 |
 
-审核者支持 `herdr` 或 `command` 通知，发送前核验目标身份。完整合同见 [`harness-adapters.zh-CN.md`](references/harness-adapters.zh-CN.md) 和 [`monitoring.zh-CN.md`](references/monitoring.zh-CN.md)。
+## 安全模型与限制
 
-### 5. 开始监控
+- **配置不等于授权。** 派发、通知和连续执行都需要你明确授权。通知本身也不构成新的授权。
+- **完成以审核为准。** 终端空闲、退出码为 0 或 `review_ready` 都不算通过，只有登记的审核结论才算。
+- **不盲目重试。** 每个任务只发送一次。发送或通知结果不确定时，会被记录下来留待检查。
+- **只有一个控制者。** 切换后旧绑定失去权限。旁支对话可以提供建议，但不能确认事件、审核或派发。
+- **停止监控不会停止 Worker。** 取消工作需要单独处理。
+- **上下文标志是受信输入。** `--context main` 由操作者或桥接程序声明，不是身份认证。
+- **不预设真实客户端兼容。** 首次使用某个真实客户端时，需核验其身份、状态和投递接口。无法核验时报告 `ADAPTER_NOT_VERIFIED`，不要猜测。
+- 不要把凭证写入任务、命令参数或仓库。
 
-```sh
-python scripts/monitor_task.py --request /absolute/task/request.json --check
-python scripts/monitor_task.py --request /absolute/task/request.json --preflight
-```
+## 更多指南
 
-使用台账时，在请求中填写 `workflow_state`。确认派工开始后，先登记最终请求再监控：
+| 主题 | 指南 |
+|---|---|
+| 默认角色及如何修改 | [roles.zh-CN.md](references/roles.zh-CN.md) |
+| 设置、绑定、会话策略、切换窗口、恢复 | [setup-and-switching.zh-CN.md](references/setup-and-switching.zh-CN.md) |
+| 适配器约定（Herdr、command、receipt） | [harness-adapters.zh-CN.md](references/harness-adapters.zh-CN.md) |
+| 监控行为、结果类型、后台运行 | [monitoring.zh-CN.md](references/monitoring.zh-CN.md) |
+| 单次派发、并行 DAG、资源占用 | [scheduling.zh-CN.md](references/scheduling.zh-CN.md) |
+| 任务状态与事件 | [task-state-machine.zh-CN.md](references/task-state-machine.zh-CN.md) |
+| 任务与审核模板 | [task-and-review.zh-CN.md](references/task-and-review.zh-CN.md) |
+| 带版本的客户端能力证据 | [capabilities.zh-CN.md](references/capabilities.zh-CN.md) |
 
-```sh
-python scripts/workflow_control.py --state /absolute/workflow-state register-task --request /absolute/task/request.json --actor CONTROLLER_INSTANCE --version 1 --context main
-python scripts/monitor_task.py --request /absolute/task/request.json --notify
-```
+**不使用 Herdr 时：** 具备经核验的一次性（非交互）命令的客户端，可以通过 `scripts/run_job.py --job job.json` 运行（参见 [examples/job.json](examples/job.json)）。运行器会记录状态、真实退出码和 `output.log`，供 `receipt` 适配器使用。交互式 TUI 则需要经核验的桥接程序。
 
-`--check` 只检查本地结构；`--preflight` 只读核对身份和派工前完成序号。`--notify` 需要 `authorization.notify_reviewer: true` 及授权来源；直接通知还需要相应会话策略，默认只保存待审核事件。后台启动示例见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
-
-默认每 **300 秒**检查一次，整体持续到完成或异常；不要求模型持续盯着终端，也没有一小时总时限。每次外部命令都有有限超时。
-
-### 6. 自动审核与续派
-
-监控发现新完成及合格交付后，先保存哈希和事件，再按策略通知。已绑定的主审核会话确认事件、独立核查原始证据并登记 REVIEW.md；控制器执行 next-check，在新请求中引用返回的 parent_review。完整命令见初始化指南。新任务使用新 ID/nonce；通知本身不等于新用户授权。
-
-缺交付、blocked、身份变化、执行失败和不确定通知会单独记录。终端空闲或命令退出 0 不等于任务通过。
-
-## 持久派工与审核门控 DAG
-
-[调度指南](references/scheduling.zh-CN.md)给出派工、执行核实、旧库迁移、资源配额及 DAG load/tick 命令。请求需要明确派工授权；每次 tick 有限执行一轮就绪调度，执行核实与审核仍需显式完成。真实客户端版本及原始证据按[能力合同](references/capabilities.zh-CN.md)记录。
-
-```sh
-python scripts/workflow_control.py --state /absolute/workflow-state status
-python scripts/workflow_control.py --state /absolute/workflow-state inspect --task TASK-ID
-python -B scripts/demo_scheduler.py --directory runtime/new-demo
-```
-
-演示以真实本地 Python 子进程作为测试 Worker，执行 A/B -> JOIN，并登记测试审核，不连接供应商。生产客户端兼容性仍需对应版本的实际接入证据。
-
-## 单次 CLI 作业
-
-如果不使用 Herdr，可按 [`examples/job.json`](examples/job.json) 提供经过确认的实际单次命令：
-
-```sh
-python scripts/run_job.py --job /absolute/job.json
-```
-
-脚本以参数数组启动命令，输出状态文件、真实返回码和 output.log；receipt 适配据此监控。它不猜测 Codex、Pi、Claude、dsh-tui 或 Grok 的参数，不用于无单次模式的交互 TUI。交互 TUI 需可靠的状态事件桥接，未验证前标 `ADAPTER_NOT_VERIFIED`。
-
-## 配置分层
-
-`workflow_scheduler.py prepare-dag` 可预先生成任务专属证据路径；
-`workflow_control.py --state STATE status --summary --format text` 显示跨 Adapter
-的下一角色／动作及观测过期提醒。
-
-| 层 | 可改内容 | 谁读取 |
-|---|---|---|
-| workflow.json | 角色、职责、架构、阶段、转移、自动化授权范围 | 协作 Agent |
-| task.md | 本项目标、目录、输入、验收与停止点 | 执行及审核角色 |
-| request.json | 实际身份、适配命令、交付判据、轮询与通知 | 监控脚本 |
-
-任务身份、会话目标与授权不能由 Worker 自行替换来扩大权限。不要把凭证放进任务、argv 或仓库。`STOP_MONITOR` 文件只停止监控；取消正在执行的工作须按调度器授权另行处理。
-
-## 测试与已验证范围
+## 开发
 
 ```sh
 python -B -m unittest discover -s scripts -p "test_*.py" -v
 python scripts/check_encoding.py
 ```
 
-离线测试覆盖五种 harness 标签、工作中不读对话、旧完成拒绝、身份变化、缺/空交付、错误 nonce、缺标记、blocked/失败、路径越界、通知去重、不确定通知不重试，以及真实本地子进程 → 回执 → 监控闭环。测试不会连接真实 Agent 或发送真实通知。
+测试全部离线：使用模拟传输和本地子进程，从不联系真实 Agent，也不发送通知。CI 在 Windows 和 Linux 上用 Python 3.10 和 3.12 运行。
 
-新增测试覆盖严格配置、有限只读重试、新完成独立宽限期、预检查、延后切换、旧控制器失效、声明为侧对话时拒绝操作、事件找回和审核哈希校验。CI 使用 Windows/Linux 和 Python 3.10/3.12。
+英文入口文件（`README.md`、`SKILL.md`、`agents/openai.yaml`、`references/*.md`）必须为纯 ASCII。中文翻译放在 `*.zh-CN.md` 中，两种语言需同步更新。文本使用无 BOM 的 UTF-8 和 LF 换行。
 
-编码检查会拒绝无效 UTF-8、替换字符、连续问号造成的有损文本和常见乱码；同时确认中文翻译仍包含中文，默认英文入口不含非 ASCII 字符。可用 `--expect-cjk` 和 `--expect-ascii` 调整或关闭对应语言检查。文本统一保存为 UTF-8、无 BOM，Git 使用 LF 换行。
-
-这些结果验证接口合同与自动化行为，**不表示所有客户端版本都完成现场连接测试**。首次接入需核验当前工具版本的身份、状态与精确会话投递接口；既有可用适配可复用。
-
-## 目录
+## 仓库结构
 
 ```text
-SKILL.md                    技能入口
-agents/openai.yaml          Skill UI 元数据
-references/                 角色、任务、适配与监控合同
-examples/                   可修改的工作流与任务请求示例
-scripts/monitor_task.py      状态检测与一次通知
-scripts/workflow_control.py  绑定、收件箱、交接和审核门
-scripts/workflow_scheduler.py 持久派工、DAG、占用与状态
-scripts/demo_scheduler.py    可复现的本地子进程 DAG 演示
-scripts/run_job.py           单次 CLI 作业回执
-scripts/test_*.py            离线行为与集成验证
-scripts/check_encoding.py    UTF-8 与有损文本检查
+SKILL.md / SKILL.zh-CN.md          Agent 加载的指令
+README.md / README.zh-CN.md        本指南
+agents/openai.yaml                 Skill 界面元数据
+references/                        详细指南与约定
+examples/                          workflow.json、request.herdr.json、dag.json、job.json
+scripts/workflow_control.py        状态、绑定、收件箱、审核关卡、状态查询
+scripts/workflow_scheduler.py      派发、DAG、资源占用
+scripts/monitor_task.py            状态轮询与一次性通知
+scripts/run_job.py                 带回执的一次性 CLI 作业
+scripts/demo_scheduler.py          离线演示
+scripts/check_encoding.py          编码与语言检查
+scripts/test_*.py                  离线测试
 ```
