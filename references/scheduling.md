@@ -27,7 +27,8 @@ not proof that a disconnected process has stopped.
 
 Use `status --summary --format text` (or `inspect --task TASK-ID --format text`)
 for adapter-neutral phase, harness/adapter/identity, next role/action, observation
-age and warnings. JSON summaries use `--summary`. `--stale-after 900` controls
+age, DAG dependencies, dispatch status, claim, review verdicts, blocking reason,
+warnings, resource usage against capacity and held claims. JSON summaries use `--summary`. `--stale-after 900` controls
 the observation warning; it does not infer failure, cancellation or heartbeat.
 Queued DAG nodes are included before registration. Summary reads contact no
 adapter and work with Command, Receipt and optional Herdr bindings.

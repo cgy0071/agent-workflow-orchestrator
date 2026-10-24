@@ -187,6 +187,21 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(status.summarize(self.state)["tasks"][0]["phase"], "accepted")
         self.assertIn("accepted", status.format_text(status.summarize(self.state)))
 
+    def test_text_summary_shows_dependencies_dispatch_claims_and_reviews(self):
+        req = self.one_node("text", resources={"gpu": 1})
+        text = status.format_text(status.summarize(self.state))
+        self.assertIn("dag: text/node needs: none", text)
+        self.assertIn("dispatch: none; claim: none; reviews: none", text)
+        self.assertIn("Resources: gpu 0/1", text)
+        scheduler.tick(self.state, "text", *self.actor(), transport=self.fake)
+        text = status.format_text(status.summarize(self.state))
+        self.assertIn("claim: held", text)
+        self.assertIn("Resources: gpu 1/1", text)
+        self.assertIn("Claim: TASK-A (gpu=1;", text)
+        self.finish(req)
+        text = status.format_text(status.summarize(self.state))
+        self.assertIn("reviews: accept", text)
+
     def test_summary_cli_can_inspect_an_unregistered_graph_task(self):
         req = self.one_node("summary")
         script = str(Path(control.__file__).resolve())

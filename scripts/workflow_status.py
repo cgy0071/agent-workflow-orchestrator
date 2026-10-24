@@ -90,7 +90,18 @@ def format_text(summary):
         age = "unavailable" if row["observation_age_seconds"] is None else str(round(row["observation_age_seconds"])) + "s"
         lines.append(" | ".join((row["task_id"], row["phase"], row["harness"] + "/" + row["adapter"] + "/" + session,
                                   row["next_role"] + "/" + row["next_action"], age)))
+        if row.get("run"):
+            lines.append("  dag: " + row["run"] + "/" + row["node"] + " needs: " + (", ".join(row["dependencies"]) or "none"))
+        lines.append("  dispatch: " + (row["dispatch"] or "none") + "; claim: " + ("held" if row["claim_held"] else "none") +
+                     "; reviews: " + (", ".join(row["review_verdicts"]) or "none"))
         if row.get("blocking_reason"): lines.append("  reason: " + row["blocking_reason"])
         if row["warnings"]: lines.append("  warnings: " + ", ".join(row["warnings"]))
+    capacities = summary["resource_capacities"]
+    if capacities:
+        used = {key: sum(claim["resources"].get(key, 0) for claim in summary["claims"]) for key in capacities}
+        lines.append("Resources: " + ", ".join(key + " " + str(used[key]) + "/" + str(capacities[key]) for key in sorted(capacities)))
+    for claim in summary["claims"]:
+        held = ", ".join(key + "=" + str(value) for key, value in sorted(claim["resources"].items())) or "no resources"
+        lines.append("Claim: " + claim["task_id"] + " (" + held + "; " + str(len(claim["workspaces"])) + " workspace paths)")
     lines.append("Worker heartbeat: unavailable. Observation age does not establish worker failure.")
     return "\n".join(lines)

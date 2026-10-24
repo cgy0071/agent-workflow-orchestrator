@@ -22,7 +22,8 @@ status/inspect 使用只读 SQLite 事务，不迁移数据库、不查询真实
 目录／资源占用、依赖及最近一次延后调度原因。观测时间戳不能证明失联进程已经结束。
 
 使用 `status --summary --format text` 或 `inspect --task TASK-ID --format text`
-查看通用阶段、harness／adapter／identity、下一角色／动作、观测年龄和告警。
+查看通用阶段、harness／adapter／identity、下一角色／动作、观测年龄、DAG 依赖、
+派工状态、占用、审核结论、阻塞原因、告警、资源用量／容量及当前占用。
 JSON 摘要使用 --summary；--stale-after 900 控制观测过期提醒，不推断失败、取消或
 原生心跳。尚未登记的 DAG 节点也会显示；摘要不查询 Adapter，支持 Command、Receipt
 及可选 Herdr 绑定。
