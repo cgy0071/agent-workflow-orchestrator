@@ -92,10 +92,21 @@ def argv_for(config, payload, root):
     for key, value in selection("pi", config.get("provider"), config.get("model")).items():
         if value is not None: argv += ["--" + key, value]
     if config["mode"] == "one-shot": argv.append("--no-session")
+    elif config.get("native_session_id"):
+        # Pi groups --session-id lookups by cwd, and each task has its own cwd.
+        # Resume by the exact session file instead of silently starting empty.
+        argv += ["--session", str(pi_session_file(root, config["native_session_id"]))]
     else:
-        session = config.get("native_session_id") or str(uuid.UUID(hex=config["identity"]["terminal"].removeprefix("native-bridge-")))
+        session = str(uuid.UUID(hex=config["identity"]["terminal"].removeprefix("native-bridge-")))
         argv += ["--session-dir", str(Path(root) / "sessions"), "--session-id", session]
     return argv + [payload["prompt"]]
+
+
+def pi_session_file(root, session):
+    matches = sorted((Path(root) / "sessions").glob("*_" + session + ".jsonl"))
+    if len(matches) != 1:
+        raise ValueError("Pi session " + session + " needs exactly one session file; found " + str(len(matches)))
+    return matches[0].resolve()
 
 
 def send(directory, payload):
@@ -109,10 +120,11 @@ def send(directory, payload):
     try:
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
+        config = read_json(root / "config.json")
+        argv = argv_for(config, payload, root)
         directory = root / "jobs" / task_key(payload)
         directory.mkdir(parents=True, exist_ok=False)
-        config = read_json(root / "config.json")
-        job = dict(payload, argv=argv_for(config, payload, root), identity=config["identity"],
+        job = dict(payload, argv=argv, identity=config["identity"],
                    output_dir=str(directory / "receipt"), timeout_seconds=config["timeout_seconds"],
                    completion_contract={"type": "native_turn", "harness": config["harness"]})
         save_json(directory / "job.json", job)

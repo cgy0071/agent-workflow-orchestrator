@@ -130,6 +130,40 @@ class CompletionTests(unittest.TestCase):
         for harness, provider, model in (("codex", "test", "test"), ("pi", "test", None), ("pi", None, "--bad")):
             with self.assertRaises(ValueError): native_worker.selection(harness, provider, model)
 
+    def test_pi_session_resumes_by_exact_file_across_task_directories(self):
+        worker = self.root / "pi-session"
+        native_worker.initialize(worker, "pi", sys.executable, mode="session")
+        config = read_json(worker / "config.json")
+        argv = native_worker.argv_for(config, {"prompt": "first"}, worker)
+        session = argv[argv.index("--session-id") + 1]
+        self.assertEqual(argv[argv.index("--session-dir") + 1], str(worker / "sessions"))
+        self.assertNotIn("--session", argv)
+        config["native_session_id"] = session
+        with self.assertRaisesRegex(ValueError, "found 0"):
+            native_worker.argv_for(config, {"prompt": "second"}, worker)
+        (worker / "sessions").mkdir()
+        first = worker / "sessions" / ("2026-01-01T00-00-00-000Z_" + session + ".jsonl")
+        first.write_text("{}\n", encoding="utf-8")
+        argv = native_worker.argv_for(config, {"prompt": "second"}, worker)
+        self.assertEqual(argv[argv.index("--session") + 1], str(first.resolve()))
+        self.assertNotIn("--session-id", argv)
+        (worker / "sessions" / ("2026-01-01T00-00-05-000Z_" + session + ".jsonl")).write_text("{}\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "found 2"):
+            native_worker.argv_for(config, {"prompt": "third"}, worker)
+
+    def test_unresolvable_pi_session_rejects_send_without_job_directory(self):
+        worker = self.root / "pi-missing"
+        native_worker.initialize(worker, "pi", sys.executable, mode="session")
+        config = read_json(worker / "config.json")
+        config["native_session_id"] = "00000000-0000-0000-0000-000000000000"
+        save_json(worker / "config.json", config)
+        payload = {"task_id": "PI-B", "nonce": "pi-b-nonce", "cwd": str(self.root), "prompt": "recall",
+                   "authorization": {"source": "explicit protocol fixture"}}
+        with self.assertRaisesRegex(ValueError, "session file"):
+            native_worker.send(worker, payload)
+        self.assertFalse((worker / "jobs").exists())
+        self.assertFalse((worker / "active.json").exists())
+
     def test_protocol_fixtures_work_in_herdr_but_real_acceptance_is_rejected(self):
         with patch.dict(os.environ, {"HERDR_ENV": "1"}):
             with self.assertRaisesRegex(ValueError, "outside Herdr"):
