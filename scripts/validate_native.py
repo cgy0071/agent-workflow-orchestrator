@@ -149,7 +149,14 @@ def review_payload(root, node, req):
     directory = root / "review-delivery" / node["id"]
     directory.mkdir(parents=True, exist_ok=False)
     answer = (Path(req["cwd"]) / "RESULT.md").read_text(encoding="utf-8")
-    prompt = ("Independently review this arithmetic task. Question: " + node["question"] +
+    expected = ""
+    run = read_json(Path(root) / "run.json")
+    if run["mode"] == "session" and node["needs"]:
+        # The reviewer cannot verify recall from the worker's own claim; give it
+        # the secret the validator actually sent in the earlier turn.
+        expected = ("\nExpected secret from the earlier turn, supplied by the validator rather than the worker: " +
+                    run["memory"] + ". Accept only if memory equals it exactly.")
+    prompt = ("Independently review this arithmetic task. Question: " + node["question"] + expected +
               "\nWorker response: " + answer + "\nReturn JSON only with task_id=" + req["task_id"] +
               ", nonce=" + req["nonce"] + ', verdict ("accept" or "reject"), and reason. Accept only a correct answer. Do not use tools.')
     payload = {"task_id": "REVIEW-" + req["task_id"], "nonce": uuid.uuid4().hex, "cwd": str(directory), "prompt": prompt,

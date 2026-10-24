@@ -74,6 +74,14 @@ class NativeProtocolTests(unittest.TestCase):
         result = validate_native.execute(root, budget=25)
         self.assertEqual(result["status"], "PROTOCOL_FIXTURE_PASS")
         self.assertEqual(result["session_reuse"], "passed")
+        memory = json.loads((root / "run.json").read_text(encoding="utf-8"))["memory"]
+        prompts = {}
+        for path in (root / "delivery").rglob("review-request.json"):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            prompts[payload["task_id"]] = payload["prompt"]
+        # The expected secret must reach the reviewer independently of the worker response.
+        self.assertIn(memory, prompts["REVIEW-NATIVE-B"].split("\nWorker response:")[0])
+        self.assertNotIn("supplied by the validator", prompts["REVIEW-NATIVE-A"])
         profile = json.loads((root / "command-capability-profile.json").read_text(encoding="utf-8"))
         self.assertEqual(profile["native_capabilities"]["conversation_reuse"], "unverified")
 
