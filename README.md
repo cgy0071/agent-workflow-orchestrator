@@ -20,15 +20,7 @@ The repository contains two parts:
 - **The tool** (`scripts/`): standard-library Python commands for a local SQLite ledger, dispatch, monitoring, and review gates. The guarantees (send once, notify once, nothing counts as done until reviewed, stale controllers lose authority) are enforced here, not by prompts.
 - **The Skill** (`SKILL.md`): the operating procedure an agent loads so it knows when to run those commands, how to write tasks and reviews, and when to stop. The agent playing the controller usually runs the tool; you can also run it yourself.
 
-```mermaid
-flowchart LR
-    U[You: goal and authorization] --> P[Planner: write task]
-    P --> E[Executor: implement and test]
-    E --> M[Script: poll status, check files]
-    M --> N[One inbox event]
-    N --> R[Reviewer: accept / repair / reject]
-    R -->|next or repair task| P
-```
+![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
 Roles are not tied to tools. The Planner can run in Codex, the Executor in Claude, or any other combination.
 
@@ -41,7 +33,13 @@ python -B scripts/demo_scheduler.py --directory runtime/first-run
 python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
 ```
 
-The demo builds a small task graph: independent tasks **A** and **B** become eligible together on two fake workers (local Python child processes). **JOIN** becomes eligible only after both are reviewed and accepted. The first command prints `OFFLINE_DEMO_PASS`; the status view shows A, B, and JOIN as `accepted`. Use a new directory for each run.
+The demo builds a small task graph: independent tasks **A** and **B** become eligible together on two fake workers (local Python child processes). **JOIN** becomes eligible only after both are reviewed and accepted.
+
+![Demo task graph: A and B run together, JOIN waits until both reviews are accept](docs/images/demo-dag.svg)
+
+The first command prints `OFFLINE_DEMO_PASS`; the status view shows A, B, and JOIN as `accepted`, with each task's dependencies, dispatch state, and review verdicts. Use a new directory for each run.
+
+![Actual output of the two demo commands](docs/images/demo-terminal.svg)
 
 The demo checks scheduling, one-time dispatch, delivery validation, and review gates. It does not exercise a background polling loop, direct notifications, or compatibility with a real client (Codex, Claude, ...).
 
@@ -191,7 +189,9 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 The reviewer reads the raw evidence and writes `REVIEW.md` with the task ID, nonce, and verdict. `next-check` returns a `parent_review` record; put it in the next task's request to link the follow-up. Without `continuous_execution_authorized`, the controller stops here and reports back to you.
 
-At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action.
+At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action. The main phases:
+
+![Task lifecycle: ready, execution_unconfirmed, executing, awaiting_review, accepted, with failure, rejection, and changed-evidence branches](docs/images/task-lifecycle.svg)
 
 ## Configuration files at a glance
 
@@ -240,6 +240,7 @@ README.md / README.zh-CN.md        This guide
 agents/openai.yaml                 Skill UI metadata
 references/                        Detailed guides and contracts
 examples/                          workflow.json, request.herdr.json, dag.json, job.json
+docs/images/                       README images
 scripts/workflow_control.py        State, bindings, inbox, review gates, status
 scripts/workflow_scheduler.py      Dispatch, DAGs, resource claims
 scripts/monitor_task.py            Status polling and one-time notification

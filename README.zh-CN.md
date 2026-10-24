@@ -20,15 +20,7 @@
 - **工具**（`scripts/`）：仅依赖标准库的 Python 命令，提供本地 SQLite 账本、派发、监控和审核关卡。“只发送一次、只通知一次、未审核不算完成、旧控制者失去权限”这些保证由工具强制执行，而不是靠提示词。
 - **Skill**（`SKILL.md`）：Agent 加载的操作规程，告诉它何时运行这些命令、如何编写任务和审核、何时停止。工具通常由担任控制者的 Agent 运行，你也可以手动运行。
 
-```mermaid
-flowchart LR
-    U[你：目标与授权] --> P[Planner：编写任务]
-    P --> E[Executor：实现与测试]
-    E --> M[脚本：轮询状态、检查文件]
-    M --> N[一条收件箱事件]
-    N --> R[审核者：接受 / 返修 / 拒绝]
-    R -->|下一个或返修任务| P
-```
+![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)
 
 角色与工具无关。Planner 可以运行在 Codex 中，Executor 可以运行在 Claude 中，任意组合均可。
 
@@ -41,7 +33,13 @@ python -B scripts/demo_scheduler.py --directory runtime/first-run
 python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
 ```
 
-演示会构建一个小型任务图：独立的任务 **A** 和 **B** 同时具备派发条件，交给两个模拟 Worker（本地 Python 子进程）；**JOIN** 要等两者都审核通过后才具备派发条件。第一条命令输出 `OFFLINE_DEMO_PASS`；状态视图中 A、B、JOIN 均为 `accepted`。每次运行请使用新目录。
+演示会构建一个小型任务图：独立的任务 **A** 和 **B** 同时具备派发条件，交给两个模拟 Worker（本地 Python 子进程）；**JOIN** 要等两者都审核通过后才具备派发条件。
+
+![演示任务图：A 与 B 同时运行，JOIN 等两份审核均为 accept 后才派发](docs/images/demo-dag.zh-CN.svg)
+
+第一条命令输出 `OFFLINE_DEMO_PASS`；状态视图中 A、B、JOIN 均为 `accepted`，并列出每个任务的依赖、派工状态和审核结论。每次运行请使用新目录。
+
+![两条演示命令的实际输出](docs/images/demo-terminal.svg)
 
 演示检查调度、单次派发、交付校验和审核关卡；它没有运行后台轮询循环、直接通知，也不能证明某个真实客户端（Codex、Claude 等）兼容。
 
@@ -191,7 +189,9 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 审核者阅读原始证据，编写包含任务 ID、nonce 和结论的 `REVIEW.md`。`next-check` 返回一条 `parent_review` 记录，把它写入下一个任务的请求以关联后续任务。未授权 `continuous_execution_authorized` 时，控制者到此停止并向你汇报。
 
-任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。
+任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。主要阶段如下：
+
+![任务生命周期：ready、execution_unconfirmed、executing、awaiting_review、accepted，以及失败、驳回和证据变化分支](docs/images/task-lifecycle.zh-CN.svg)
 
 ## 配置文件一览
 
@@ -240,6 +240,7 @@ README.md / README.zh-CN.md        本指南
 agents/openai.yaml                 Skill 界面元数据
 references/                        详细指南与约定
 examples/                          workflow.json、request.herdr.json、dag.json、job.json
+docs/images/                       README 配图
 scripts/workflow_control.py        状态、绑定、收件箱、审核关卡、状态查询
 scripts/workflow_scheduler.py      派发、DAG、资源占用
 scripts/monitor_task.py            状态轮询与一次性通知
