@@ -51,7 +51,7 @@ SQLite 台账保存配置快照、绑定版本、冻结任务、待审核事件�
 
 台账 bind/switch 会将所选策略保存到适配器配置；dedicated_window 的 context_declaration 缺失时从 --reason 填入。独立监控请求仍需自己的声明。绑定和 preflight 对直接通知的 Herdr 目标执行只读 agent_session 检查；发送前再次核对身份和该前提，不发送测试提示。字段存在只是能力前提，不保证投递成功，超时及不确定投递规则仍适用。
 
-报告的 Windows / Herdr 0.9.3 实测中，Pi 暴露 agent_session 且可接收提示，dsh-tui 没有该字段。此类目标使用 inbox_only，或另行验证的 command 桥接。不能根据 harness 名称或可为空的 name 字段推断兼容性；其他版本以及 Codex/Claude/Grok 均须独立实测。
+目标没有暴露 agent_session 时，使用 inbox_only，或另行验证的 command 桥接。不能根据 harness 名称或可为空的 name 字段推断兼容性；每个客户端版本都须单独核验。
 
 **信任边界：** `--context main|side|unknown` 来自可信桥接程序或知情操作者的声明，不是自动分支识别或身份认证。脚本会拒绝声明为 side/unknown 的操作和失效绑定；它无法阻止拥有台账写权限的程序谎报 main。桥接程序必须先核对实际调用方元数据，再传入 main。做不到时使用收件箱模式，不编造分支 ID，也不根据窗口焦点判断主对话。
 

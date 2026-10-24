@@ -47,4 +47,4 @@ Worker 的 `status_argv` 返回 JSON：
 
 按[版本化能力记录](capabilities.zh-CN.md)分别核验 spawn、attach/resume、send、status、cancel、collect、heartbeat。[调度器](scheduling.zh-CN.md)可经已核验的 command／Herdr 接口单次派工，不据此推断客户端具备其他生命周期能力。
 
-本技能对五种 harness 使用相同角色和交付合同。离线测试覆盖任意身份标签、跨 harness 通知和失败分支；这不等于五种客户端都完成了现场连接测试。每个真实适配在首次使用时验证：身份、working、新完成、文件/nonce、单次通知、异常不误判成功。既有可用适配直接复用；版本或身份改变后重新核验。
+本技能对五种 harness 使用相同角色和交付合同。并非每个客户端版本都已完成现场连接核验。每个真实适配在首次使用时验证：身份、working、新完成、文件/nonce、单次通知、异常不误判成功。既有可用适配直接复用；版本或身份改变后重新核验。

@@ -1,1 +1,8 @@
 * text=auto eol=lf
+
+# Keep tests, validation tooling and CI in the repository, out of release archives.
+.github export-ignore
+.gitattributes export-ignore
+scripts/test_*.py export-ignore
+scripts/check_encoding.py export-ignore
+scripts/validate_native.py export-ignore

@@ -45,6 +45,4 @@ side or unknown controller cannot dispatch, reconcile, release or review.
 
 Rework is a new scoped task with a new ID and nonce; record the next generation
 and the sealed parent review as appropriate. The scheduler does not replay
-failed work or infer cancellation from missing updates. Standard-library
-regression tests exercise these transitions, crash windows, conflicting claims,
-duplicate events, controller changes, and invalid dependency admission.
+failed work or infer cancellation from missing updates.

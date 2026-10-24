@@ -198,22 +198,20 @@ Overall monitor timeout stops observation; it never terminates the worker.
 Wall-clock deadlines can be affected by clock changes; they cannot grant review
 or dispatch permission.
 
-## Reproducible local fixture
+## Local demo
 
 ```sh
 python -B scripts/demo_scheduler.py --directory runtime/new-demo
 python -B scripts/demo_scheduler.py --directory runtime/new-done-demo --completion-status done
-python -B -m unittest discover -s scripts -p "test_*.py" -v
 ```
 
 The demo refuses an existing directory. It uses real local Python subprocesses
-as fixture workers, executes A/B and JOIN, compares results with expected bytes,
-records fixture reviews and writes `dag.json`, `demo-result.json` and the ledger.
-It creates no external agents and sends no external notifications. These results
-establish local orchestration behavior; record actual client compatibility using
-the [capability contract](capabilities.md).
+as workers, executes A/B and JOIN, compares results with expected bytes,
+records reviews and writes `dag.json`, `demo-result.json` and the ledger.
+It creates no external agents and sends no external notifications. The demo
+shows local orchestration behavior only; record actual client compatibility
+using the [capability contract](capabilities.md).
 
-The second demo leaves the same fixture worker at `done` after each turn and
-uses the explicit mapping to reuse its binding for A and JOIN. It never resets
-the worker between passes. This regression fixture does not establish live Pi
-compatibility; the corresponding external report is version-scoped.
+The second demo leaves the same worker at `done` after each turn and uses the
+explicit mapping to reuse its binding for A and JOIN. It never resets the
+worker between passes.

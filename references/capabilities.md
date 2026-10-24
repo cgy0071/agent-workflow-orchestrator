@@ -17,7 +17,7 @@ Binding an identity does not resume a harness conversation. A status observation
 timestamp is not a native worker heartbeat. Unsupported operations raise errors;
 the scheduler does not guess provider commands or provision sessions.
 
-The local Python-child demo verifies command transport and fixture review. For a
+The local Python-child demo exercises command transport and review. For a
 real client, create a profile for the installed version after checking its actual
 identity, command responses, and task delivery. No client is preconfigured.
 

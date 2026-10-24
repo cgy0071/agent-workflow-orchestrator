@@ -230,13 +230,6 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 ## 开发
 
-```sh
-python -B -m unittest discover -s scripts -p "test_*.py" -v
-python scripts/check_encoding.py
-```
-
-测试全部离线：使用模拟传输和本地子进程，从不联系真实 Agent，也不发送通知。CI 在 Windows 和 Linux 上用 Python 3.10 和 3.12 运行。
-
 英文入口文件（`README.md`、`SKILL.md`、`agents/openai.yaml`、`references/*.md`）必须为纯 ASCII。中文翻译放在 `*.zh-CN.md` 中，两种语言需同步更新。文本使用无 BOM 的 UTF-8 和 LF 换行。
 
 ## 仓库结构
@@ -252,6 +245,4 @@ scripts/workflow_scheduler.py      派发、DAG、资源占用
 scripts/monitor_task.py            状态轮询与一次性通知
 scripts/run_job.py                 带回执的一次性 CLI 作业
 scripts/demo_scheduler.py          离线演示
-scripts/check_encoding.py          编码与语言检查
-scripts/test_*.py                  离线测试
 ```

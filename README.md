@@ -230,13 +230,6 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 
 ## Development
 
-```sh
-python -B -m unittest discover -s scripts -p "test_*.py" -v
-python scripts/check_encoding.py
-```
-
-Tests are offline: they use fake transports and local child processes, and never contact real agents or send notifications. CI runs on Windows and Linux with Python 3.10 and 3.12.
-
 English entry points (`README.md`, `SKILL.md`, `agents/openai.yaml`, `references/*.md`) must be ASCII-only. Chinese translations live in `*.zh-CN.md`; update both languages together. Text is UTF-8 without BOM with LF line endings.
 
 ## Repository layout
@@ -252,6 +245,4 @@ scripts/workflow_scheduler.py      Dispatch, DAGs, resource claims
 scripts/monitor_task.py            Status polling and one-time notification
 scripts/run_job.py                 One-shot CLI jobs with receipts
 scripts/demo_scheduler.py          Offline demo
-scripts/check_encoding.py          Encoding and language checks
-scripts/test_*.py                  Offline tests
 ```

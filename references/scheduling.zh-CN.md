@@ -154,19 +154,17 @@ retry_max_seconds 默认 60 秒；此策略不重试发送操作。
 事件 ID 保证去重。监控超时只结束观测。系统时钟变化会影响时间判断，但不会产生
 审核或派工许可。
 
-## 本地可复现演示
+## 本地演示
 
 ```sh
 python -B scripts/demo_scheduler.py --directory runtime/new-demo
 python -B scripts/demo_scheduler.py --directory runtime/new-done-demo --completion-status done
-python -B -m unittest discover -s scripts -p "test_*.py" -v
 ```
 
-演示拒绝已有目录，以真实本地 Python 子进程作为测试 Worker，执行 A/B 与 JOIN，
-逐字节核对结果并登记测试审核，生成 dag.json、demo-result.json 和台账。
-没有创建外部 Agent 或发送外部通知。真实客户端兼容性按
+演示拒绝已有目录，以真实本地 Python 子进程作为 Worker，执行 A/B 与 JOIN，
+逐字节核对结果并登记审核，生成 dag.json、demo-result.json 和台账。
+没有创建外部 Agent 或发送外部通知。演示只展示本地编排行为；真实客户端兼容性按
 [能力证据合同](capabilities.zh-CN.md) 单独记录。
 
-第二条演示让同一个测试 Worker 在每轮完成后持续保持 done，通过显式映射复用
-A 与 JOIN 的同一绑定，不在轮次间重置 Worker。这是离线回归；相关 Pi 外部报告
-仅适用于报告中的版本环境。
+第二条演示让同一个 Worker 在每轮完成后持续保持 done，通过显式映射复用
+A 与 JOIN 的同一绑定，不在轮次间重置 Worker。
