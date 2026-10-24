@@ -45,6 +45,8 @@ With workflow_state enabled, register the frozen request before monitoring and p
 
 Record blocked states, missing delivery, changed identities, failures, and uncertain notifications separately. Never answer approval dialogs or blindly resend. Stopping the monitor does not stop the worker; handle cancellation separately under the configured authorization.
 
+When the user asks to see the dashboard or a visual status view, start `python -B scripts/dashboard.py --state /abs/state` as a background process. It opens the local browser; also give the printed token URL to the user only. Do not add `--allow-dispatch` unless the user explicitly asks for form dispatch in this conversation. Stop the process when the user is done.
+
 ## Review and continuation
 
 The reviewer reads the frozen request, delivery, changes, and raw acceptance evidence; records accept, repair, reject, or missing evidence; and updates current state. Advance only through configured stages. Engineering admission and paper-contribution judgment can remain separate gates.

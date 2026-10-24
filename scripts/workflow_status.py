@@ -1,5 +1,6 @@
 """Read-only task phases, next actors, and observation age; never native heartbeats."""
 from datetime import datetime, timezone
+import json
 import math
 
 
@@ -80,6 +81,52 @@ def summarize(state, task=None, stale_after=900, now=None):
     return {"read_only": True, "tasks": selected, "resource_capacities": raw["resources"],
             "claims": raw["claims"], "alerts": [{"task_id": row["task_id"], "warnings": row["warnings"]}
                                                for row in selected if row["warnings"]]}
+
+
+def dashboard_details(state, summary=None):
+    """Additional ledger details for the local UI, without writes or adapter calls."""
+    from workflow_scheduler import _read_database, has_schema, snapshot
+    summary = summarize(state) if summary is None else summary
+    raw = snapshot(state)
+    phases = {row["task_id"]: row["phase"] for row in summary["tasks"]}
+    with _read_database(state) as con:
+        config = json.loads(con.execute("SELECT value FROM meta WHERE key='config'").fetchone()[0])
+        roles = {role: {"role": role, "bindings": [], "tasks": []} for role in config["roles"]}
+        for row in con.execute("SELECT role,status,data FROM bindings WHERE status IN ('active','pending') "
+                               "ORDER BY role,version"):
+            data = json.loads(row["data"])
+            spec = data["spec"]
+            roles.setdefault(row["role"], {"role": row["role"], "bindings": [], "tasks": []})["bindings"].append({
+                "status": row["status"], "mode": data["mode"], "harness": spec.get("harness", "unknown"),
+                "adapter": spec["adapter"], "version": data["version"],
+                "context_policy": data["context_policy"], "instance_id": data["instance_id"][:8],
+                "bound_at": data.get("created_at"),
+            })
+        inbox = []
+        for row in con.execute("SELECT id,task,status,data FROM events ORDER BY rowid DESC"):
+            data = json.loads(row["data"])
+            inbox.append({"event_id": row["id"][:12], "task_id": row["task"], "status": row["status"],
+                          "created_at": data.get("created_at"),
+                          "report_status": (data.get("report") or {}).get("status")})
+        for row in con.execute("SELECT id,worker,status,data FROM tasks WHERE status!='resolved' ORDER BY id"):
+            data = json.loads(row["data"])
+            for role in {row["worker"], data["controller"]["role"], data["request"]["reviewer"]["role"]}:
+                if role in roles:
+                    roles[role]["tasks"].append({"task_id": row["id"], "phase": phases.get(row["id"], row["status"])})
+        cwd_by_task = {row["id"]: json.loads(row["data"])["request"]["cwd"]
+                       for row in con.execute("SELECT id,data FROM tasks")}
+        if has_schema(con):
+            for row in con.execute("SELECT data FROM dag_runs"):
+                for node in json.loads(row["data"])["graph"]["nodes"]:
+                    cwd_by_task.setdefault(node["request"]["task_id"], node["request"]["cwd"])
+    task_details = {}
+    for item in raw["tasks"]:
+        task_details[item["task_id"]] = {"cwd": item["cwd"], "journal": item.get("journal", [])[-10:]}
+    for dag in raw["dags"].values():
+        for name, plan in dag["tasks"].items():
+            task_details.setdefault(plan["task_id"], {"cwd": cwd_by_task.get(plan["task_id"]), "journal": []})
+    return {"goal": config.get("goal", ""), "roles": list(roles.values()), "inbox": inbox,
+            "dags": raw["dags"], "scheduling_blocks": raw["scheduling_blocks"], "task_details": task_details}
 
 
 def format_text(summary):

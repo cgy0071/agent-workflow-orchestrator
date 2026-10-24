@@ -77,3 +77,17 @@ Herdr 优先读取 completion_seq，缺失时读取 state_change_seq；计数器
 适配样式见 harness-adapters.zh-CN.md。各角色均可使用任意 harness；发送通知的实际接口必须能核验目标身份并精确投递会话。没有该接口先返回 ADAPTER_NOT_VERIFIED，不宣称全自动已运行。
 
 在任务目录创建 STOP_MONITOR 会于下一轮停止监控，不发送续接通知，也不取消 Worker。实际取消按调度器授权处理。原始失败和父任务记录保持不变。
+
+## 状态面板
+
+标准库本地面板仅监听回环地址，打印每次启动生成的带令牌地址，并用默认浏览器打开（加 `--no-browser` 则只打印）。可双击 `dashboard.cmd`（Windows）或 `dashboard.command`（macOS），或运行：
+
+```sh
+python -B scripts/dashboard.py --state /absolute/workflow-state
+```
+
+不带 `--state` 时，页面会请你选择状态目录，并列出 `~/.agent-workflow-orchestrator/dashboard-recent.json` 中最多 10 个最近目录；该文件只保存路径。未启用派发时，可用 **Switch state** 切换查看的目录。默认端口 8765 被占用时，服务会自动改用空闲端口。可设置 `AWO_PYTHON` 指定启动文件使用的解释器。
+
+页面只读台账，不改动它，也不自动查询 Agent；显示绑定、任务阶段与证据、DAG 依赖、收件箱事件、资源占用和告警。自动刷新只读台账；**Probe workers** 按钮才执行有超时的实时状态查询。服务校验令牌、Host 和 POST Origin，使用严格 CSP，并把台账文字作为文本渲染。不要外传带令牌地址。
+
+要启用表单派发，启动时与 `--state` 一起增加 `--allow-dispatch --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks`；此时状态目录固定，不能切换。actor 必须是当前有效控制者；`main` 是操作者的明确声明。预览实时检查空闲 Worker，返回任务绑定请求、nonce、消息与摘要，不写文件。确认时重新检查预览和完成序列，创建新任务目录，并交给 `workflow_scheduler.dispatch` 单次发送；不自动重试不确定派发。独立确认执行后，由操作者自行编写 `EXECUTION.md` 并运行页面显示的 `reconcile` 命令，再启动监控。页面不执行 reconcile、审核、绑定切换或 DAG tick。

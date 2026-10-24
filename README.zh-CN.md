@@ -189,6 +189,14 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 审核者阅读原始证据，编写包含任务 ID、nonce 和结论的 `REVIEW.md`。`next-check` 返回一条 `parent_review` 记录，把它写入下一个任务的请求以关联后续任务。未授权 `continuous_execution_authorized` 时，控制者到此停止并向你汇报。
 
+如需在本机查看台账，可打开可选状态面板。它显示绑定、任务、DAG、收件箱、资源和告警，不会自动联系 Agent；实时探测须手动点击按钮。以下任一方式都会在浏览器中打开面板：
+
+- 在仓库文件夹中双击 `dashboard.cmd`（Windows）或 `dashboard.command`（macOS），再选择最近用过的状态目录或粘贴路径。
+- 对控制者 Agent 说“打开状态面板”，Skill 已写明做法。
+- 运行 `python -B scripts/dashboard.py`，可加 `--state /abs/state`。
+
+表单派发需要显式启用，仍须独立观察执行并运行 `reconcile`；详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+
 任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。主要阶段如下：
 
 ![任务生命周期：ready、execution_unconfirmed、executing、awaiting_review、accepted，以及失败、驳回和证据变化分支](docs/images/task-lifecycle.zh-CN.svg)
@@ -246,4 +254,6 @@ scripts/workflow_scheduler.py      派发、DAG、资源占用
 scripts/monitor_task.py            状态轮询与一次性通知
 scripts/run_job.py                 带回执的一次性 CLI 作业
 scripts/demo_scheduler.py          离线演示
+scripts/dashboard.py               本地台账面板与可选派发表单
+dashboard.cmd / dashboard.command  双击启动面板
 ```

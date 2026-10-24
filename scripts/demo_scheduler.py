@@ -13,7 +13,19 @@ def worker(directory, message=None):
     path = Path(directory) / "worker_status.json"
     status = read_json(path)
     if message is not None:
-        task = json.loads(message)
+        try:
+            task = json.loads(message)
+        except json.JSONDecodeError:
+            lines = message.splitlines()
+            names = ("Task ID: ", "Nonce: ", "Cwd: ", "Completion marker: ")
+            if len(lines) < 4 or any(not line.startswith(prefix) for line, prefix in zip(lines[:4], names)):
+                raise ValueError("fixture message needs four task-bound header lines")
+            task = {"task_id": lines[0][len(names[0]):], "nonce": lines[1][len(names[1]):],
+                    "cwd": lines[2][len(names[2]):], "marker": lines[3][len(names[3]):],
+                    "completion_status": "idle"}
+            if not task["task_id"] or not task["nonce"] or task["marker"] != (
+                    "TASK_DONE " + task["task_id"] + " " + task["nonce"]):
+                raise ValueError("fixture message marker does not bind task and nonce")
         if status.get("task_id") == task["task_id"]:
             raise ValueError("fixture refuses duplicate task submission")
         output = Path(task["cwd"])

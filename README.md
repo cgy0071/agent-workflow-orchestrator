@@ -189,6 +189,14 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 The reviewer reads the raw evidence and writes `REVIEW.md` with the task ID, nonce, and verdict. `next-check` returns a `parent_review` record; put it in the next task's request to link the follow-up. Without `continuous_execution_authorized`, the controller stops here and reports back to you.
 
+For a local ledger view, open the optional dashboard. It shows bindings, tasks, DAGs, inbox events, resources, and alerts without contacting agents; live probing needs a button click. Any of these opens it in your browser:
+
+- Double-click `dashboard.cmd` (Windows) or `dashboard.command` (macOS) in the repository folder, then pick a recent state directory or paste one.
+- Ask the controller agent to "open the dashboard"; the Skill tells it how.
+- Run `python -B scripts/dashboard.py`, optionally with `--state /abs/state`.
+
+Authorized form dispatch is opt-in and still requires an independently observed `reconcile` step; see [monitoring.md](references/monitoring.md).
+
 At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action. The main phases:
 
 ![Task lifecycle: ready, execution_unconfirmed, executing, awaiting_review, accepted, with failure, rejection, and changed-evidence branches](docs/images/task-lifecycle.svg)
@@ -246,4 +254,6 @@ scripts/workflow_scheduler.py      Dispatch, DAGs, resource claims
 scripts/monitor_task.py            Status polling and one-time notification
 scripts/run_job.py                 One-shot CLI jobs with receipts
 scripts/demo_scheduler.py          Offline demo
+scripts/dashboard.py               Local ledger dashboard and optional dispatch form
+dashboard.cmd / dashboard.command  Double-click launchers for the dashboard
 ```

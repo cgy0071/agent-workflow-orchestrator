@@ -77,3 +77,17 @@ For new tasks, put the exact marker in HANDOFF.md and select marker_source=artif
 See harness-adapters.md for details. Every role may use any harness, but actual notification needs a verified identity and precise session-delivery interface. Report ADAPTER_NOT_VERIFIED when that interface is absent.
 
 Creating STOP_MONITOR in the task directory stops monitoring on its next iteration, sends no continuation notification, and does not cancel the Worker. Handle actual cancellation through authorized scheduling. Preserve failures and parent-task records.
+
+## Dashboard
+
+The standard-library-only local dashboard binds to loopback, prints a per-process token URL, and opens it in the default browser (`--no-browser` only prints it). Double-click `dashboard.cmd` (Windows) or `dashboard.command` (macOS), or run:
+
+```sh
+python -B scripts/dashboard.py --state /absolute/workflow-state
+```
+
+Without `--state`, the page asks for a state directory and lists up to 10 recent ones from `~/.agent-workflow-orchestrator/dashboard-recent.json`; the file stores paths only. **Switch state** changes the viewed directory while dispatch is disabled. If the default port 8765 is busy, the server picks a free port. Set `AWO_PYTHON` to choose the launcher's interpreter.
+
+The page reads the ledger without changing it or querying agents. It shows bindings, task phases and evidence, DAG dependencies, inbox events, resource claims, and alerts. Automatic refresh reads only the ledger; **Probe workers** explicitly makes bounded live status queries. The server checks its token, Host, and POST Origin; it uses a restrictive CSP and renders ledger text as text. Do not expose or forward the token URL.
+
+To enable the form, add `--allow-dispatch --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks` with `--state` at startup; the state is then fixed. The actor must be the active controller and `main` is the operator's explicit declaration. Preview checks a live idle Worker and returns a task-bound request, nonce, message, and digest without writing files. Confirm rechecks the frozen preview and baseline, creates a new task directory, and delegates one send to `workflow_scheduler.dispatch`; uncertain sends are never retried. After an independent observation, write `EXECUTION.md` yourself and run the displayed `reconcile` command, then start the monitor. The page does not perform reconcile, review, binding changes, or DAG ticks.

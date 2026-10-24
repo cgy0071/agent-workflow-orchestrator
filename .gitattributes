@@ -1,4 +1,6 @@
 * text=auto eol=lf
+# cmd.exe needs CRLF to parse labels and goto reliably.
+*.cmd text eol=crlf
 
 # Keep tests, validation tooling and CI in the repository, out of release archives.
 .github export-ignore
