@@ -2,7 +2,7 @@
 
 English | [Chinese](README.zh-CN.md)
 
-Let several AI coding agents work as a team: one plans and reviews, another implements, and a small Python script watches the work in between so nobody has to babysit terminals.
+A local tool for coordinating several AI coding agents, with an Agent Skill that teaches the controlling agent how to use it. One agent plans and reviews, another implements, and the tool records dispatch, watches status, and gates review so nobody has to babysit terminals.
 
 ## What problem does it solve?
 
@@ -17,8 +17,8 @@ With this tool:
 
 The repository contains two parts:
 
-- **The Skill** (`SKILL.md`): instructions that an agent loads so it knows how to plan, dispatch, review, and continue.
-- **The scripts** (`scripts/`): standard-library Python tools for state, dispatch, monitoring, and review gates. The agent playing the controller usually runs them; you can also run them yourself.
+- **The tool** (`scripts/`): standard-library Python commands for a local SQLite ledger, dispatch, monitoring, and review gates. The guarantees (send once, notify once, nothing counts as done until reviewed, stale controllers lose authority) are enforced here, not by prompts.
+- **The Skill** (`SKILL.md`): the operating procedure an agent loads so it knows when to run those commands, how to write tasks and reviews, and when to stop. The agent playing the controller usually runs the tool; you can also run it yourself.
 
 ```mermaid
 flowchart LR
@@ -73,7 +73,7 @@ The demo checks scheduling, one-time dispatch, delivery validation, and review g
 
 ## Installation
 
-Clone the repository into your client's Skill directory. Examples:
+One clone installs both parts: the client discovers `SKILL.md`, and the controller runs `scripts/` from the same directory. Keep workflow state directories outside the clone. Clone the repository into your client's Skill directory. Examples:
 
 ```sh
 # Codex

@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent Workflow Orchestrator"
-  short_description: "Configurable agent roles, monitoring, and review handoffs"
+  short_description: "Local multi-agent dispatch, monitoring, and review tool with its operating Skill"
   default_prompt: "Use $agent-workflow-orchestrator to configure roles, architecture constraints, and automation, monitor tasks, and notify the reviewer to continue authorized work."

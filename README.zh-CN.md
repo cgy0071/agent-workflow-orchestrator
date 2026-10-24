@@ -2,7 +2,7 @@
 
 [English](README.md) | Chinese
 
-让多个 AI 编程 Agent 像团队一样协作：一个负责规划和审核，一个负责实现，中间由一个小型 Python 脚本盯着进度，你不必守在各个终端前。
+一个协调多个 AI 编程 Agent 的本地工具，并附带一个 Agent Skill，教控制者 Agent 如何使用它。一个 Agent 负责规划和审核，另一个负责实现；工具负责记录派发、监控状态和把关审核，你不必守在各个终端前。
 
 ## 解决什么问题？
 
@@ -17,8 +17,8 @@
 
 仓库由两部分组成：
 
-- **Skill**（`SKILL.md`）：Agent 加载的指令，告诉它如何规划、派发、审核和继续。
-- **脚本**（`scripts/`）：仅依赖标准库的 Python 工具，负责状态、派发、监控和审核关卡。通常由担任控制者的 Agent 运行，你也可以手动运行。
+- **工具**（`scripts/`）：仅依赖标准库的 Python 命令，提供本地 SQLite 账本、派发、监控和审核关卡。“只发送一次、只通知一次、未审核不算完成、旧控制者失去权限”这些保证由工具强制执行，而不是靠提示词。
+- **Skill**（`SKILL.md`）：Agent 加载的操作规程，告诉它何时运行这些命令、如何编写任务和审核、何时停止。工具通常由担任控制者的 Agent 运行，你也可以手动运行。
 
 ```mermaid
 flowchart LR
@@ -73,7 +73,7 @@ python -B scripts/workflow_control.py --state runtime/first-run/state status --s
 
 ## 安装
 
-把仓库克隆到客户端的 Skill 目录，例如：
+一次克隆即可同时安装两部分：客户端读取 `SKILL.md`，控制者从同一目录运行 `scripts/`。工作流状态目录请放在克隆目录之外。把仓库克隆到客户端的 Skill 目录，例如：
 
 ```sh
 # Codex

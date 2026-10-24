@@ -1,13 +1,13 @@
 ---
 name: agent-workflow-orchestrator
-description: Configure and run multi-agent workflows with editable roles, architecture rules, and automation policies. Supports Planner, Executor, and Paper Lead as defaults across Codex, Pi, Claude, dsh-tui, Grok, and other harnesses through Herdr, command, or receipt adapters, with completion notification and independent review.
+description: Operating procedure for the bundled local multi-agent orchestration tool (scripts/). Use it to configure editable roles, architecture rules, and automation policies, then dispatch once, monitor status, record completion events, and gate independent review through the tool's ledger. Planner, Executor, and Paper Lead are defaults; any role can run in Codex, Pi, Claude, dsh-tui, Grok, or another harness through Herdr, command, or receipt adapters.
 ---
 
 # Agent Workflow Orchestrator
 
 English | [Chinese](SKILL.zh-CN.md)
 
-Coordinate planning, execution, monitoring, delivery, review, and follow-up tasks. This skill is independent of any project, path, model, or harness. Planner, Executor, and Paper Lead are editable defaults.
+Coordinate planning, execution, monitoring, delivery, review, and follow-up tasks. This skill is the operating procedure for the tool in `scripts/`: the scripts enforce single dispatch, identity checks, deduplicated notification, and review gates; this document tells you when and how to run them. Both are independent of any project, path, model, or harness. Planner, Executor, and Paper Lead are editable defaults.
 
 ## Load the workflow
 

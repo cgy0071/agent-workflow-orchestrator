@@ -7,7 +7,7 @@ description: Configure and run multi-agent workflows with editable roles, archit
 
 [English](SKILL.md) | Chinese
 
-组织可配置的多角色工作流，将任务、状态检测、交付、审核和下一步动作连接起来。技能独立于具体工程、路径、模型及 harness。Planner、Executor、Paper Lead 是默认模板，用户可以修改或替换。
+组织可配置的多角色工作流，将任务、状态检测、交付、审核和下一步动作连接起来。本 Skill 是 `scripts/` 中工具的操作规程：脚本强制执行单次派发、身份核验、通知去重和审核关卡，本文档说明何时以及如何运行它们。两者都独立于具体工程、路径、模型及 harness。Planner、Executor、Paper Lead 是默认模板，用户可以修改或替换。
 
 ## 读取配置
 
