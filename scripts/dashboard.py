@@ -35,59 +35,126 @@ HTML = r"""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Workflow Dashboard</title>
 <style nonce="__CSP_NONCE__">
-:root { color-scheme: light dark; --bg:#f4f6f8; --surface:#fff; --ink:#172634; --muted:#607586; --line:#dbe3e8;
-  --accent:#086d75; --accent-soft:#e0f3ef; --danger:#ad4334; --warn:#a66812; --shadow:0 10px 28px rgba(22,42,50,.07); }
-@media (prefers-color-scheme:dark) { :root { --bg:#111c23; --surface:#1b2a32; --ink:#ecf2f3;
-  --muted:#a7bbc3; --line:#34505b; --accent:#7dd4ca; --accent-soft:#21413f; --danger:#f29383;
-  --warn:#e2b46c; --shadow:0 10px 28px rgba(0,0,0,.15); } }
+:root { color-scheme:light; --bg:#f3f5f4; --surface:#fff; --ink:#172b32; --muted:#60757b;
+  --line:#dce5e3; --accent:#126b66; --accent-soft:#e5f3ef; --danger:#a43e37; --warn:#9a681d;
+  --shadow:0 10px 30px rgba(22,47,50,.055); --hero:#173b40; --hero-deep:#10292f; --hero-muted:#b5d4d2; }
+@media (prefers-color-scheme:dark) { :root { color-scheme:dark; --bg:#101d22; --surface:#1a2b30;
+  --ink:#ecf5f1; --muted:#a7bdbd; --line:#385057; --accent:#8bdfc9; --accent-soft:#23463e;
+  --danger:#f2a59d; --warn:#f0c580; --shadow:0 12px 36px rgba(0,0,0,.14);
+  --hero:#1d464b; --hero-deep:#163238; --hero-muted:#c0e0dc; } }
 * { box-sizing:border-box } html,body { margin:0; min-width:0 } body { background:var(--bg); color:var(--ink);
-  font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden }
-.shell { max-width:1400px; margin:auto; padding:24px clamp(14px,3vw,34px) 70px }
-header { display:flex; gap:20px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-bottom:23px }
-.eyebrow { text-transform:uppercase; font-size:11px; letter-spacing:.16em; font-weight:800; color:var(--accent) }
-h1 { margin:3px 0 6px; font-size:clamp(26px,3vw,39px); line-height:1.1; letter-spacing:-.035em }
-h2 { margin:0 0 14px; font-size:19px; letter-spacing:-.025em }
-h3 { margin:0 0 8px; font-size:16px } p { margin:7px 0 } small,.muted { color:var(--muted) }
-.sub { color:var(--muted); max-width:900px; overflow-wrap:anywhere }
-.toolbar { display:flex; align-items:center; gap:9px; flex-wrap:wrap }
-button { cursor:pointer; border:1px solid var(--line); border-radius:9px; background:var(--surface); color:var(--ink);
-  padding:9px 13px; font:inherit; font-weight:650 }
-button:hover { border-color:var(--accent); color:var(--accent) } button:disabled { opacity:.45; cursor:default }
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden }
+.shell { max-width:1460px; margin:auto; padding:22px clamp(14px,3vw,40px) 70px }
+.masthead { position:relative; overflow:hidden; display:flex; gap:24px; align-items:flex-start;
+  justify-content:space-between; flex-wrap:wrap; padding:30px 32px; border-radius:22px;
+  background:radial-gradient(circle at 85% 15%,rgba(113,211,188,.15) 0 1px,transparent 2px) 0 0/18px 18px,
+    linear-gradient(120deg,var(--hero-deep),var(--hero)); color:#f1faf7; box-shadow:0 16px 36px rgba(15,42,46,.12) }
+.hero-copy { min-width:0; flex:1 1 390px; position:relative; z-index:1 }
+.eyebrow { display:flex; align-items:center; gap:9px; text-transform:uppercase; font-size:11px;
+  letter-spacing:.16em; font-weight:800; color:#9ce4cc }
+.eyebrow:before { content:""; width:7px; height:7px; border-radius:50%; background:#9ce4cc;
+  box-shadow:0 0 0 4px rgba(156,228,204,.15) }
+h1 { margin:9px 0 12px; font-size:clamp(31px,3.5vw,48px); line-height:1.08; letter-spacing:-.045em }
+h2 { margin:0; font-size:18px; line-height:1.25; letter-spacing:-.025em }
+h3 { margin:0; font-size:15px } p { margin:7px 0 } small,.muted { color:var(--muted) }
+.masthead .sub { color:var(--hero-muted) } .sub { max-width:900px; overflow-wrap:anywhere }
+.state-path { display:inline-block; max-width:100%; padding:8px 11px; margin:2px 0 0; border-radius:9px;
+  color:#d8ece7 !important; background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.12);
+  font:12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace }
+.masthead #goal { margin:11px 0 0; font-size:13px }
+.toolbar { display:flex; justify-content:flex-end; align-items:center; gap:8px; flex-wrap:wrap;
+  max-width:500px; position:relative; z-index:1 }
+button { cursor:pointer; border:1px solid var(--line); border-radius:9px; background:var(--surface);
+  color:var(--ink); padding:9px 13px; font:inherit; font-weight:700; transition:background .15s,border-color .15s,transform .15s }
+button:hover { border-color:var(--accent); color:var(--accent); transform:translateY(-1px) }
+button:disabled { opacity:.45; cursor:default; transform:none } button:focus-visible,input:focus-visible,
+select:focus-visible,textarea:focus-visible { outline:3px solid #5abfae; outline-offset:2px }
+.masthead button { background:rgba(255,255,255,.1); color:#f5fcf9; border-color:rgba(255,255,255,.23) }
+.masthead button:hover { background:rgba(255,255,255,.2); color:#fff; border-color:#9ce4cc }
 button.primary { background:var(--accent); color:var(--bg); border-color:var(--accent) }
 input,select,textarea { min-width:0; width:100%; border:1px solid var(--line); border-radius:9px;
-  background:var(--surface); color:var(--ink); font:inherit; padding:9px 11px }
+  background:var(--surface); color:var(--ink); font:inherit; padding:10px 11px }
 textarea { min-height:116px; resize:vertical } input[type=checkbox] { width:auto; margin:0 5px 0 0 }
 label { display:block; font-weight:650; font-size:13px } label span { display:block; margin-bottom:5px }
-.inline-label { display:flex; align-items:center; font-size:13px; color:var(--muted); font-weight:600 }
-.grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(280px,1fr); gap:18px }
+.inline-label { display:flex; align-items:center; font-size:12px; color:var(--hero-muted); font-weight:650;
+  padding:8px 9px; white-space:nowrap }
+.section-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+  margin:15px 2px 14px; color:var(--muted); font-size:12px }
+.section-meta #updated { margin:0 } .local-tag { color:var(--accent); font-size:11px; font-weight:800;
+  letter-spacing:.1em; text-transform:uppercase }
+.overview { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin:16px 0 0 }
+.metric { min-width:0; padding:16px 19px; border:1px solid var(--line); border-radius:15px;
+  background:var(--surface); box-shadow:var(--shadow) }
+.metric-label { color:var(--muted); font-size:11px; font-weight:750; letter-spacing:.09em; text-transform:uppercase }
+.metric-value { display:block; margin:3px 0 0; font-size:29px; font-weight:780; line-height:1.1; letter-spacing:-.05em }
+.metric-note { display:block; margin-top:5px; color:var(--muted); font-size:11px; overflow-wrap:anywhere }
+.grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(280px,1fr); gap:16px }
 .stack { display:grid; gap:18px } .panel { min-width:0; background:var(--surface); border:1px solid var(--line);
-  border-radius:14px; padding:20px; box-shadow:var(--shadow) }
+  border-radius:17px; padding:21px; box-shadow:var(--shadow) }
+.panel-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:17px }
+.panel-caption { font-size:11px; font-weight:700; letter-spacing:.04em; color:var(--muted) }
 .wide { grid-column:1 / -1 } .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:12px }
-.role { border:1px solid var(--line); border-radius:11px; padding:14px; min-width:0 }
-.role p { margin:5px 0; font-size:13px; overflow-wrap:anywhere } .role strong { color:var(--ink) }
+.role { border:1px solid var(--line); border-radius:13px; padding:15px; min-width:0;
+  background:linear-gradient(160deg,var(--accent-soft),var(--surface) 38%); }
+.role-top { display:flex; align-items:center; gap:10px; margin-bottom:14px }
+.role-mark { display:grid; place-items:center; flex:none; width:34px; height:34px; border-radius:10px;
+  color:var(--accent); background:var(--accent-soft); font-size:16px; font-weight:800; text-transform:uppercase }
+.role-top h3 { margin:0; font-size:15px; line-height:1.15 }
+.role-top .badge { margin-left:auto } .binding { margin:0 0 10px }
+.role-meta { display:grid; grid-template-columns:78px minmax(0,1fr); gap:5px 8px; margin:0;
+  padding:11px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); font-size:12px }
+.meta-key { color:var(--muted) } .meta-value { font-weight:650; overflow-wrap:anywhere }
+.role-tasks { margin:10px 0 0; font-size:12px; color:var(--muted); overflow-wrap:anywhere }
+.role-summary { margin:5px 0; font-size:12px; color:var(--muted) }
+.technical { margin-top:9px; font-size:12px; color:var(--muted) }
+.technical summary { cursor:pointer; font-weight:700; color:var(--accent) }
+.technical p { margin:5px 0; overflow-wrap:anywhere }
+.technical .role-meta { margin-top:8px }
 .badge { display:inline-block; border-radius:30px; padding:3px 9px; font-size:11px; font-weight:800;
-  letter-spacing:.025em; background:var(--accent-soft); color:var(--accent) }
-.badge.accepted,.badge.submitted { background:#e2f4e9; color:#23744a }
-.badge.executing,.badge.running { background:#e5efff; color:#275da6 }
-.badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review { background:#fff0d4; color:#84571b }
-.badge.failed,.badge.review_blocked,.badge.needs_inspection { background:#ffebe6; color:#a54231 }
-@media (prefers-color-scheme:dark) { .badge.accepted,.badge.submitted { background:#1d3e30;color:#98dab0 }
-  .badge.executing,.badge.running { background:#203c59;color:#a9ccff }
-  .badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review { background:#47371b;color:#f2d097 }
-  .badge.failed,.badge.review_blocked,.badge.needs_inspection { background:#4d302d;color:#f9b1a6 } }
-.table-scroll { max-width:100%; overflow-x:auto } table { width:100%; border-collapse:collapse; font-size:13px }
-th { text-align:left; color:var(--muted); font-size:11px; letter-spacing:.06em; text-transform:uppercase }
-th,td { padding:10px 9px; border-bottom:1px solid var(--line); vertical-align:top; overflow-wrap:anywhere }
-tr.task-row { cursor:pointer } tr.task-row:hover { background:var(--accent-soft) }
+  letter-spacing:.015em; background:var(--accent-soft); color:var(--accent) }
+.badge.accepted,.badge.submitted { background:#e3f3e9; color:#246a47 }
+.badge.executing,.badge.running { background:#e5efff; color:#285c96 }
+.badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review { background:#fff0d5; color:#855a19 }
+.badge.failed,.badge.review_blocked,.badge.needs_inspection { background:#fce9e5; color:#a43e37 }
+@media (prefers-color-scheme:dark) { .badge.accepted,.badge.submitted { background:#234735;color:#a4e5b9 }
+  .badge.executing,.badge.running { background:#243f5c;color:#a9ceff }
+  .badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review { background:#513d1d;color:#f5d99e }
+  .badge.failed,.badge.review_blocked,.badge.needs_inspection { background:#50322f;color:#f6aaa1 } }
+.table-scroll { max-width:100%; overflow-x:auto } table { width:100%; border-collapse:collapse; font-size:12px }
+th { text-align:left; color:var(--muted); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+  border-bottom:1px solid var(--line); white-space:nowrap }
+th,td { padding:12px 9px; vertical-align:top; overflow-wrap:anywhere }
+td { border-bottom:1px solid var(--line) } .task-row td:first-child { font-weight:800; color:var(--ink);
+  font:700 12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace }
+tr.task-row { cursor:pointer; transition:background .15s } tr.task-row:hover { background:var(--accent-soft) }
+tr.task-row td:last-child { color:var(--warn) } tr.task-row td.info-note { color:var(--muted) }
+.task-row td:nth-child(6) { min-width:170px }
 .detail { background:var(--bg); padding:13px; border-radius:9px; overflow-wrap:anywhere }
 pre { margin:7px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
   background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:9px; max-height:320px; overflow:auto }
-.dag-scroll { width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:10px; background:var(--bg) }
-svg { display:block; width:100%; min-width:0; height:auto } svg text { font:12px system-ui,sans-serif; fill:var(--ink) }
+.dag-run { min-width:0 } .dag-title { display:flex; align-items:center; gap:9px; margin:0 0 11px }
+.dag-count { color:var(--muted); font-size:11px }
+.dag-scroll { width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:12px;
+  padding:12px; background:var(--bg) }
+svg { display:block; max-width:none; height:auto; margin:auto } svg text { font:13px system-ui,sans-serif; fill:var(--ink) }
 svg line { stroke:var(--muted); stroke-width:1.5 } svg rect { fill:var(--surface); stroke:var(--line); stroke-width:1.5 }
 svg rect.accepted { stroke:#3baf70; stroke-width:2 } svg rect.executing { stroke:#478cd7; stroke-width:2 }
 svg rect.scheduling_blocked,svg rect.review_blocked { stroke:var(--warn); stroke-width:2 }
-.list { display:grid; gap:9px } .list-item { padding:9px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere }
+.list { display:grid; gap:8px } .list-item { padding:9px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere }
+.event-item,.alert-item { min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:10px;
+  background:var(--bg) } .event-head { display:flex; justify-content:space-between; align-items:center; gap:8px }
+.event-item small { display:block; overflow-wrap:anywhere; font-size:11px; margin-top:5px }
+.event-item strong { font:700 12px ui-monospace,SFMono-Regular,Consolas,monospace }
+.alert-item { border-left:3px solid var(--warn); padding:13px 15px }
+.alert-item.info { border-left-color:var(--accent) }
+.alert-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:7px }
+.alert-head strong { font:700 12px ui-monospace,SFMono-Regular,Consolas,monospace }
+.alert-item h3 { margin:0 0 5px; font-size:13px; line-height:1.3 }
+.alert-item p { margin:4px 0; font-size:12px; line-height:1.5 }
+.alert-next { color:var(--ink); font-weight:650 }
+.alert-technical { color:var(--muted); overflow-wrap:anywhere }
+.detail-note { margin:10px 0; padding:10px 12px; border-left:3px solid var(--accent);
+  background:var(--surface); border-radius:7px; font-size:12px }
 .meter { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; margin:8px 0 }
 progress { width:100%; height:12px; accent-color:var(--accent) }
 .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px }
@@ -98,62 +165,93 @@ progress { width:100%; height:12px; accent-color:var(--accent) }
 .path-row label { flex:1; min-width:0 } .recent-item { text-align:left; width:100%; overflow-wrap:anywhere; font-weight:500 }
 code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
 .hidden { display:none !important } .small-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
-@media(max-width:800px) { .grid { grid-template-columns:1fr } .wide { grid-column:auto } }
-@media(max-width:520px) { .shell { padding:16px 12px 44px } .panel { padding:14px } .form-grid { grid-template-columns:1fr }
+@media(max-width:900px) { .grid { grid-template-columns:1fr } .wide { grid-column:auto }
+  .overview { grid-template-columns:repeat(2,minmax(0,1fr)) } }
+@media(max-width:520px) { .shell { padding:12px 12px 44px } .masthead { padding:23px 18px; border-radius:16px }
+  .toolbar { justify-content:flex-start } .inline-label { padding-left:0 } .panel { padding:16px }
+  .metric { padding:13px 14px } .metric-value { font-size:25px } .form-grid { grid-template-columns:1fr }
   .form-grid .full { grid-column:auto } .cards { grid-template-columns:1fr } .table-scroll { overflow:visible }
   table,tbody,tr,td { display:block; width:100% } thead { display:none }
   tr.task-row { display:grid; grid-template-columns:1fr 1fr; gap:5px 8px; padding:11px 0; border-bottom:1px solid var(--line) }
-  tr.task-row td { border:0; padding:0; min-width:0 } tr.task-row td:first-child { grid-column:1 / -1; font-weight:800 }
+  tr.task-row td { border:0; padding:0; min-width:0 }
+  tr.task-row td::before { content:attr(data-label); display:block; color:var(--muted); font:700 10px/1.5 system-ui,sans-serif;
+    letter-spacing:.06em; text-transform:uppercase }
+  tr.task-row td:first-child,tr.task-row td:nth-child(6) { grid-column:1 / -1 }
+  tr.task-row td:first-child { font-weight:800 }
   tr.detail-row td { border:0; padding:7px 0 } }
 </style>
 </head>
 <body>
 <div class="shell">
-  <header><div><div class="eyebrow">LOCAL / LEDGER VIEW</div><h1>Workflow Dashboard</h1>
-    <p class="sub" id="state">Loading state...</p><p class="sub" id="goal"></p></div>
-    <div class="toolbar"><label class="inline-label"><input id="auto" type="checkbox" checked>Auto refresh / 5s</label>
-      <button id="refresh" type="button">Refresh ledger</button><button id="probe" type="button">Probe workers</button>
-      <button id="switch" type="button" class="hidden">Switch state</button></div></header>
-  <p class="sub" id="updated">Waiting for first refresh</p><p class="error" id="error" role="alert"></p>
-  <section class="panel hidden" id="picker"><h2>Open a workflow state</h2>
-    <p class="muted">Choose a recent state directory, or paste the absolute path given to <code>init</code>.</p>
+  <header class="masthead"><div class="hero-copy"><div class="eyebrow">Local workflow status</div>
+    <h1>Workflow Dashboard</h1><p class="sub state-path" id="state">Loading state...</p>
+    <p class="sub" id="goal"></p></div>
+    <div class="toolbar"><label class="inline-label"><input id="auto" type="checkbox" checked>Update page every 5s</label>
+      <button id="refresh" type="button">Refresh page</button><button id="probe" type="button">Check workers now</button>
+      <button id="switch" type="button" class="hidden">Choose workflow</button></div></header>
+  <section class="overview" id="overview" aria-label="Workflow overview">
+    <div class="metric"><span class="metric-label">Tasks</span><strong id="metric-tasks" class="metric-value">--</strong>
+      <span id="metric-tasks-note" class="metric-note">Accepted tasks</span></div>
+    <div class="metric"><span class="metric-label">Assigned roles</span><strong id="metric-roles" class="metric-value">--</strong>
+      <span id="metric-roles-note" class="metric-note">Configured roles</span></div>
+    <div class="metric"><span class="metric-label">Task plans</span><strong id="metric-dags" class="metric-value">--</strong>
+      <span class="metric-note">Tasks linked by prerequisites</span></div>
+    <div class="metric"><span class="metric-label">Completion updates</span><strong id="metric-inbox" class="metric-value">--</strong>
+      <span id="metric-inbox-note" class="metric-note">Waiting for review</span></div>
+  </section>
+  <div class="section-meta"><p id="updated">Waiting for first update</p>
+    <span class="local-tag">Page updates do not contact workers</span></div><p class="error" id="error" role="alert"></p>
+  <section class="panel hidden" id="picker"><h2>Choose a workflow</h2>
+    <p class="muted">Select a recent workflow data folder, or enter the full path created when the workflow was initialized.</p>
     <div id="recent" class="list"></div>
-    <div class="path-row"><label><span>State directory</span><input id="state-input" autocomplete="off"
+    <div class="path-row"><label><span>Workflow data folder</span><input id="state-input" autocomplete="off"
       placeholder="E:\work\state  or  /home/me/work/state"></label>
       <button id="open-state" class="primary" type="button">Open</button></div>
     <p id="picker-error" class="error" role="alert"></p></section>
   <div class="grid" id="main">
-    <section class="panel wide"><h2>Roles & bindings</h2><div id="roles" class="cards"></div></section>
-    <section class="panel wide"><h2>Tasks</h2><div class="table-scroll"><table><thead><tr><th>Task</th><th>Phase</th>
-      <th>Worker</th><th>Dispatch</th><th>Claim</th><th>Review</th><th>Next</th><th>Observed</th><th>Alerts</th>
+    <section class="panel wide"><div class="panel-head"><h2>People and agents</h2>
+      <span class="panel-caption">Who can work on these tasks</span></div><div id="roles" class="cards"></div></section>
+    <section class="panel wide"><div class="panel-head"><h2>Tasks</h2>
+      <span class="panel-caption">Select a row for details</span></div><div class="table-scroll"><table><thead><tr><th>Task</th><th>Stage</th>
+      <th>Assigned to</th><th>Delivery</th><th>Review</th><th>Next step</th><th>Last check</th><th>Note</th>
       </tr></thead><tbody id="tasks"></tbody></table></div></section>
-    <section class="panel wide"><h2>DAG runs</h2><div id="dags" class="stack"></div></section>
-    <section class="panel"><h2>Inbox</h2><div id="inbox" class="list"></div></section>
-    <section class="panel"><h2>Resources & claims</h2><div id="resources"></div></section>
-    <section class="panel"><h2>Alerts</h2><div id="alerts" class="list"></div></section>
-    <section class="panel"><h2>Live probe</h2><p class="muted">Only the button above contacts workers.</p>
+    <section class="panel wide"><div class="panel-head"><h2>Task plans</h2>
+      <span class="panel-caption">A task can start after its prerequisites are accepted</span></div><div id="dags" class="stack"></div></section>
+    <section class="panel"><div class="panel-head"><h2>Completion inbox</h2>
+      <span class="panel-caption">Updates for reviewers</span></div><div id="inbox" class="list"></div></section>
+    <section class="panel"><div class="panel-head"><h2>Resource limits</h2>
+      <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
+    <section class="panel"><div class="panel-head"><h2>Alerts & guidance</h2>
+      <span class="panel-caption">Meaning and next step</span></div><div id="alerts" class="list"></div></section>
+    <section class="panel"><div class="panel-head"><h2>Current worker check</h2>
+      <span class="panel-caption">On demand only</span></div><p class="muted">The page refresh reads saved records. Use Check workers now to contact active workers.</p>
       <div id="probe-result" class="list"></div></section>
-    <section class="panel wide" id="dispatch-panel"><h2>Dispatch a task</h2>
+    <section class="panel wide" id="dispatch-panel"><div class="panel-head"><h2>Start a task</h2>
+      <span class="panel-caption">One send attempt after your confirmation</span></div>
       <p class="muted" id="dispatch-note"></p>
       <div id="dispatch-form" class="hidden">
         <div class="form-grid">
-          <label><span>Worker role</span><select id="worker-role"></select></label>
-          <label><span>Task ID</span><input id="task-id" autocomplete="off" placeholder="TASK-123" maxlength="64"></label>
-          <label><span>Nonce (generated by preview)</span><input id="nonce" readonly></label>
-          <label><span>Authorization source</span><input id="source" placeholder="Current owner instruction"></label>
-          <label><span>Binding artifact</span><input id="binding" value="HANDOFF.md"></label>
-          <label><span>Other artifacts (comma separated)</span><input id="artifacts" value="RESULT.md"></label>
-          <label><span>Resources (JSON)</span><input id="resource-input" value="{}"></label>
-          <label class="inline-label"><input id="notify" type="checkbox">Authorize direct reviewer prompt when policy permits</label>
-          <label class="full"><span>Task body: objective, scope, acceptance</span>
+          <label><span>Who should do the work?</span><select id="worker-role"></select></label>
+          <label><span>Task name or ID</span><input id="task-id" autocomplete="off" placeholder="TASK-123" maxlength="64"></label>
+          <label><span>Approval source</span><input id="source" placeholder="Current owner instruction"></label>
+          <label class="full"><span>What should they do? Include scope and acceptance checks.</span>
             <textarea id="body" placeholder="Objective:&#10;Allowed changes:&#10;Acceptance:"></textarea></label>
-        </div><div class="actions"><button id="preview" class="primary" type="button">Preview & validate</button>
-          <button id="confirm" type="button" disabled>Confirm one-time dispatch</button></div>
+          <div class="full"><details class="technical"><summary>Advanced task settings</summary>
+            <p>Use these only when the task needs different evidence files or reserved resources.</p>
+            <div class="form-grid">
+              <label><span>Completion marker file</span><input id="binding" value="HANDOFF.md"></label>
+              <label><span>Other result files (comma separated)</span><input id="artifacts" value="RESULT.md"></label>
+              <label><span>Resource reservation (JSON)</span><input id="resource-input" value="{}"></label>
+              <label><span>One-time task token (created by preview)</span><input id="nonce" readonly></label>
+              <label class="full"><input id="notify" type="checkbox">Allow a direct reviewer notification when the workflow policy permits it</label>
+            </div></details></div>
+        </div><div class="actions"><button id="preview" class="primary" type="button">Check and preview</button>
+          <button id="confirm" type="button" disabled>Confirm and send once</button></div>
         <p id="dispatch-error" class="error" role="alert"></p>
-        <div id="preview-output" class="hidden"><h3>Frozen preview</h3><p class="muted">Review the full request and message before confirming.</p>
+        <div id="preview-output" class="hidden"><h3>Ready to send</h3><p class="muted">Check the complete request and worker message before confirming. This preview does not send anything.</p>
           <pre id="preview-request"></pre><pre id="preview-message"></pre></div>
-        <div id="dispatch-output" class="hidden"><h3>Dispatch result</h3><p id="dispatch-status"></p>
-          <p class="notice">Independently confirm execution before writing EXECUTION.md and running reconcile. Never resend an uncertain dispatch.</p>
+        <div id="dispatch-output" class="hidden"><h3>Send result</h3><p id="dispatch-status"></p>
+          <p class="notice">Sending a task does not prove the worker started. Confirm execution independently, write EXECUTION.md, then run the reconciliation command. If delivery is uncertain, inspect the record before any new action.</p>
           <div class="small-actions"><strong>EXECUTION.md template</strong><button type="button" data-copy="execution-template">Copy</button></div>
           <pre id="execution-template"></pre><div class="small-actions"><strong>Reconcile command</strong>
           <button type="button" data-copy="reconcile-command">Copy</button></div><pre id="reconcile-command"></pre>
@@ -188,42 +286,171 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     return data;
   }
   function empty(container, message) { container.replaceChildren(); add(container, 'p', 'muted', message); }
+  function metrics(data) {
+    const active = data.roles.filter(r => r.bindings.some(b => b.status === 'active'));
+    const accepted = data.tasks.filter(t => t.phase === 'accepted').length;
+    const pending = data.inbox.filter(e => e.status === 'pending').length;
+    id('metric-tasks').textContent = data.tasks.length;
+    id('metric-tasks-note').textContent = accepted + ' accepted';
+    id('metric-roles').textContent = active.length;
+    id('metric-roles-note').textContent = 'of ' + data.roles.length + ' configured';
+    id('metric-dags').textContent = Object.keys(data.dags).length;
+    id('metric-inbox').textContent = data.inbox.length;
+    id('metric-inbox-note').textContent = pending + ' waiting for review';
+  }
+  const stageNames = {
+    accepted:'Accepted', evidence_changed:'Accepted review; evidence changed', review_blocked:'Review needs follow-up',
+    closed:'Closed after inspection', execution_unconfirmed:'Start not confirmed', awaiting_review:'Awaiting review',
+    failed:'Worker stopped', needs_inspection:'Check worker status', executing:'In progress',
+    scheduling_blocked:'Could not start', ready:'Ready to start', waiting:'Waiting for earlier tasks',
+    blocked_dependency:'Earlier task needs attention', blocked:'Needs attention', under_review:'Under review',
+    running:'In progress', submitted:'Sent; start unconfirmed', reserved:'Send reserved', uncertain:'Send uncertain',
+    not_sent:'Not sent', terminated:'Stopped', pending:'Waiting for review', acknowledged:'Review acknowledged',
+    reviewed:'Reviewed'
+  };
+  const reviewNames = {accept:'Accepted', reject:'Rejected', repair:'Needs repair'};
+  const nextNames = {
+    release_claim_or_advance:'Release reserved resources or continue the plan',
+    inspect_changed_evidence:'Check why accepted evidence changed',
+    plan_new_scoped_task:'Plan a follow-up task after the review',
+    retain_evidence:'Keep the final evidence',
+    inspect_execution_no_resend:'Check whether the worker started; do not resend blindly',
+    acknowledge_and_review:'Acknowledge the update and review the evidence',
+    inspect_termination:'Inspect why the worker stopped',
+    inspect_monitor_and_worker:'Check the monitor record and worker',
+    await_delivery:'Wait for the worker to deliver its result',
+    inspect_notification_and_inbox:'Check the reviewer inbox; do not resend blindly',
+    resolve_scheduling_block:'Resolve the start blocker',
+    tick:'Run the scheduler to start this ready task',
+    inspect_dependencies:'Check the earlier tasks'
+  };
+  const reportNames = {review_ready:'Work submitted for review', failed:'Worker failed', exited:'Worker exited'};
+  const dagNames = {evidence_changed:'Evidence changed', execution_unconfirmed:'Start unconfirmed',
+    blocked_dependency:'Prerequisite blocked', review_blocked:'Review follow-up',
+    scheduling_blocked:'Could not start', waiting:'Waiting', ready:'Ready to start',
+    under_review:'Under review', submitted:'Sent', uncertain:'Send uncertain'};
+  function named(value, names) { return names[value] || (value ? String(value).replaceAll('_', ' ') : 'Not recorded'); }
+  function deliveryText(task) {
+    if (task.phase === 'accepted' || task.phase === 'evidence_changed') return 'Received and reviewed';
+    if (task.phase === 'awaiting_review') return 'Received; awaiting review';
+    if (task.phase === 'review_blocked') return 'Review needs follow-up';
+    if (task.phase === 'closed') return 'Attempt closed';
+    if (task.phase === 'execution_unconfirmed') return 'Start not confirmed';
+    return task.dispatch ? named(task.dispatch, {reserved:'Send reserved', uncertain:'Send uncertain',
+      submitted:'Sent; start unconfirmed', running:'Start confirmed', not_sent:'Not sent', terminated:'Stopped'}) :
+      'No send recorded';
+  }
+  function detailLine(root, label, value) { add(root, 'p', '', label + ': ' + (value ?? 'not recorded')); }
+  function technical(root, label) {
+    const details = add(root, 'details', 'technical'); add(details, 'summary', '', label); return details;
+  }
+  function warningInfo(code, task) {
+    const finished = task && ['accepted', 'closed'].includes(task.phase);
+    if (code === 'no_monitor_observation') return finished ? {
+      label:'No live check saved', title:'No monitoring history saved', tone:'info',
+      explanation:'The listed work has finished, but the ledger has no saved live monitoring check. This does not mean a worker failed.',
+      next:'No action is needed unless you are investigating the task history.'
+    } : {
+      label:'No live check yet', title:'No monitoring update yet', tone:'info',
+      explanation:'The ledger has no saved monitoring check for this task. A missing check alone does not mean the worker stopped.',
+      next:'If you need a current status, use Check workers now before taking action.'
+    };
+    if (code === 'observation_stale') return {
+      label:'Live check is old', title:'Last monitoring update is old', tone:finished ? 'info' : 'check',
+      explanation:'The latest saved check is older than 15 minutes. It is a past observation, not proof of the worker\'s current state.',
+      next:finished ? 'No action is needed unless you are reviewing this task\'s history.' :
+        'Use Check workers now for a current check, then review the task\'s monitor record if the status still looks wrong.'
+    };
+    if (code === 'invalid_observation_timestamp') return {
+      label:'Check time unavailable', title:'Monitoring time cannot be read', tone:'check',
+      explanation:'The saved check has an invalid time, so the dashboard cannot tell how recent it is.',
+      next:'Inspect the task\'s monitor record before relying on its age.'
+    };
+    if (code === 'notification_uncertain_no_resend') return {
+      label:'Reviewer notice uncertain', title:'Reviewer notification may have arrived', tone:'check',
+      explanation:'The send result is uncertain. Sending it again could create a duplicate message.',
+      next:'Check the reviewer inbox and delivery evidence first. Do not resend blindly.'
+    };
+    return {label:'Status needs inspection', title:'Unrecognized status note', tone:'check',
+      explanation:'The ledger contains a status note this dashboard cannot explain yet.',
+      next:'Inspect the task details or ledger before taking action.', technical:String(code)};
+  }
+  function alertCard(root, taskIds, info) {
+    const card = add(root, 'article', 'alert-item ' + info.tone);
+    const head = add(card, 'div', 'alert-head');
+    add(head, 'strong', '', taskIds.length === 1 ? taskIds[0] : taskIds.length + ' tasks');
+    add(head, 'span', 'badge', info.tone === 'info' ? 'For reference' : 'Check needed');
+    add(card, 'h3', '', info.title);
+    if (taskIds.length > 1) add(card, 'p', 'alert-technical', 'Tasks: ' + taskIds.join(', '));
+    add(card, 'p', '', info.explanation);
+    add(card, 'p', 'alert-next', 'Next: ' + info.next);
+    if (info.technical) add(card, 'p', 'alert-technical', 'Ledger detail: ' + info.technical);
+  }
   function roles(data) {
     const root = id('roles'); root.replaceChildren();
     for (const role of data.roles) {
-      const card = add(root, 'article', 'role'); add(card, 'h3', '', role.role);
-      if (!role.bindings.length) add(card, 'p', 'muted', 'No active or pending binding');
-      for (const b of role.bindings) {
-        const p = add(card, 'p'); p.append(el('span', 'badge ' + b.status, b.status));
-        for (const [key, value] of [['Mode', b.mode], ['Harness', b.harness], ['Adapter', b.adapter],
-          ['Version', b.version], ['Policy', b.context_policy], ['Instance', b.instance_id], ['Bound', b.bound_at]]) {
-          const row = add(card, 'p'); add(row, 'strong', '', key + ': '); row.append(document.createTextNode(String(value ?? 'unknown')));
+      const card = add(root, 'article', 'role'); const top = add(card, 'div', 'role-top');
+      add(top, 'span', 'role-mark', role.role.slice(0, 1)); add(top, 'h3', '', role.role);
+      const current = role.bindings.find(b => b.status === 'active') || role.bindings[0];
+      const purpose = {worker:'Runs assigned tasks', controller:'Coordinates tasks and next steps',
+        reviewer:'Checks delivered work'};
+      if (current) add(top, 'span', 'badge ' + current.status,
+        current.status === 'active' ? 'Assigned' : 'Setup pending');
+      add(card, 'p', 'role-summary', current ?
+        (purpose[current.mode] || 'Assigned workflow role') : 'No active agent connection');
+      add(card, 'p', 'role-tasks', role.tasks.length ?
+        role.tasks.length + ' open task' + (role.tasks.length === 1 ? '' : 's') + ': ' +
+          role.tasks.map(t => t.task_id).join(', ') : 'No open tasks');
+      if (role.bindings.length) {
+        const extra = technical(card, 'Connection details');
+        for (const b of role.bindings) {
+          const binding = add(extra, 'div', 'binding');
+          if (role.bindings.length > 1) add(binding, 'span', 'badge ' + b.status, named(b.status, {active:'Assigned', pending:'Setup pending'}));
+          const meta = add(binding, 'div', 'role-meta');
+          for (const [key, value] of [['Mode', b.mode], ['Harness', b.harness], ['Adapter', b.adapter],
+            ['Version', b.version], ['Context policy', b.context_policy], ['Instance', b.instance_id], ['Bound', b.bound_at]]) {
+            add(meta, 'span', 'meta-key', key); add(meta, 'span', 'meta-value', value ?? 'unknown');
+          }
         }
       }
-      const tasks = role.tasks.map(t => t.task_id + ' / ' + t.phase).join(', ');
-      add(card, 'p', 'muted', 'Open tasks: ' + (tasks || 'none'));
     }
   }
   function taskTable(data) {
     const root = id('tasks'); root.replaceChildren();
-    if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 9; return; }
+    if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 8; return; }
     for (const t of data.tasks) {
       const tr = add(root, 'tr', 'task-row');
-      add(tr, 'td', '', t.task_id); const phase = add(tr, 'td'); add(phase, 'span', 'badge ' + t.phase, t.phase);
-      add(tr, 'td', '', t.worker_role + ' / ' + t.harness + ' / ' + t.adapter);
-      add(tr, 'td', '', t.dispatch || 'none'); add(tr, 'td', '', t.claim_held ? 'held' : 'none');
-      add(tr, 'td', '', t.review_verdicts.join(', ') || 'none');
-      add(tr, 'td', '', t.next_role + ' / ' + t.next_action);
-      add(tr, 'td', '', t.observation_age_seconds === null ? 'unavailable' : Math.round(t.observation_age_seconds) + 's');
-      add(tr, 'td', '', t.warnings.join(', ') || 'none');
-      const detailRow = add(root, 'tr', 'detail-row hidden'); const td = add(detailRow, 'td'); td.colSpan = 9;
+      add(tr, 'td', '', t.task_id); const phase = add(tr, 'td');
+      add(phase, 'span', 'badge ' + t.phase, named(t.phase, stageNames));
+      add(tr, 'td', '', t.worker_role);
+      add(tr, 'td', '', deliveryText(t));
+      add(tr, 'td', '', t.review_verdicts.map(v => named(v, reviewNames)).join(', ') || 'Not reviewed');
+      add(tr, 'td', '', t.next_role + ': ' + named(t.next_action, nextNames));
+      add(tr, 'td', '', t.observation_age_seconds === null ? 'No saved check' :
+        Math.round(t.observation_age_seconds / 60) + ' min ago');
+      const notes = t.warnings.map(code => warningInfo(code, t));
+      add(tr, 'td', notes.length && notes.every(note => note.tone === 'info') ? 'info-note' : '',
+        notes.map(note => note.label).join('; ') || 'No notes');
+      [...tr.cells].forEach((cell, index) => { cell.dataset.label =
+        ['Task', 'Stage', 'Assigned to', 'Delivery', 'Review', 'Next step', 'Last check', 'Note'][index]; });
+      const detailRow = add(root, 'tr', 'detail-row hidden'); const td = add(detailRow, 'td'); td.colSpan = 8;
       const detail = add(td, 'div', 'detail');
       const info = data.task_details[t.task_id] || {};
-      add(detail, 'p', '', 'Dependencies: ' + ((t.dependencies || []).join(', ') || 'none'));
-      add(detail, 'p', '', 'Block: ' + (t.blocking_reason || 'none'));
-      add(detail, 'p', '', 'Cwd: ' + (info.cwd || 'unknown'));
+      if (t.dependencies?.length) detailLine(detail, 'Starts after', t.dependencies.join(', '));
+      if (t.blocking_reason) detailLine(detail, 'Why it could not start', t.blocking_reason);
+      for (const code of t.warnings) {
+        const note = warningInfo(code, t), box = add(detail, 'div', 'detail-note');
+        add(box, 'strong', '', note.title);
+        add(box, 'p', '', note.explanation + ' Next: ' + note.next);
+        if (note.technical) add(box, 'p', 'muted', 'Ledger detail: ' + note.technical);
+      }
+      const extra = technical(detail, 'Technical record');
+      detailLine(extra, 'Phase', t.phase); detailLine(extra, 'Harness / adapter', t.harness + ' / ' + t.adapter);
+      detailLine(extra, 'Dispatch', t.dispatch); detailLine(extra, 'Resource reservation', t.claim_held ? 'held' : 'none');
+      detailLine(extra, 'Review verdicts', t.review_verdicts.join(', ') || 'none');
+      detailLine(extra, 'Next action', t.next_action); detailLine(extra, 'Working folder', info.cwd || 'unknown');
       const journal = (info.journal || []).map(j => [j.at, j.kind, j.actor].join(' | ')).join('\n');
-      add(detail, 'pre', '', journal || 'No journal entries');
+      add(extra, 'pre', '', journal || 'No journal entries');
       tr.addEventListener('click', () => detailRow.classList.toggle('hidden'));
     }
   }
@@ -231,9 +458,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function dagGraph(data) {
     const root = id('dags'); root.replaceChildren();
     const runs = Object.entries(data.dags);
-    if (!runs.length) { empty(root, 'No DAG runs'); return; }
+    if (!runs.length) { empty(root, 'No task plans yet'); return; }
     for (const [run, dag] of runs) {
-      const box = add(root, 'div'); add(box, 'h3', '', run);
+      const box = add(root, 'div', 'dag-run'); const title = add(box, 'div', 'dag-title');
+      add(title, 'h3', '', run); add(title, 'span', 'dag-count', Object.keys(dag.nodes).length + ' tasks');
       const levels = {}, visiting = new Set();
       const level = name => { if (levels[name] !== undefined) return levels[name];
         if (visiting.has(name)) return 0; visiting.add(name);
@@ -242,47 +470,77 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         visiting.delete(name); levels[name] = n; return n; };
       Object.keys(dag.nodes).forEach(level);
       const groups = []; for (const name of Object.keys(dag.nodes)) (groups[levels[name]] ||= []).push(name);
-      const width = Math.max(420, groups.length * 190 + 30);
-      const height = Math.max(120, Math.max(...groups.map(g => g.length)) * 88 + 20);
+      const width = Math.max(300, groups.length * 230 + 30);
+      const height = Math.max(130, Math.max(...groups.map(g => g.length)) * 105 + 24);
       const wrap = add(box, 'div', 'dag-scroll'); const svg = svgEl('svg');
       svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height); svg.setAttribute('role', 'img');
+      svg.style.width = width + 'px'; svg.style.height = height + 'px';
       svg.setAttribute('aria-label', 'Dependency graph for ' + run); wrap.append(svg);
-      const pos = {}; groups.forEach((group, col) => group.forEach((name, row) => { pos[name] = [20 + col * 190, 17 + row * 88]; }));
+      const pos = {}; groups.forEach((group, col) => group.forEach((name, row) => { pos[name] = [24 + col * 230, 18 + row * 105]; }));
       for (const [name, deps] of Object.entries(dag.dependencies)) for (const dep of deps) {
         if (!pos[name] || !pos[dep]) continue;
-        const line = svgEl('line'); line.setAttribute('x1', pos[dep][0] + 145); line.setAttribute('y1', pos[dep][1] + 25);
-        line.setAttribute('x2', pos[name][0]); line.setAttribute('y2', pos[name][1] + 25); svg.append(line);
+        const line = svgEl('line'); line.setAttribute('x1', pos[dep][0] + 175); line.setAttribute('y1', pos[dep][1] + 31);
+        line.setAttribute('x2', pos[name][0]); line.setAttribute('y2', pos[name][1] + 31); svg.append(line);
       }
       for (const [name, state] of Object.entries(dag.nodes)) {
         const [x,y] = pos[name]; const rect = svgEl('rect'); rect.setAttribute('x', x); rect.setAttribute('y', y);
-        rect.setAttribute('width', 145); rect.setAttribute('height', 54); rect.setAttribute('rx', 8);
+        rect.setAttribute('width', 175); rect.setAttribute('height', 64); rect.setAttribute('rx', 10);
         rect.setAttribute('class', state); svg.append(rect);
-        const label = svgEl('text'); label.setAttribute('x', x + 9); label.setAttribute('y', y + 21);
+        const label = svgEl('text'); label.setAttribute('x', x + 12); label.setAttribute('y', y + 26);
         label.textContent = name; svg.append(label);
-        const sub = svgEl('text'); sub.setAttribute('x', x + 9); sub.setAttribute('y', y + 40);
-        sub.textContent = state; svg.append(sub);
+        const sub = svgEl('text'); sub.setAttribute('x', x + 12); sub.setAttribute('y', y + 49);
+        sub.textContent = named(state, {...stageNames, ...dagNames}); svg.append(sub);
+        const tip = svgEl('title'); tip.textContent = name + ': ' + named(state, stageNames); rect.append(tip);
       }
     }
   }
   function lists(data) {
     const inbox = id('inbox'); inbox.replaceChildren();
-    if (!data.inbox.length) empty(inbox, 'No events');
-    else for (const e of data.inbox) add(inbox, 'div', 'list-item', e.event_id + ' / ' + e.task_id +
-      ' / ' + e.status + ' / ' + (e.report_status || 'unknown') + ' / ' + (e.created_at || ''));
+    if (!data.inbox.length) empty(inbox, 'No completion updates yet');
+    else for (const e of data.inbox) {
+      const item = add(inbox, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
+      add(head, 'strong', '', e.task_id); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
+      add(item, 'p', 'role-summary', named(e.report_status, reportNames));
+      if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
+      else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
+      if (e.created_at) {
+        const received = new Date(e.created_at);
+        add(item, 'small', '', 'Received ' + (Number.isNaN(received.getTime()) ? e.created_at : received.toLocaleString()));
+      }
+      const extra = technical(item, 'Event details'); detailLine(extra, 'Event ID', e.event_id);
+      detailLine(extra, 'Inbox status', e.status); detailLine(extra, 'Report status', e.report_status);
+    }
     const alerts = id('alerts'); alerts.replaceChildren();
-    if (!data.alerts.length && !Object.keys(data.scheduling_blocks).length) empty(alerts, 'No alerts');
-    else { for (const a of data.alerts) add(alerts, 'div', 'list-item', a.task_id + ': ' + a.warnings.join(', '));
-      for (const [task, block] of Object.entries(data.scheduling_blocks)) add(alerts, 'div', 'list-item', task + ': ' + block.reason); }
+    if (!data.alerts.length && !Object.keys(data.scheduling_blocks).length)
+      empty(alerts, 'Nothing needs attention right now.');
+    else {
+      const tasks = new Map(data.tasks.map(task => [task.task_id, task]));
+      const groups = new Map();
+      for (const a of data.alerts) for (const code of a.warnings) {
+        const info = warningInfo(code, tasks.get(a.task_id));
+        const key = code + '|' + info.next;
+        if (!groups.has(key)) groups.set(key, {ids:[], info});
+        groups.get(key).ids.push(a.task_id);
+      }
+      for (const group of groups.values()) alertCard(alerts, group.ids, group.info);
+      for (const [task, block] of Object.entries(data.scheduling_blocks))
+        alertCard(alerts, [task], {tone:'check', title:'Task could not start',
+          explanation:'The scheduler has paused this task before dispatch.',
+          next:'Read the scheduler detail and resolve the condition before the next scheduling pass.',
+          technical:block.reason || 'No reason recorded'});
+    }
     const resources = id('resources'); resources.replaceChildren();
     const caps = data.resource_capacities;
-    if (!Object.keys(caps).length) add(resources, 'p', 'muted', 'No resource capacities configured');
+    if (!Object.keys(caps).length) add(resources, 'p', 'muted', 'No named resource limits are set for this workflow.');
     for (const [name, cap] of Object.entries(caps)) {
       const used = data.claims.reduce((sum,c) => sum + (c.resources[name] || 0), 0);
       const row = add(resources, 'div', 'meter'); const bar = add(row, 'div'); add(bar, 'strong', '', name);
       const meter = add(bar, 'progress'); meter.max = cap; meter.value = used;
-      add(row, 'strong', '', used + ' / ' + cap);
+      add(row, 'strong', '', used + ' of ' + cap + ' reserved');
     }
-    add(resources, 'p', 'muted', data.claims.length + ' held claim(s)');
+    add(resources, 'p', 'muted', data.claims.length ?
+      data.claims.length + ' active task reservation' + (data.claims.length === 1 ? '' : 's') :
+      'No active task reservations');
   }
   function workers(data) {
     const select = id('worker-role'), selected = select.value;
@@ -294,11 +552,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   }
   function picker(data, open) {
     show('picker', open); show('main', !open && data.state !== null);
+    show('overview', !open && data.state !== null);
     show('switch', data.can_switch && data.state !== null); show('probe', data.state !== null);
-    id('switch').textContent = open && data.state !== null ? 'Cancel' : 'Switch state';
+    id('switch').textContent = open && data.state !== null ? 'Cancel' : 'Choose workflow';
     if (!open) return;
     const root = id('recent'); root.replaceChildren();
-    if (!data.recent.length) empty(root, 'No recent state directories');
+    if (!data.recent.length) empty(root, 'No recent workflows');
     for (const path of data.recent) {
       const button = add(root, 'button', 'recent-item', path); button.type = 'button';
       if (path === data.state) button.disabled = true;
@@ -314,16 +573,16 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   async function refresh() {
     try { const data = await api('/api/status'); lastData = data; id('error').textContent = '';
       picker(data, picking || data.state === null);
-      if (data.state === null) { id('state').textContent = 'No workflow state open'; id('goal').textContent = '';
-        id('updated').textContent = 'Pick a state directory to begin'; return; }
+      if (data.state === null) { id('state').textContent = 'No workflow open'; id('goal').textContent = '';
+        id('updated').textContent = 'Choose a workflow data folder to begin'; return; }
       id('state').textContent = data.state;
-      id('goal').textContent = data.goal ? 'Goal: ' + data.goal : 'No workflow goal configured';
-      id('updated').textContent = 'Last ledger refresh: ' + new Date().toLocaleTimeString();
-      roles(data); taskTable(data); dagGraph(data); lists(data); workers(data);
+      id('goal').textContent = data.goal ? 'Goal: ' + data.goal : 'No goal description set';
+      id('updated').textContent = 'Page updated: ' + new Date().toLocaleTimeString();
+      metrics(data); roles(data); taskTable(data); dagGraph(data); lists(data); workers(data);
       show('dispatch-form', data.allow_dispatch);
       id('dispatch-note').textContent = data.allow_dispatch ?
-        'Preview checks a live idle worker. Confirm reserves and sends once through the scheduler.' :
-        'Dispatch is disabled. Restart with --allow-dispatch, --actor, --version, --context main, and --tasks-root to enable it.';
+        'Preview checks that the worker is available. Confirm sends the task once; check the result before taking another action.' :
+        'Starting tasks is off for this dashboard session. To enable it, restart the server with --allow-dispatch and the required coordinator identity and task-folder options.';
     } catch (error) { id('error').textContent = error.message; }
   }
   function form(includeNonce) {
@@ -352,7 +611,9 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     if (!preview) return; const digest = preview.preview_sha256;
     id('confirm').disabled = true; id('dispatch-error').textContent = '';
     try { const result = await api('/api/dispatch/confirm', {...form(true), preview_sha256:digest});
-      id('dispatch-status').textContent = result.status;
+      id('dispatch-status').textContent = result.status === 'SUBMITTED' ?
+        'Task sent. Worker execution still needs independent confirmation.' :
+        'Send result uncertain. Inspect the task record before taking another action.';
       id('dispatch-status').className = result.status === 'SUBMITTED' ? 'success' : 'error';
       for (const key of ['execution-template','reconcile-command','monitor-command']) id(key).textContent = result[key];
       show('dispatch-output', true); await refresh();
@@ -360,11 +621,20 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     preview = null;
   });
   id('probe').addEventListener('click', async () => {
-    id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Probing...');
+    id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active workers...');
     try { const data = await api('/api/probe', {}); root.replaceChildren();
-      if (!data.workers.length) empty(root, 'No active workers');
-      for (const w of data.workers) add(root, 'div', 'list-item', w.role + ': ' +
-        (w.error || (w.status + ' / seq ' + w.completion_seq + ' / identity ' + w.identity_matches)));
+      if (!data.workers.length) empty(root, 'No active workers to check');
+      for (const w of data.workers) {
+        const item = add(root, 'div', 'list-item');
+        add(item, 'strong', '', w.role + ': ' + (w.error ? 'Could not check worker' :
+          w.identity_matches === false ? 'Worker identity changed; inspect before acting' :
+          named(w.status, {idle:'Available', working:'Working', blocked:'Needs help',
+            failed:'Failed', exited:'Exited', unknown:'Status unknown'})));
+        if (w.error) add(item, 'p', 'error', w.error);
+        const extra = technical(item, 'Check details');
+        detailLine(extra, 'Status', w.status); detailLine(extra, 'Completion sequence', w.completion_seq);
+        detailLine(extra, 'Identity matches', w.identity_matches);
+      }
     } catch (error) { empty(root, error.message); } finally { id('probe').disabled = false; }
   });
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {

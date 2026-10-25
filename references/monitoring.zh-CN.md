@@ -88,6 +88,6 @@ python -B scripts/dashboard.py --state /absolute/workflow-state
 
 不带 `--state` 时，页面会请你选择状态目录，并列出 `~/.agent-workflow-orchestrator/dashboard-recent.json` 中最多 10 个最近目录；该文件只保存路径。未启用派发时，可用 **Switch state** 切换查看的目录。默认端口 8765 被占用时，服务会自动改用空闲端口。可设置 `AWO_PYTHON` 指定启动文件使用的解释器。
 
-页面只读台账，不改动它，也不自动查询 Agent；显示绑定、任务阶段与证据、DAG 依赖、收件箱事件、资源占用和告警。自动刷新只读台账；**Probe workers** 按钮才执行有超时的实时状态查询。服务校验令牌、Host 和 POST Origin，使用严格 CSP，并把台账文字作为文本渲染。不要外传带令牌地址。
+页面只读台账，不改动它，也不自动查询 Agent；显示绑定、任务阶段与证据、DAG 依赖、收件箱事件、资源占用和告警。自动刷新只读台账；**Check workers now** 按钮才执行有超时的实时状态查询。服务校验令牌、Host 和 POST Origin，使用严格 CSP，并把台账文字作为文本渲染。不要外传带令牌地址。
 
 要启用表单派发，启动时与 `--state` 一起增加 `--allow-dispatch --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks`；此时状态目录固定，不能切换。actor 必须是当前有效控制者；`main` 是操作者的明确声明。预览实时检查空闲 Worker，返回任务绑定请求、nonce、消息与摘要，不写文件。确认时重新检查预览和完成序列，创建新任务目录，并交给 `workflow_scheduler.dispatch` 单次发送；不自动重试不确定派发。独立确认执行后，由操作者自行编写 `EXECUTION.md` 并运行页面显示的 `reconcile` 命令，再启动监控。页面不执行 reconcile、审核、绑定切换或 DAG tick。
