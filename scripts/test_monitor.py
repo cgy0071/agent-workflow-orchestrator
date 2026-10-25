@@ -225,8 +225,12 @@ class Tests(unittest.TestCase):
                  "agent_status": "idle", "state_change_seq": 11}
         agent.update(fields)
         transport = module.Transport(self.request)
-        transport.run = lambda argv, cwd=None: json.dumps({"result": {"agent": agent}})
+        transport.calls = []
+        transport.run = lambda argv, cwd=None: transport.calls.append(argv) or json.dumps({"result": {"agent": agent}})
         return spec, agent, transport
+
+    def prompts(self, transport):
+        return [argv for argv in transport.calls if argv[4] == "prompt"]
 
     def test_herdr_state_sequence_and_missing_counter(self):
         spec, agent, transport = self.herdr_fixture()
@@ -261,28 +265,61 @@ class Tests(unittest.TestCase):
         second = module.inspect_once(self.request, FakeTransport(self.request, seq=12), first[2], now=121)
         self.assertEqual(second[0], "settling")
 
-    def test_herdr_prompt_capability_without_harness_blacklist(self):
-        spec, agent, transport = self.herdr_fixture(agent="dsh-tui")
-        spec["expected_identity"]["kind"] = "dsh-tui"
-        self.assertEqual(transport.reviewer_identity(spec)["kind"], "dsh-tui")
-        spec["context_policy"] = "dedicated_window"
-        with self.assertRaisesRegex(ValueError, "agent_session"):
-            transport.reviewer_identity(spec)
-        with self.assertRaisesRegex(ValueError, "agent_session"):
-            transport.send(spec, "offline")
-        agent["agent_session"] = {"kind": "path", "value": "offline-session"}
-        self.assertEqual(transport.reviewer_identity(spec)["kind"], "dsh-tui")
+    def test_native_herdr_agent_prompts_without_agent_session(self):
+        spec, agent, transport = self.herdr_fixture(agent="codex")
+        spec.update(context_policy="dedicated_window")
+        spec["expected_identity"]["kind"] = "codex"
+        state = transport.status(spec)
+        self.assertTrue(state["prompt_available"])
+        self.assertNotIn("prompt_unavailable_reason", state)
+        self.assertEqual(transport.reviewer_identity(spec)["kind"], "codex")
         transport.send(spec, "offline")
+        self.assertEqual(self.prompts(transport), [["herdr", "--session", "offline", "agent", "prompt", "p1", "offline"]])
+
+    def test_custom_herdr_label_is_not_prompt_capable_even_with_agent_session(self):
+        spec, agent, transport = self.herdr_fixture(agent="custom:dsh-tui",
+                                                    agent_session={"kind": "path", "value": "offline-session"})
+        spec["expected_identity"]["kind"] = "custom:dsh-tui"
+        # Status reporting still works and inbox_only never needs a prompt.
+        self.assertEqual(transport.reviewer_identity(spec)["kind"], "custom:dsh-tui")
+        self.assertFalse(transport.status(spec)["prompt_available"])
+        spec["context_policy"] = "dedicated_window"
+        with self.assertRaisesRegex(ValueError, "not a native Herdr prompt agent"):
+            transport.reviewer_identity(spec)
+        with self.assertRaisesRegex(ValueError, "not a native Herdr prompt agent"):
+            transport.send(spec, "offline")
+        self.assertEqual(self.prompts(transport), [])
+
+    def test_herdr_blocked_pending_or_changed_target_is_not_prompted(self):
+        cases = ({"agent_status": "blocked"}, {"launch_pending": True}, {"terminal_id": "t2"}, {"agent": "codex"})
+        for fields in cases:
+            spec, agent, transport = self.herdr_fixture(**fields)
+            with self.subTest(fields=fields), self.assertRaises(ValueError):
+                transport.send(spec, "offline")
+            self.assertEqual(self.prompts(transport), [])
+        spec, agent, transport = self.herdr_fixture(launch_pending=False, agent_status="done")
+        transport.send(spec, "offline")
+        self.assertEqual(len(self.prompts(transport)), 1)
+
+    def test_herdr_native_label_mirrors_herdr_normalization(self):
+        for label in ("pi", " Codex.EXE ", "claude-code", "C:\\tools\\cursor-agent.cmd", "/usr/bin/opencode",
+                      "kiro-cli", "muse-bin-0.1.0-R708.1"):
+            self.assertTrue(module.herdr_native_agent(label), label)
+        for label in ("custom:dsh-tui", "dsh-tui", "any-harness", "muse-bin", "muse-binary", "", None, 3):
+            self.assertFalse(module.herdr_native_agent(label), label)
 
     def test_herdr_preflight_rejects_undeliverable_reviewer_without_sending(self):
         spec, agent, transport = self.herdr_fixture()
         self.request["worker"] = dict(spec, baseline_completion_seq=11)
         self.request["reviewer"] = dict(spec, context_policy="dedicated_window", context_declaration="offline only")
         with patch.object(module, "Transport", return_value=transport), patch.object(transport, "send") as send:
-            with self.assertRaisesRegex(ValueError, "agent_session"): module.preflight(self.request)
-            send.assert_not_called()
+            self.assertEqual(module.preflight(self.request)["status"], "PREFLIGHT_OK")
+            agent["agent"] = "custom:dsh-tui"
+            for role in ("worker", "reviewer"): self.request[role]["expected_identity"]["kind"] = "custom:dsh-tui"
+            with self.assertRaisesRegex(ValueError, "not a native Herdr prompt agent"): module.preflight(self.request)
             self.request["reviewer"]["context_policy"] = "inbox_only"
             self.assertEqual(module.preflight(self.request)["status"], "PREFLIGHT_OK")
+            send.assert_not_called()
 
     def test_artifact_marker_ignores_echo_and_both_requires_output(self):
         self.request["completion"]["marker_source"] = "artifact"

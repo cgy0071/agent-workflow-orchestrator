@@ -102,6 +102,43 @@ def checked_artifact(cwd, item):
     return {"path": str(path), "bytes": path.stat().st_size, "sha256": digest}
 
 
+# Mirror of Herdr v0.9.3 parse_agent_label (src/detect/mod.rs). Herdr's native
+# prompt accepts only these agent kinds; custom labels such as custom:dsh-tui
+# report status but get agent_not_ready. agent_session is optional metadata.
+HERDR_PROMPT_AGENTS = frozenset((
+    "pi", "claude", "claude-code", "codex", "gemini", "cursor", "cursor-agent",
+    "devin", "devin-cli", "devin cli", "agy", "antigravity", "antigravity-cli",
+    "cline", ".cline", "omp", "mastracode", "mastra-code", "mastra code",
+    "opencode", "opencode2", "open-code", "copilot", "github-copilot", "ghcs",
+    "kimi", "kimi-code", "kimi code", "kiro", "kiro-cli", "droid", "amp", "amp-local",
+    "grok", "grok-build", "hermes", "hermes-agent", "kilo", "kilo-code", "kilo code",
+    "qodercli", "qoderclicn", "qoder", "qodercn", "qwen", "qwen-code", "qwen code",
+    "letta", "letta-code", "letta code", "maki", "muse", "muse-code", "muse-cli"))
+
+
+def herdr_native_agent(label):
+    if not isinstance(label, str): return False
+    name = label.strip().lower()
+    for suffix in (".exe", ".cmd", ".bat", ".ps1", ".js"):
+        if name.endswith(suffix):
+            name = name[:-len(suffix)]
+            break
+    name = next((part for part in reversed(re.split(r"[/\\]", name)) if part), name)
+    return name in HERDR_PROMPT_AGENTS or bool(re.match(r"muse-bin-[0-9]", name))
+
+
+def herdr_prompt_unavailable(agent):
+    """Return why Herdr would refuse a native prompt, judged from read-only fields only.
+    Herdr still checks the foreground process itself when the prompt is sent."""
+    if not herdr_native_agent(agent.get("agent")):
+        return "agent label " + json.dumps(agent.get("agent")) + " is not a native Herdr prompt agent"
+    if agent.get("launch_pending") is True:
+        return "agent launch is still pending"
+    if agent.get("agent_status") == "blocked":
+        return "agent is blocked"
+    return None
+
+
 class Transport:
     def __init__(self, request):
         self.request = request
@@ -129,9 +166,12 @@ class Transport:
             for key in ("conversation_id", "branch_id"):
                 if agent.get(key): identity[key] = agent[key]
             source = "completion_seq" if agent.get("completion_seq") is not None else "state_change_seq"
-            return {"identity": identity, "status": agent.get("agent_status"),
-                    "completion_seq": sequence(agent.get(source)), "sequence_source": source,
-                    "prompt_available": bool(agent.get("agent_session"))}
+            reason = herdr_prompt_unavailable(agent)
+            state = {"identity": identity, "status": agent.get("agent_status"),
+                     "completion_seq": sequence(agent.get(source)), "sequence_source": source,
+                     "prompt_available": reason is None}
+            if reason: state["prompt_unavailable_reason"] = reason
+            return state
         if adapter == "command":
             return json.loads(self.run(spec["status_argv"]))
         if adapter == "receipt":
@@ -160,8 +200,9 @@ class Transport:
     @staticmethod
     def check_prompt_available(state):
         if not state.get("prompt_available"):
-            raise ValueError("Herdr target exposes no agent_session; direct prompt is unavailable. "
-                             "Use context_policy=inbox_only or a verified prompt-capable adapter.")
+            raise ValueError("Herdr native prompt is unavailable: "
+                             + state.get("prompt_unavailable_reason", "capability not reported")
+                             + ". Use context_policy=inbox_only or a verified prompt-capable adapter.")
 
     def send(self, spec, message):
         if spec["adapter"] == "herdr":

@@ -96,17 +96,19 @@ class WorkflowTests(unittest.TestCase):
         spec.update(adapter="herdr", executable="herdr", session="offline", pane="p1")
         agent = {"agent": "any-harness", "terminal_id": "terminal-paper", "cwd": str(self.root),
                  "pane_id": "p1", "agent_status": "idle", "state_change_seq": 11}
+        agent["agent_session"] = {"kind": "path", "value": "offline"}
         with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
-            with self.assertRaisesRegex(ValueError, "agent_session"):
+            with self.assertRaisesRegex(ValueError, "not a native Herdr prompt agent"):
                 control.bind(self.state, "paper", spec, spec["expected_identity"], "reviewer",
                              "dedicated_window", reason="exclusive review window")
-        agent["agent_session"] = {"kind": "path", "value": "offline"}
+        agent.pop("agent_session")
+        agent["agent"] = spec["expected_identity"]["kind"] = "codex"
         with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
             control.bind(self.state, "paper", spec, spec["expected_identity"], "reviewer",
                          "dedicated_window", defer=True, reason="new exclusive review window")
-        agent.pop("agent_session")
+        agent["agent_status"] = "blocked"
         with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
-            with self.assertRaisesRegex(ValueError, "agent_session"):
+            with self.assertRaisesRegex(ValueError, "agent is blocked"):
                 control.activate(self.state, "paper", spec["expected_identity"])
 
     def test_cli_inbox_policy_overrides_spec_before_live_query(self):

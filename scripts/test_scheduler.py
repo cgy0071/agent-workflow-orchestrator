@@ -304,7 +304,7 @@ class SchedulerTests(unittest.TestCase):
         req["status_map"] = {"done": "idle"}
         identity = spec["expected_identity"]
         agent = {"agent": "pi", "terminal_id": identity["terminal"], "cwd": identity["launch_cwd"], "pane_id": "p1",
-                 "agent_status": "done", "state_change_seq": 10, "agent_session": {"kind": "path", "value": "offline"}}
+                 "agent_status": "done", "state_change_seq": 10}
         sends = []
         def run(argv, cwd=None):
             if argv[4] == "get": return json.dumps({"result": {"agent": agent}})
@@ -315,6 +315,44 @@ class SchedulerTests(unittest.TestCase):
             result = scheduler.dispatch(self.state, req, self.message(req), *self.actor())
         self.assertEqual(result["status"], "SUBMITTED")
         self.assertEqual(sends, [self.message(req)])
+
+    def herdr_worker(self, kind):
+        spec = {"role": "executor", "adapter": "herdr", "harness": kind, "executable": "offline-herdr",
+                "session": "offline-session", "pane": "p1",
+                "expected_identity": dict(self.specs["executor"]["expected_identity"], kind=kind, pane="p1")}
+        control.bind(self.state, "executor", spec, spec["expected_identity"], reason="verified offline Herdr fixture")
+        identity = spec["expected_identity"]
+        agent = {"agent": kind, "terminal_id": identity["terminal"], "cwd": identity["launch_cwd"], "pane_id": "p1",
+                 "agent_status": "idle", "state_change_seq": 10}
+        sends = []
+        def run(argv, cwd=None):
+            if argv[4] == "get": return json.dumps({"result": {"agent": agent}})
+            sends.append(argv[-1])
+            raise TimeoutError("prompt may have arrived")
+        req = self.request()
+        req["worker"] = dict(spec, baseline_completion_seq=10)
+        return req, sends, run
+
+    def test_herdr_native_uncertain_prompt_holds_claim_without_retry(self):
+        req, sends, run = self.herdr_worker("codex")
+        with patch.object(monitor.Transport, "run", side_effect=run):
+            self.assertEqual(scheduler.dispatch(self.state, req, self.message(req), *self.actor())["status"],
+                             "DISPATCH_UNCERTAIN")
+            self.assertEqual(scheduler.dispatch(self.state, req, self.message(req), *self.actor())["status"],
+                             "ALREADY_ATTEMPTED")
+        self.assertEqual(sends, [self.message(req)])
+        other = self.request("TASK-B", "second", Path(req["cwd"]) / "nested")
+        with self.assertRaisesRegex(ValueError, "workspace"):
+            self.send(other)
+
+    def test_herdr_custom_label_is_rejected_before_any_claim(self):
+        req, sends, run = self.herdr_worker("custom:dsh-tui")
+        with patch.object(monitor.Transport, "run", side_effect=run):
+            with self.assertRaisesRegex(ValueError, "not a native Herdr prompt agent"):
+                scheduler.dispatch(self.state, req, self.message(req), *self.actor())
+        self.assertEqual(sends, [])
+        with control.database(self.state) as con:
+            self.assertIsNone(con.execute("SELECT 1 FROM dispatches WHERE task=?", (req["task_id"],)).fetchone())
 
     def test_invalid_status_map_fails_before_contacting_the_adapter(self):
         for mapping in (None, [], {"done": None}, {1: "idle"}):
