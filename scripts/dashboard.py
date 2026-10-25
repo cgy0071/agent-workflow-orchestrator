@@ -30,8 +30,27 @@ TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
 NONCE = re.compile(r"[0-9a-f]{16}\Z")
 EVENT_ID = re.compile(r"[0-9a-f]{64}\Z")
 ARTIFACT_LIMIT = 200000  # bytes of each delivery file shown in the page
-CHAT_MESSAGE_LIMIT = 20000  # characters in one chat message to the controller
-CHAT_OUTPUT_LIMIT = 60000  # characters of recent controller output shown in the page
+CHAT_MESSAGE_LIMIT = 20000  # characters in one chat message
+CHAT_OUTPUT_LIMIT = 60000  # characters of recent role output shown in the page
+PUBLIC_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\Z")
+PUBLIC_NETLOC = re.compile(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?\Z")
+
+
+def _public_origin(value):
+    if not isinstance(value, str) or value != value.strip():
+        raise ValueError("public origin must be an https://hostname[:port] URL")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("public origin must be an https://hostname[:port] URL") from exc
+    host = parsed.hostname
+    if (parsed.scheme != "https" or not host or not PUBLIC_NETLOC.fullmatch(parsed.netloc)
+            or not all(PUBLIC_LABEL.fullmatch(part) for part in host.split("."))
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path or parsed.query or parsed.fragment or (port is not None and port == 0)):
+        raise ValueError("public origin must be an https://hostname[:port] URL without a path")
+    return "https://" + host.lower() + ((":" + str(port)) if port is not None else "")
 # UI translations live beside this file; JSON-in-script stays inert and cannot close its tag.
 I18N_ZH = json.dumps(json.loads((Path(__file__).resolve().parent / "dashboard_i18n.zh-CN.json")
                                 .read_text(encoding="utf-8")), ensure_ascii=True).replace("</", "<\\/")
@@ -117,7 +136,7 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
 .technical summary { cursor:pointer; font-weight:700; color:var(--accent) }
 .technical p { margin:5px 0; overflow-wrap:anywhere }
 .technical .role-meta { margin-top:8px }
-.badge { display:inline-block; border-radius:30px; padding:3px 9px; font-size:11px; font-weight:800;
+.badge { display:inline-block; border-radius:30px; padding:3px 9px; font-size:11px; font-weight:800; white-space:nowrap;
   letter-spacing:.015em; background:var(--accent-soft); color:var(--accent) }
 .badge.accepted,.badge.submitted { background:#e3f3e9; color:#246a47 }
 .badge.executing,.badge.running { background:#e5efff; color:#285c96 }
@@ -130,7 +149,10 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
 .table-scroll { max-width:100%; overflow-x:auto } table { width:100%; border-collapse:collapse; font-size:12px }
 th { text-align:left; color:var(--muted); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
   border-bottom:1px solid var(--line); white-space:nowrap }
-th,td { padding:12px 9px; vertical-align:top; overflow-wrap:anywhere }
+th,td { padding:12px 9px; vertical-align:top; overflow-wrap:break-word }
+th:nth-child(2),th:nth-child(5),td:nth-child(2),td:nth-child(5) { min-width:90px; word-break:keep-all }
+th:nth-child(4),th:nth-child(7),th:nth-child(8),td:nth-child(4),td:nth-child(7),td:nth-child(8) {
+  min-width:115px; word-break:keep-all }
 td { border-bottom:1px solid var(--line) } .task-row td:first-child { color:var(--ink); min-width:220px;
   font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif }
 tr.task-row { cursor:pointer; transition:background .15s } tr.task-row:hover { background:var(--accent-soft) }
@@ -226,12 +248,15 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       <button id="open-state" class="primary" type="button">Open</button></div>
     <p id="picker-error" class="error" role="alert"></p></section>
   <div class="grid" id="main">
-    <section class="panel wide hidden" id="chat-panel"><div class="panel-head"><h2>Chat with the controller</h2>
-      <span class="panel-caption" id="chat-caption">Sent as one message to the bound controller</span></div>
-      <p class="muted">Messages go straight to the controller agent's session; it treats them like typed owner input.
+    <section class="panel wide hidden" id="chat-panel"><div class="panel-head"><h2>Chat with a role</h2>
+      <span class="panel-caption" id="chat-caption">Sent by the bound controller</span></div>
+      <p class="muted">Messages go to the selected agent's session as typed input.
         Each send is one attempt and is recorded in the ledger audit (hash and length only).</p>
+      <label><span>Conversation target</span><select id="chat-role"></select></label>
+      <p id="chat-busy" class="notice hidden"></p>
+      <label id="chat-busy-confirm-row" class="hidden"><input id="chat-confirm-busy" type="checkbox">I understand this message may interrupt the active task</label>
       <label class="full"><span class="sr-only">Message</span>
-        <textarea id="chat-input" maxlength="20000" placeholder="Ask the controller about progress, or give an instruction. Ctrl+Enter sends."></textarea></label>
+        <textarea id="chat-input" maxlength="20000" placeholder="Ask this role about progress, or give an instruction. Ctrl+Enter sends."></textarea></label>
       <div class="actions"><button id="chat-send" class="primary" type="button">Send</button>
         <button id="chat-read" type="button">Read recent output</button></div>
       <p id="chat-status" role="status"></p>
@@ -310,6 +335,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   if (token) { sessionStorage.setItem('dashboard-token', token); history.replaceState(null, '', location.pathname + location.search); }
   let preview = null;
   let lastData = null;
+  const chatSessions = new Map();
+  let chatBusyKey = '';
+  const chatSession = role => {
+    if (!chatSessions.has(role)) chatSessions.set(role, {draft:'', entries:[], output:null, status:''});
+    return chatSessions.get(role);
+  };
   // Elements that show ledger or agent data; the translator leaves them as written.
   const RAW = new Set(['task-title', 'task-excerpt', 'task-id', 'meta-value', 'role-mark', 'raw']);
   const el = (tag, className, value) => {
@@ -337,14 +368,14 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       if (m) return target.replace(/([$#])(\d)/g, (_, kind, n) => kind === '$' ? m[+n] : tr(m[+n]));
     }
     const parts = key.split('; ');
-    if (parts.length > 1) { const done = parts.map(tr); if (done.some((x, i) => x !== parts[i])) return done.join('；'); }
+    if (parts.length > 1) { const done = parts.map(tr); if (done.some((x, i) => x !== parts[i])) return done.join('\uFF1B'); }
     const at = key.indexOf(': ');
     if (at > 0 && zh.exact[key.slice(0, at)] !== undefined)
-      return zh.exact[key.slice(0, at)] + '：' + tr(key.slice(at + 2));
-    if (at > 0 && zh.exact[key.slice(at + 2)] !== undefined) return key.slice(0, at) + '：' + zh.exact[key.slice(at + 2)];
+      return zh.exact[key.slice(0, at)] + '\uFF1A' + tr(key.slice(at + 2));
+    if (at > 0 && zh.exact[key.slice(at + 2)] !== undefined) return key.slice(0, at) + '\uFF1A' + zh.exact[key.slice(at + 2)];
     return text;
   }
-  const baseText = new WeakMap(), baseAttr = new WeakMap(), ATTRS = ['placeholder', 'title', 'aria-label'];
+  const baseText = new WeakMap(), baseAttr = new WeakMap(), ATTRS = ['placeholder', 'title', 'aria-label', 'data-label'];
   const skipped = node => { const p = node.nodeType === 1 ? node : node.parentElement;
     return !p || !!p.closest('script,style,pre,textarea,[translate="no"]'); };
   function localizeText(node) {
@@ -380,7 +411,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function setLang(next) {
     lang = next; try { localStorage.setItem('dashboard-lang', next); } catch {}
     document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
-    id('lang').textContent = next === 'zh' ? 'English' : '中文';
+    id('lang').textContent = next === 'zh' ? 'English' : '\u4e2d\u6587';
     localize(document.documentElement);
   }
   async function api(path, payload) {
@@ -532,7 +563,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
           const meta = add(binding, 'div', 'role-meta');
           for (const [key, value] of [['Mode', b.mode], ['Harness', b.harness], ['Adapter', b.adapter],
             ['Version', b.version], ['Context policy', b.context_policy], ['Instance', b.instance_id], ['Bound', b.bound_at]]) {
-            add(meta, 'span', 'meta-key', key); add(meta, 'span', 'meta-value', value ?? 'unknown');
+            add(meta, 'span', 'meta-key', key);
+            const shown = key === 'Bound' && value && !Number.isNaN(new Date(value).getTime()) ?
+              new Date(value).toLocaleString() : value;
+            const cell = add(meta, 'span', 'meta-value', shown ?? 'unknown');
+            if (key === 'Bound' && value) cell.title = value;
           }
         }
       }
@@ -593,7 +628,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       for (const code of t.warnings) {
         const note = warningInfo(code, t), box = add(detail, 'div', 'detail-note');
         add(box, 'strong', '', note.title);
-        add(box, 'p', '', note.explanation + ' Next: ' + note.next);
+        add(box, 'p', '', note.explanation);
+        add(box, 'p', 'alert-next', 'Next: ' + note.next);
         if (note.technical) add(box, 'p', 'muted', 'Ledger detail: ' + note.technical);
       }
       const results = add(detail, 'div', 'results');
@@ -619,6 +655,13 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     }
   }
   const svgEl = tag => document.createElementNS('http://www.w3.org/2000/svg', tag);
+  function fitSvgText(node, value) {
+    const chars = Array.from(value);
+    node.textContent = value;
+    while (node.getComputedTextLength() > 150 && chars.length) {
+      chars.pop(); node.textContent = chars.join('') + '...';
+    }
+  }
   function dagGraph(data) {
     const root = id('dags'); root.replaceChildren();
     const runs = Object.entries(data.dags);
@@ -666,12 +709,13 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         const [x,y] = pos[name]; const rect = svgEl('rect'); rect.setAttribute('x', x); rect.setAttribute('y', y);
         rect.setAttribute('width', 175); rect.setAttribute('height', 64); rect.setAttribute('rx', 10);
         rect.setAttribute('class', state); svg.append(rect);
-        const text = label(name), short = text.length > 20 ? text.slice(0, 19) + '...' : text;
+        const text = label(name);
         const caption = svgEl('text'); caption.setAttribute('x', x + 12); caption.setAttribute('y', y + 26);
-        caption.textContent = short; caption.setAttribute('translate', 'no'); svg.append(caption);
+        caption.setAttribute('translate', 'no'); svg.append(caption); fitSvgText(caption, text);
         const sub = svgEl('text'); sub.setAttribute('x', x + 12); sub.setAttribute('y', y + 49);
-        sub.textContent = named(state, {...stageNames, ...dagNames}); svg.append(sub);
-        const tip = svgEl('title'); tip.textContent = text + ' (' + name + '): ' + named(state, stageNames); rect.append(tip);
+        sub.setAttribute('translate', 'no'); svg.append(sub);
+        fitSvgText(sub, tr(named(state, {...stageNames, ...dagNames})));
+        const tip = svgEl('title'); tip.textContent = text + ' (' + name + '): ' + tr(named(state, stageNames)); rect.append(tip);
       }
     }
   }
@@ -757,6 +801,48 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     try { await api('/api/state', {state: path}); picking = false; id('state-input').value = ''; await refresh(); }
     catch (error) { id('picker-error').textContent = error.message; }
   }
+  function chatRole() { return id('chat-role').value; }
+  function renderChat(role) {
+    const session = chatSession(role), log = id('chat-log'), out = id('chat-output');
+    id('chat-input').value = session.draft;
+    id('chat-status').textContent = session.status;
+    log.replaceChildren();
+    for (const entry of session.entries) {
+      const row = add(log, 'div', 'list-item chat-entry');
+      add(row, 'small', '', entry.when + ' to ' + role + (entry.uncertain ? ' - delivery uncertain' : ''));
+      add(row, 'p', 'raw', entry.message);
+    }
+    show('chat-output', session.output !== null);
+    out.textContent = session.output || '';
+    updateChatBusy(lastData);
+  }
+  function updateChatBusy(data) {
+    const role = chatRole();
+    const busy = (data?.tasks || []).find(t => t.worker_role === role &&
+      (t.claim_held || (['executing', 'execution_unconfirmed'].includes(t.phase) &&
+        ['reserved', 'uncertain', 'submitted', 'running'].includes(t.dispatch))));
+    const visible = !!busy;
+    const key = busy ? role + ':' + busy.task_id : '';
+    if (key !== chatBusyKey) id('chat-confirm-busy').checked = false;
+    chatBusyKey = key;
+    id('chat-busy').textContent = busy ?
+      'This role is working on ' + taskName(data, busy.task_id) + '. A message may interrupt its work.' : '';
+    show('chat-busy', visible); show('chat-busy-confirm-row', visible);
+  }
+  function chatTargets(data) {
+    const select = id('chat-role'), selected = select.value;
+    const targets = data.chat_targets || [];
+    const next = targets.map(x => x.role);
+    const current = [...select.options].map(x => x.value);
+    if (JSON.stringify(current) !== JSON.stringify(next)) {
+      select.replaceChildren();
+      for (const target of targets) { const option = add(select, 'option', '', target.role);
+        option.value = target.role; option.setAttribute('translate', 'no'); }
+      select.value = next.includes(selected) ? selected :
+        (next.includes(data.actor_role) ? data.actor_role : next[0] || '');
+      renderChat(select.value);
+    } else updateChatBusy(data);
+  }
   async function refresh() {
     try { const data = await api('/api/status'); lastData = data; id('error').textContent = '';
       picker(data, picking || data.state === null);
@@ -768,7 +854,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       metrics(data); roles(data); taskTable(data); dagGraph(data); lists(data); workers(data);
       show('dispatch-form', data.allow_dispatch);
       show('chat-panel', data.allow_chat); show('chat-open', data.allow_chat);
-      if (data.allow_chat) id('chat-caption').textContent = 'Talking to ' + data.actor_role;
+      if (data.allow_chat) { chatTargets(data); id('chat-caption').textContent = 'Talking to ' + chatRole(); }
       id('dispatch-note').textContent = data.allow_dispatch ?
         'Preview checks that the worker is available. Confirm sends the task once; check the result before taking another action.' :
         'Starting tasks is off for this dashboard session. To enable it, restart the server with --allow-dispatch and the required coordinator identity and task-folder options.';
@@ -871,34 +957,48 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     } catch (error) { empty(root, error.message); } finally { id('probe').disabled = false; }
   });
   id('probe-top').addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
-  async function chatRead() {
-    const out = id('chat-output'); id('chat-read').disabled = true;
-    try { const data = await api('/api/chat/output', {});
-      out.textContent = (data.truncated ? '[earlier output omitted]\n' : '') + (data.output || '(no output)');
-      show('chat-output', true); out.scrollTop = out.scrollHeight;
-      id('chat-status').textContent = data.role + ' is ' + named(data.status, {idle:'idle', working:'working',
+  async function chatRead(role = chatRole()) {
+    if (!role) return; id('chat-read').disabled = true;
+    try { const data = await api('/api/chat/output', {role});
+      const session = chatSession(role);
+      session.output = (data.truncated ? '[earlier output omitted]\n' : '') + (data.output || '(no output)');
+      session.status = data.role + ' is ' + named(data.status, {idle:'idle', working:'working',
         blocked:'blocked', done:'done'}) + ' (read ' + new Date().toLocaleTimeString() + ')';
-      id('chat-status').className = 'muted';
-    } catch (error) { id('chat-status').textContent = error.message; id('chat-status').className = 'error'; }
+      if (chatRole() === role) { renderChat(role); id('chat-output').scrollTop = id('chat-output').scrollHeight;
+        id('chat-status').className = 'muted'; }
+    } catch (error) { if (chatRole() === role) { id('chat-status').textContent = error.message;
+      id('chat-status').className = 'error'; } }
     finally { id('chat-read').disabled = false; }
   }
   async function chatSend() {
-    const input = id('chat-input'), text = input.value.trim(); if (!text) return;
+    const role = chatRole(), text = id('chat-input').value.trim(); if (!role || !text) return;
+    const confirmBusy = id('chat-confirm-busy').checked;
+    if (!id('chat-busy').classList.contains('hidden') && !confirmBusy) {
+      id('chat-status').textContent = 'Confirm the interruption warning before sending to this busy worker.';
+      id('chat-status').className = 'error'; return;
+    }
     id('chat-send').disabled = true; id('chat-status').textContent = 'Sending...'; id('chat-status').className = 'muted';
-    try { const result = await api('/api/chat/send', {message: text});
-      const entry = add(id('chat-log'), 'div', 'list-item chat-entry');
-      add(entry, 'small', '', new Date().toLocaleTimeString() + ' to ' + result.role +
-        (result.status === 'SENT' ? '' : ' - delivery uncertain'));
-      add(entry, 'p', 'raw', text);
-      if (result.status === 'SENT') { input.value = '';
-        id('chat-status').textContent = 'Sent. Reading the reply shortly...'; setTimeout(chatRead, 3000); }
-      else { id('chat-status').textContent = 'Delivery uncertain: ' + (result.error || 'unknown') +
-        '. Read the output before sending again.'; id('chat-status').className = 'error'; }
-    } catch (error) { id('chat-status').textContent = error.message; id('chat-status').className = 'error'; }
+    try { const result = await api('/api/chat/send', {role, message:text, confirm_busy:confirmBusy});
+      const session = chatSession(role);
+      session.entries.push({when:new Date().toLocaleTimeString(), message:text,
+        uncertain:result.status !== 'SENT'});
+      if (result.status === 'SENT') { session.draft = '';
+        session.status = 'Sent. Reading the reply shortly...'; setTimeout(() => chatRead(role), 3000); }
+      else session.status = 'Delivery uncertain: ' + (result.error || 'unknown') +
+        '. Read the output before sending again.';
+      if (chatRole() === role) { renderChat(role); id('chat-status').className =
+        result.status === 'SENT' ? 'muted' : 'error'; }
+    } catch (error) { if (chatRole() === role) { id('chat-status').textContent = error.message;
+      id('chat-status').className = 'error'; } }
     finally { id('chat-send').disabled = false; }
   }
   id('chat-send').addEventListener('click', chatSend);
-  id('chat-read').addEventListener('click', chatRead);
+  id('chat-read').addEventListener('click', () => chatRead());
+  id('chat-input').addEventListener('input', () => { if (chatRole()) chatSession(chatRole()).draft = id('chat-input').value; });
+  id('chat-role').addEventListener('change', () => {
+    id('chat-confirm-busy').checked = false; renderChat(chatRole());
+    id('chat-caption').textContent = 'Talking to ' + chatRole();
+  });
   id('chat-input').addEventListener('keydown', event => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); chatSend(); } });
   id('chat-open').addEventListener('click', () => { id('chat-panel').scrollIntoView({behavior:'smooth', block:'start'});
@@ -1025,7 +1125,7 @@ class DashboardServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
     def __init__(self, address, state=None, *, allow_dispatch=False, allow_chat=False, actor=None, version=None,
-                 context=None, tasks_root=None, transport_factory=Transport, recent_file=None):
+                 context=None, tasks_root=None, transport_factory=Transport, recent_file=None, public_origins=()):
         host, port = address
         if host not in ("127.0.0.1", "localhost"):
             raise ValueError("dashboard host must be loopback: 127.0.0.1 or localhost")
@@ -1039,6 +1139,8 @@ class DashboardServer(ThreadingHTTPServer):
         self.recent_file = recent_file
         self.allow_dispatch = bool(allow_dispatch)
         self.allow_chat = bool(allow_chat)
+        self.public_origins = tuple(dict.fromkeys(_public_origin(value) for value in public_origins))
+        self.public_hosts = {urlsplit(value).netloc for value in self.public_origins}
         self.actor, self.version, self.context = actor, version, context
         self.tasks_root = None
         self.transport_factory = transport_factory
@@ -1085,20 +1187,49 @@ class DashboardServer(ThreadingHTTPServer):
             raise PermissionError("chat actor is not the active controller")
         return binding
 
-    def chat_target(self):
-        binding = self.chat_binding()
+    def chat_target(self, role, *, sending=False):
+        sender = self.chat_binding()
+        if role is None:
+            role = sender["role"]  # Keep the original controller-only API payload usable.
+        if not isinstance(role, str) or not role or len(role) > 128:
+            raise ValueError("choose an active conversation role")
+        with scheduler._read_database(self.state) as con:
+            row = con.execute("SELECT data FROM bindings WHERE role=? AND status='active'", (role,)).fetchone()
+        if not row:
+            raise ValueError("conversation role has no active binding: " + role)
+        binding = json.loads(row[0])
         spec = binding["spec"]
+        if sending and spec["adapter"] == "receipt":
+            raise ValueError("this receipt adapter cannot send messages")
+        if sending and spec["adapter"] == "command" and not spec.get("prompt_argv"):
+            raise ValueError("this command adapter has no prompt command")
         transport = self.transport_factory({"monitor": {"command_timeout_seconds": 15}})
         observed = transport.status(spec)
         if not identity_matches(observed.get("identity", {}), spec["expected_identity"]):
-            raise ValueError("controller identity changed; rebind before chatting")
+            raise ValueError("conversation target identity changed; rebind before chatting")
+        if sending and spec["adapter"] == "herdr":
+            Transport.check_prompt_available(observed)
         return binding, spec, transport, observed
 
-    def chat_output(self):
-        binding, spec, transport, observed = self.chat_target()
+    def chat_output(self, payload=None):
+        role = payload.get("role") if isinstance(payload, dict) else None
+        binding, spec, transport, observed = self.chat_target(role)
         text = transport.output(spec)
         return {"role": binding["role"], "status": observed.get("status"),
                 "output": text[-CHAT_OUTPUT_LIMIT:], "truncated": len(text) > CHAT_OUTPUT_LIMIT}
+
+    def chat_busy(self, role):
+        raw = scheduler.snapshot(self.state)
+        claims = {item["task_id"] for item in raw["claims"]}
+        for item in raw["tasks"]:
+            if item["worker"]["role"] != role or item["execution"] == "resolved":
+                continue
+            dispatch = (item.get("dispatch") or {}).get("status")
+            if item["task_id"] in claims or (item["execution"] == "running" and
+                    dispatch in ("reserved", "uncertain", "submitted", "running")):
+                detail = workflow_status.task_summary(item["task_id"], item["cwd"], [])
+                return {"task_id": item["task_id"], "title": detail["title"] or item["task_id"]}
+        return None
 
     def chat_send(self, payload):
         message = payload.get("message") if isinstance(payload, dict) else None
@@ -1107,9 +1238,19 @@ class DashboardServer(ThreadingHTTPServer):
         message = message.replace("\r\n", "\n").strip()
         if len(message) > CHAT_MESSAGE_LIMIT or "\x00" in message:
             raise ValueError("message must be at most " + str(CHAT_MESSAGE_LIMIT) + " characters of text")
+        role = payload.get("role") if isinstance(payload, dict) else None
+        confirm_busy = payload.get("confirm_busy", False) if isinstance(payload, dict) else False
+        if type(confirm_busy) is not bool:
+            raise ValueError("confirm_busy must be a boolean")
         with self.chat_lock:
-            binding, spec, transport, _ = self.chat_target()
+            binding, spec, transport, _ = self.chat_target(role, sending=True)
+            busy = self.chat_busy(binding["role"]) if binding["mode"] == "worker" else None
+            if busy and not confirm_busy:
+                raise FileExistsError("This role is working on " + busy["title"] + " (" + busy["task_id"] +
+                                      "). A message may interrupt its work. Confirm separately to send.")
             record = {"actor": self.actor, "version": self.version, "role": binding["role"],
+                      "target_role": binding["role"], "target_version": binding["version"],
+                      "confirm_busy": bool(busy and confirm_busy),
                       "message_sha256": hashlib.sha256(message.encode("utf-8")).hexdigest(), "chars": len(message)}
             try:
                 transport.send(spec, message)
@@ -1132,11 +1273,14 @@ class DashboardServer(ThreadingHTTPServer):
         recent = [value for value in _recent(self.recent_file) if (Path(value) / "workflow.sqlite3").is_file()]
         fixed = self.allow_dispatch or self.allow_chat
         base = {"allow_dispatch": self.allow_dispatch, "allow_chat": self.allow_chat, "can_switch": not fixed,
-                "recent": recent, "actor_role": self.actor_role if fixed else None}
+                "recent": recent, "actor_role": self.actor_role if fixed else None, "chat_targets": []}
         if state is None:
             return dict(base, read_only=True, state=None)
         summary = workflow_status.summarize(state)
         details = workflow_status.dashboard_details(state, summary)
+        targets = [{"role": item["role"], "mode": binding["mode"]}
+                   for item in details["roles"] for binding in item["bindings"] if binding["status"] == "active"]
+        base["chat_targets"] = targets
         return dict(summary, **details, **base, state=str(state))
 
     def select_state(self, payload):
@@ -1415,6 +1559,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _host(self):
         allowed = {"127.0.0.1:" + str(self.server.server_port),
                    "localhost:" + str(self.server.server_port)}
+        allowed.update(self.server.public_hosts)
         return self.headers.get("Host", "").lower() in allowed
 
     def _token(self):
@@ -1423,7 +1568,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _origin(self):
         host = self.headers.get("Host", "").lower()
-        return self.headers.get("Origin") == "http://" + host
+        local = {"127.0.0.1:" + str(self.server.server_port),
+                 "localhost:" + str(self.server.server_port)}
+        expected = "http://" + host if host in local else "https://" + host
+        return self.headers.get("Origin") == expected and (host in local or host in self.server.public_hosts)
 
     def _read_raw(self):
         # Consume the bounded body before any reply: on Windows, closing with unread bytes sends RST, not FIN.
@@ -1513,7 +1661,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             elif path == "/api/chat/send":
                 result = self.server.chat_send(payload)
             elif path == "/api/chat/output":
-                result = self.server.chat_output()
+                result = self.server.chat_output(payload)
             elif path == "/api/review/preview":
                 result = self.server.review_preview(payload)
             elif path == "/api/review/confirm":
@@ -1549,9 +1697,11 @@ def main(argv=None):
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true", help="print the URL without opening a browser")
+    parser.add_argument("--public-origin", action="append", default=[], metavar="URL",
+                        help="authorized HTTPS reverse-proxy origin; repeat for more than one")
     parser.add_argument("--allow-dispatch", action="store_true")
     parser.add_argument("--allow-chat", action="store_true",
-                        help="let the page send messages to and read output from the bound controller")
+                        help="let the bound controller chat with any active role")
     parser.add_argument("--actor")
     parser.add_argument("--version", type=int)
     parser.add_argument("--context", choices=("main", "side", "unknown"))
@@ -1561,12 +1711,15 @@ def main(argv=None):
         server = open_server(args.host, args.port, args.state, allow_dispatch=args.allow_dispatch,
                              allow_chat=args.allow_chat,
                              actor=args.actor, version=args.version, context=args.context,
-                             tasks_root=args.tasks_root, recent_file=RECENT_FILE)
+                             tasks_root=args.tasks_root, recent_file=RECENT_FILE,
+                             public_origins=args.public_origin)
     except (ValueError, OSError) as exc:
         parser.exit(2, "dashboard: " + str(exc) + "\n")
     with server:
         url = server.origin() + "/#" + server.token
         print("Dashboard: " + url, flush=True)
+        for public in server.public_origins:
+            print("Dashboard (remote): " + public + "/#" + server.token, flush=True)
         print("State: " + (str(server.state) if server.state else "choose in the page"), flush=True)
         print("Press Ctrl+C to stop.", flush=True)
         if not args.no_browser:

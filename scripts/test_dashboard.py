@@ -59,13 +59,13 @@ class DashboardTests(unittest.TestCase):
             self.thread.join(timeout=5)
         test_scheduler.SchedulerTests.tearDown(self)
 
-    def start_server(self, allow_dispatch=False, state="default", recent_file=None):
+    def start_server(self, allow_dispatch=False, state="default", recent_file=None, public_origins=()):
         if self.server:
             self.server.shutdown()
             self.server.server_close()
             self.thread.join(timeout=5)
         options = {"allow_dispatch": allow_dispatch, "transport_factory": lambda _request: self.fake,
-                   "recent_file": recent_file}
+                   "recent_file": recent_file, "public_origins": public_origins}
         if allow_dispatch:
             options.update(actor=self.controller["instance_id"], version=self.controller["version"],
                            context="main", tasks_root=self.tasks_root)
@@ -119,6 +119,9 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(self.http("GET", "/api/status")[0], 200)
         self.assertEqual(database.read_bytes(), before)
         self.assertEqual({p.name for p in self.state.iterdir()}, files)
+        self.assertEqual(self.fake.status_calls, 0)
+        self.assertEqual({item["role"] for item in self.http("GET", "/api/status")[1]["chat_targets"]},
+                         {"planner", "executor", "second"})
         self.assertEqual(self.fake.status_calls, 0)
         self.assertEqual(self.http("POST", "/api/probe")[0], 200)
         self.assertEqual(self.fake.status_calls, 2)
@@ -239,6 +242,74 @@ class DashboardTests(unittest.TestCase):
         self.fake.identity_drift = True
         self.assertEqual(self.http("POST", "/api/chat/send", {"message": "third"})[0], 400)
         self.assertEqual(len(self.fake.messages), 2)
+
+    def test_chat_targets_worker_and_busy_requires_explicit_confirmation(self):
+        self.chat_server()
+        request = self.request("BUSY-1", "executor")
+        (Path(request["cwd"]) / "TASK.md").write_text("# Measure active work\n", encoding="utf-8")
+        self.assertEqual(scheduler.dispatch(self.state, request, self.message(request),
+                                            *self.actor(), transport=self.fake)["status"], "SUBMITTED")
+        before = len(self.fake.messages)
+        payload = {"role": "executor", "message": "Can you pause?"}
+        status, body, _ = self.http("POST", "/api/chat/send", payload)
+        self.assertEqual(status, 409)
+        self.assertIn("Measure active work", body["error"])
+        self.assertEqual(len(self.fake.messages), before)
+        status, sent, _ = self.http("POST", "/api/chat/send", dict(payload, confirm_busy=True))
+        self.assertEqual((status, sent["status"], sent["role"]), (200, "SENT", "executor"))
+        self.assertEqual(self.fake.messages[-1], payload["message"])
+        self.assertEqual(self.http("POST", "/api/chat/output", {"role": "second"})[1]["role"], "second")
+        with control.database(self.state) as con:
+            record = json.loads(con.execute("SELECT data FROM audit WHERE action='dashboard_chat' ORDER BY rowid DESC")
+                                .fetchone()[0])
+        self.assertEqual((record["actor"], record["version"], record["target_role"],
+                          record["target_version"], record["confirm_busy"]),
+                         (self.controller["instance_id"], 1, "executor", 1, True))
+        self.assertNotIn(payload["message"], json.dumps(record))
+
+    def test_chat_rechecks_target_binding_identity_and_prompt_capability(self):
+        self.chat_server()
+        self.assertEqual(self.http("POST", "/api/chat/send", {"role": "second", "message": "hello"})[0], 200)
+        self.fake.identity_drift = True
+        self.assertEqual(self.http("POST", "/api/chat/send", {"role": "second", "message": "again"})[0], 400)
+        self.fake.identity_drift = False
+        with control.database(self.state) as con:
+            row = con.execute("SELECT id,data FROM bindings WHERE role='second' AND status='active'").fetchone()
+            value = json.loads(row["data"])
+            value["spec"]["adapter"] = "herdr"
+            con.execute("UPDATE bindings SET data=? WHERE id=?", (json.dumps(value), row["id"]))
+        status, body, _ = self.http("POST", "/api/chat/send", {"role": "second", "message": "hello"})
+        self.assertEqual(status, 400)
+        self.assertIn("prompt is unavailable", body["error"])
+        self.assertEqual(self.fake.messages, ["hello"])
+        with control.database(self.state) as con:
+            con.execute("UPDATE bindings SET status='pending' WHERE role='second' AND status='active'")
+        self.assertEqual(self.http("POST", "/api/chat/send", {"role": "second", "message": "still there?"})[0], 400)
+        self.assertEqual(self.fake.messages, ["hello"])
+
+    def test_chat_sender_binding_must_still_be_active(self):
+        self.chat_server()
+        with control.database(self.state) as con:
+            con.execute("UPDATE bindings SET status='pending' WHERE role='planner' AND status='active'")
+        self.assertEqual(self.http("POST", "/api/chat/send", {"role": "executor", "message": "hello"})[0], 403)
+        self.assertEqual(self.fake.messages, [])
+
+    def test_public_origin_allows_only_named_https_proxy(self):
+        for value in ("http://example.test", "https://example.test/path", "https://example.test/",
+                      "https://example.test?x=1", "https://user@example.test", "https://example.test:0",
+                      "https://example.test:"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                dashboard.DashboardServer(("127.0.0.1", 0), self.state, public_origins=[value])
+        self.start_server(public_origins=["https://demo.tailnet.ts.net", "https://other.example:8443"])
+        self.assertEqual(self.http("GET", "/api/status", host="demo.tailnet.ts.net")[0], 200)
+        self.assertEqual(self.http("POST", "/api/probe", host="demo.tailnet.ts.net",
+                                   origin="https://demo.tailnet.ts.net")[0], 200)
+        self.assertEqual(self.http("POST", "/api/probe", host="other.example:8443",
+                                   origin="https://other.example:8443")[0], 200)
+        self.assertEqual(self.http("POST", "/api/probe", host="demo.tailnet.ts.net",
+                                   origin="http://demo.tailnet.ts.net")[0], 403)
+        self.assertEqual(self.http("GET", "/api/status", host="unknown.example")[0], 403)
+        self.assertEqual(self.http("GET", "/api/status")[0], 200)
 
     def test_page_embeds_inert_chinese_dictionary(self):
         status, html, _ = self.http("GET", "/")

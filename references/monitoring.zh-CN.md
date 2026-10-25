@@ -94,6 +94,10 @@ python -B scripts/dashboard.py --state /absolute/workflow-state
 
 任务详情中的 **View result files** 只读取该任务声明的文件（绑定文件、交付文件、审核文件），每个最多 200000 字节，并与完成回执中的哈希比对。派发模式下，属于 actor 自身审核角色的完成更新会显示 **Acknowledge** 和 **Record review**。两者都先做只读预览，再一次性确认，确认时以绑定的 actor 调用 `workflow_control.acknowledge` 或 `record_review`，并重新执行全部审核门检查。页面从不写入审核文件：请自行编写 `REVIEW.md`（或冻结的 `review_path`），包含任务 ID、nonce 和 `Verdict:` 行；文件在预览后改动会使预览失效。页面不执行 reconcile、绑定切换、续派检查或 DAG tick。
 
-要使用 **与控制者对话**，启动时与 `--state` 一起加 `--allow-chat --actor INSTANCE --version 1 --context main`（可与 `--allow-dispatch` 同时使用）；默认关闭，并且状态目录固定。actor 必须是当前有效控制者。每次发送前都会重新检查该绑定和实时身份，只发送一次，从不重试；结果为 `SENT` 或 `SEND_UNCERTAIN`。每次发送都会写入审计记录 `dashboard_chat`，只记录角色、字符数和 SHA-256，不保存消息正文。**读取最近输出**按需读取控制者最近的终端输出。消息会被当作 Owner 亲自输入，因此只能把令牌地址交给 Owner 本人。
+要使用 **与角色对话**，启动时与 `--state` 一起加 `--allow-chat --actor INSTANCE --version 1 --context main`（可与 `--allow-dispatch` 同时使用）；默认关闭，并且状态目录固定。发送者必须是当前有效的控制者。可以选择任意已激活角色作为目标；每次发送前重新检查双方绑定和目标的实时身份。向忙碌的 Worker 发送需要单独确认；不支持提示输入的适配器不能发送。每条消息只尝试一次，不自动重试；结果为 `SENT` 或 `SEND_UNCERTAIN`。`dashboard_chat` 审计记录发送者、目标角色和绑定版本、忙碌确认、字符数与 SHA-256，不保存正文。**读取最近输出**只按需读取当前选中角色的输出。
+
+要从另一台电脑查看，在那台电脑运行 `ssh -L 8765:127.0.0.1:8765 <看板所在主机>`，再打开打印出的 `http://127.0.0.1:8765/#token` 地址。无需 `--public-origin`；如果 8765 已被占用，请使用实际打印的端口。要从同一 tailnet 的手机或其他设备查看，在看板主机运行 `tailscale serve --bg 8765`，启动看板时加 `--public-origin https://<机器名>.<tailnet>.ts.net`，然后在设备上打开额外打印的 HTTPS 地址。看板仍只监听本机，仅接受配置的 HTTPS 代理 Host 和 Origin。代理命令参见 [Tailscale Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve)；不要使用会暴露到公网的 Tailscale Funnel。
+
+令牌地址等同于操作权限：开启 `--allow-chat` 或 `--allow-dispatch` 时，持有地址的人可以向 agent 发指令。重启看板会生成新令牌，使旧地址失效。只向可信设备开放代理；不要启用明文 HTTP 局域网监听。看板不会安装或配置 SSH、Tailscale。
 
 右上角的语言按钮可在英文（默认）和中文之间切换，选择保存在浏览器中；也可以在地址中加 `?lang=zh` 或 `?lang=en`。翻译只作用于界面文字，台账中的任务标题、路径、角色名和 agent 输出保持原文。
