@@ -160,6 +160,25 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.http("GET", "/api/artifacts?task=NOPE")[0], 400)
         self.assertEqual(self.http("GET", "/api/artifacts?task=ART-1", token=False)[0], 403)
 
+    confirm = test_scheduler.SchedulerTests.confirm
+    message = test_scheduler.SchedulerTests.message
+    finish = test_scheduler.SchedulerTests.finish
+
+    def test_status_links_followup_to_parent_without_dag(self):
+        parent = self.request("PARENT", "executor")
+        self.assertEqual(scheduler.dispatch(self.state, parent, self.message(parent), *self.actor(),
+                                            transport=self.fake)["status"], "SUBMITTED")
+        parent, event = self.finish(parent)
+        scheduler.release(self.state, "PARENT", *self.actor())
+        child = self.request("CHILD", "executor")
+        child.update(parent_task="PARENT", parent_review=control.next_gate(self.state, event, *self.actor())["parent_review"])
+        self.assertEqual(scheduler.dispatch(self.state, child, self.message(child), *self.actor(),
+                                            transport=self.fake)["status"], "SUBMITTED")
+        data = self.http("GET", "/api/status")[1]
+        self.assertEqual(data["dags"], {})
+        self.assertEqual(data["task_details"]["CHILD"]["parent_task"], "PARENT")
+        self.assertIsNone(data["task_details"]["PARENT"]["parent_task"])
+
     def test_task_summary_prefers_human_text_and_never_raises(self):
         import workflow_status
         cwd = self.root / "SUM-1"

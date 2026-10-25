@@ -203,7 +203,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     <div class="metric"><span class="metric-label">Assigned roles</span><strong id="metric-roles" class="metric-value">--</strong>
       <span id="metric-roles-note" class="metric-note">Configured roles</span></div>
     <div class="metric"><span class="metric-label">Task plans</span><strong id="metric-dags" class="metric-value">--</strong>
-      <span class="metric-note">Tasks linked by prerequisites</span></div>
+      <span id="metric-dags-note" class="metric-note">Tasks linked by prerequisites</span></div>
     <div class="metric"><span class="metric-label">Completion updates</span><strong id="metric-inbox" class="metric-value">--</strong>
       <span id="metric-inbox-note" class="metric-note">Waiting for review</span></div>
   </section>
@@ -316,7 +316,9 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     id('metric-tasks-note').textContent = accepted + ' accepted';
     id('metric-roles').textContent = active.length;
     id('metric-roles-note').textContent = 'of ' + data.roles.length + ' configured';
-    id('metric-dags').textContent = Object.keys(data.dags).length;
+    id('metric-dags').textContent = Object.keys(data.dags).length +
+      Object.values(data.task_details).filter(t => t.parent_task).length;
+    id('metric-dags-note').textContent = 'Task plans and follow-up links';
     id('metric-inbox').textContent = data.inbox.length;
     id('metric-inbox-note').textContent = pending + ' waiting for review';
   }
@@ -372,6 +374,13 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     return details;
   }
   function taskName(data, taskId) { return (data.task_details[taskId] || {}).title || taskId; }
+  function ago(seconds) {
+    const m = Math.floor(seconds / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+    if (m < 1) return 'Just now';
+    if (h < 1) return m + ' min ago';
+    if (d < 1) return h + ' h ' + (m % 60) + ' min ago';
+    return d + ' d ' + (h % 24) + ' h ago';
+  }
   function warningInfo(code, task) {
     const finished = task && ['accepted', 'closed'].includes(task.phase);
     if (code === 'no_monitor_observation') return finished ? {
@@ -462,7 +471,14 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function taskTable(data) {
     const root = id('tasks'); root.replaceChildren();
     if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 8; return; }
-    for (const t of data.tasks) {
+    // Newest last check first; tasks never checked use their latest ledger entry instead.
+    const now = Date.now();
+    const seen = t => { if (t.observation_age_seconds !== null) return now - t.observation_age_seconds * 1000;
+      const journal = (data.task_details[t.task_id] || {}).journal || [];
+      const at = journal.length ? Date.parse(journal[journal.length - 1].at) : NaN;
+      return Number.isNaN(at) ? 0 : at; };
+    const ordered = [...data.tasks].sort((a, b) => seen(b) - seen(a) || a.task_id.localeCompare(b.task_id));
+    for (const t of ordered) {
       const tr = add(root, 'tr', 'task-row');
       const info = data.task_details[t.task_id] || {};
       const name = add(tr, 'td', 'task-name'); add(name, 'span', 'task-title', info.title || t.task_id);
@@ -474,8 +490,9 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       add(tr, 'td', '', deliveryText(t));
       add(tr, 'td', '', t.review_verdicts.map(v => named(v, reviewNames)).join(', ') || 'Not reviewed');
       add(tr, 'td', '', t.next_role + ': ' + named(t.next_action, nextNames));
-      add(tr, 'td', '', t.observation_age_seconds === null ? 'No saved check' :
-        Math.round(t.observation_age_seconds / 60) + ' min ago');
+      const age = t.observation_age_seconds;
+      const check = add(tr, 'td', '', age === null ? 'No saved check' : ago(age));
+      if (age !== null) check.title = 'Checked ' + new Date(now - age * 1000).toLocaleString();
       const notes = t.warnings.map(code => warningInfo(code, t));
       add(tr, 'td', notes.length && notes.every(note => note.tone === 'info') ? 'info-note' : '',
         notes.map(note => note.label).join('; ') || 'No notes');
@@ -519,8 +536,24 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function dagGraph(data) {
     const root = id('dags'); root.replaceChildren();
     const runs = Object.entries(data.dags);
-    if (!runs.length) { empty(root, 'No task plans yet'); return; }
-    for (const [run, dag] of runs) {
+    for (const [run, dag] of runs) drawGraph(root, run, dag.nodes, dag.dependencies,
+      name => taskName(data, dag.tasks[name]?.task_id || name));
+    // Standalone follow-ups (parent_task) form chains even without a loaded DAG plan.
+    const phase = Object.fromEntries(data.tasks.map(t => [t.task_id, t.phase]));
+    const linked = new Set();
+    for (const [task, info] of Object.entries(data.task_details))
+      if (info.parent_task && phase[task] && phase[info.parent_task]) { linked.add(task); linked.add(info.parent_task); }
+    if (linked.size) {
+      const nodes = {}, deps = {};
+      for (const task of linked) { nodes[task] = phase[task];
+        const parent = data.task_details[task].parent_task; deps[task] = linked.has(parent) ? [parent] : []; }
+      drawGraph(root, 'Follow-up chains', nodes, deps, name => taskName(data, name));
+    }
+    if (!root.children.length) empty(root, 'No task plans or follow-up chains yet');
+  }
+  function drawGraph(root, run, nodes, dependencies, label) {
+    {
+      const dag = {nodes, dependencies};
       const box = add(root, 'div', 'dag-run'); const title = add(box, 'div', 'dag-title');
       add(title, 'h3', '', run); add(title, 'span', 'dag-count', Object.keys(dag.nodes).length + ' tasks');
       const levels = {}, visiting = new Set();
@@ -547,11 +580,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         const [x,y] = pos[name]; const rect = svgEl('rect'); rect.setAttribute('x', x); rect.setAttribute('y', y);
         rect.setAttribute('width', 175); rect.setAttribute('height', 64); rect.setAttribute('rx', 10);
         rect.setAttribute('class', state); svg.append(rect);
-        const label = svgEl('text'); label.setAttribute('x', x + 12); label.setAttribute('y', y + 26);
-        label.textContent = name; svg.append(label);
+        const text = label(name), short = text.length > 20 ? text.slice(0, 19) + '...' : text;
+        const caption = svgEl('text'); caption.setAttribute('x', x + 12); caption.setAttribute('y', y + 26);
+        caption.textContent = short; svg.append(caption);
         const sub = svgEl('text'); sub.setAttribute('x', x + 12); sub.setAttribute('y', y + 49);
         sub.textContent = named(state, {...stageNames, ...dagNames}); svg.append(sub);
-        const tip = svgEl('title'); tip.textContent = name + ': ' + named(state, stageNames); rect.append(tip);
+        const tip = svgEl('title'); tip.textContent = text + ' (' + name + '): ' + named(state, stageNames); rect.append(tip);
       }
     }
   }

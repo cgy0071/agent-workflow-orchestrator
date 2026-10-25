@@ -156,11 +156,12 @@ def dashboard_details(state, summary=None):
             for role in {row["worker"], data["controller"]["role"], data["request"]["reviewer"]["role"]}:
                 if role in roles:
                     roles[role]["tasks"].append({"task_id": row["id"], "phase": phases.get(row["id"], row["status"])})
-        cwd_by_task, sources = {}, {}
+        cwd_by_task, sources, parents = {}, {}, {}
         for row in con.execute("SELECT id,data FROM tasks"):
             request = json.loads(row["data"])["request"]
             cwd_by_task[row["id"]] = request["cwd"]
             sources[row["id"]] = [request.get("taskbook_path")]
+            parents[row["id"]] = request.get("parent_task")
         if has_schema(con):
             for row in con.execute("SELECT task,data FROM dispatches"):
                 sources.setdefault(row["task"], []).append(json.loads(row["data"]).get("message"))
@@ -170,7 +171,8 @@ def dashboard_details(state, summary=None):
                     sources.setdefault(node["request"]["task_id"], []).append(node.get("message"))
     task_details = {}
     for item in raw["tasks"]:
-        task_details[item["task_id"]] = {"cwd": item["cwd"], "journal": item.get("journal", [])[-10:]}
+        task_details[item["task_id"]] = {"cwd": item["cwd"], "journal": item.get("journal", [])[-10:],
+                                         "parent_task": parents.get(item["task_id"])}
     for dag in raw["dags"].values():
         for name, plan in dag["tasks"].items():
             task_details.setdefault(plan["task_id"], {"cwd": cwd_by_task.get(plan["task_id"]), "journal": []})
