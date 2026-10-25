@@ -2,6 +2,48 @@
 from datetime import datetime, timezone
 import json
 import math
+from pathlib import Path
+import re
+
+SUMMARY_READ = 65536  # bytes of a taskbook read for its title and opening lines
+# Routing lines repeat what the ledger already shows; skip them when summarizing.
+ROUTING = re.compile(r"(task id|nonce|cwd|assigned directory|completion marker|status|owner authorization|roles?)"
+                     r"[^:\uff1a]{0,60}[:\uff1a]", re.I)
+
+
+def task_summary(task_id, cwd, messages):
+    """Title and a short excerpt of what a task asks for; never raises."""
+    candidates = [Path(m) for m in messages[:1] if m]
+    if cwd:
+        candidates += [Path(cwd) / "TASK.md", Path(cwd) / "task.md"]
+    texts = []
+    for path in candidates:
+        try:
+            if path.is_file():
+                with path.open("rb") as stream:
+                    texts.append(stream.read(SUMMARY_READ).decode("utf-8", errors="replace"))
+                break
+        except OSError:
+            continue
+    texts += [m for m in messages[1:] if isinstance(m, str)]
+    for text in texts:
+        if text.lstrip().startswith(("{", "[")):
+            continue  # machine-readable message; not a human description
+        title, body = "", []
+        for line in text.splitlines():
+            line = line.strip().lstrip("#").strip()
+            if not line or ROUTING.match(line) or set(line) <= set("-=|*`"):
+                continue
+            if not title:
+                title = re.sub(r"^" + re.escape(task_id) + r"\s*[:\uff1a\u2014\u2013-]*\s*", "", line) or line
+            else:
+                body.append(line)
+            if sum(map(len, body)) > 240:
+                break
+        if title:
+            excerpt = " ".join(body)
+            return {"title": title[:120], "excerpt": excerpt[:240] + ("..." if len(excerpt) > 240 else "")}
+    return {"title": "", "excerpt": ""}
 
 
 def summarize(state, task=None, stale_after=900, now=None):
@@ -114,18 +156,26 @@ def dashboard_details(state, summary=None):
             for role in {row["worker"], data["controller"]["role"], data["request"]["reviewer"]["role"]}:
                 if role in roles:
                     roles[role]["tasks"].append({"task_id": row["id"], "phase": phases.get(row["id"], row["status"])})
-        cwd_by_task = {row["id"]: json.loads(row["data"])["request"]["cwd"]
-                       for row in con.execute("SELECT id,data FROM tasks")}
+        cwd_by_task, sources = {}, {}
+        for row in con.execute("SELECT id,data FROM tasks"):
+            request = json.loads(row["data"])["request"]
+            cwd_by_task[row["id"]] = request["cwd"]
+            sources[row["id"]] = [request.get("taskbook_path")]
         if has_schema(con):
+            for row in con.execute("SELECT task,data FROM dispatches"):
+                sources.setdefault(row["task"], []).append(json.loads(row["data"]).get("message"))
             for row in con.execute("SELECT data FROM dag_runs"):
                 for node in json.loads(row["data"])["graph"]["nodes"]:
                     cwd_by_task.setdefault(node["request"]["task_id"], node["request"]["cwd"])
+                    sources.setdefault(node["request"]["task_id"], []).append(node.get("message"))
     task_details = {}
     for item in raw["tasks"]:
         task_details[item["task_id"]] = {"cwd": item["cwd"], "journal": item.get("journal", [])[-10:]}
     for dag in raw["dags"].values():
         for name, plan in dag["tasks"].items():
             task_details.setdefault(plan["task_id"], {"cwd": cwd_by_task.get(plan["task_id"]), "journal": []})
+    for task_id, detail in task_details.items():
+        detail.update(task_summary(task_id, detail.get("cwd"), sources.get(task_id, [])))
     return {"goal": config.get("goal", ""), "roles": list(roles.values()), "inbox": inbox,
             "verdicts": sorted(config.get("workflow", {}).get("transitions", {})),
             "dags": raw["dags"], "scheduling_blocks": raw["scheduling_blocks"], "task_details": task_details}

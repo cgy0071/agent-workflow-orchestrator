@@ -160,6 +160,18 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.http("GET", "/api/artifacts?task=NOPE")[0], 400)
         self.assertEqual(self.http("GET", "/api/artifacts?task=ART-1", token=False)[0], 403)
 
+    def test_task_summary_prefers_human_text_and_never_raises(self):
+        import workflow_status
+        cwd = self.root / "SUM-1"
+        cwd.mkdir()
+        (cwd / "task.md").write_text("Task ID: SUM-1\nNonce: abc\nCwd: x\n\n# SUM-1: Measure skip cost\n\n"
+                                     "Compare cycles with and without skipping.\n", encoding="utf-8")
+        summary = workflow_status.task_summary("SUM-1", str(cwd), [None])
+        self.assertEqual(summary, {"title": "Measure skip cost", "excerpt": "Compare cycles with and without skipping."})
+        self.assertEqual(workflow_status.task_summary("X", str(self.root / "missing"), ['{"task_id": "X"}']),
+                         {"title": "", "excerpt": ""})
+        self.assertEqual(workflow_status.task_summary("X", None, [None, "Plain message\nDo it."])["title"], "Plain message")
+
     def test_startup_rejects_public_host_or_incomplete_controller(self):
         with self.assertRaises(ValueError):
             dashboard.DashboardServer(("0.0.0.0", 0), self.state)

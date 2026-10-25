@@ -126,13 +126,17 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
 th { text-align:left; color:var(--muted); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
   border-bottom:1px solid var(--line); white-space:nowrap }
 th,td { padding:12px 9px; vertical-align:top; overflow-wrap:anywhere }
-td { border-bottom:1px solid var(--line) } .task-row td:first-child { font-weight:800; color:var(--ink);
-  font:700 12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace }
+td { border-bottom:1px solid var(--line) } .task-row td:first-child { color:var(--ink); min-width:220px;
+  font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif }
 tr.task-row { cursor:pointer; transition:background .15s } tr.task-row:hover { background:var(--accent-soft) }
 tr.task-row td:last-child { color:var(--warn) } tr.task-row td.info-note { color:var(--muted) }
 .task-row td:nth-child(6) { min-width:170px }
 .detail { background:var(--bg); padding:13px; border-radius:9px; overflow-wrap:anywhere }
 .results { margin:9px 0 } .result-file { margin-top:10px } .result-file p { margin:3px 0 }
+.task-name span { display:block } .task-title { font-weight:800; color:var(--ink) }
+.task-excerpt { margin-top:3px; font-size:12px; color:var(--muted); max-width:46ch; line-height:1.4;
+  display:-webkit-box !important; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden }
+.task-id { margin-top:3px; font:400 10px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--muted) }
 .result-file pre { max-height:360px; overflow:auto }
 pre { margin:7px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
   background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:9px; max-height:320px; overflow:auto }
@@ -148,7 +152,7 @@ svg rect.scheduling_blocked,svg rect.review_blocked { stroke:var(--warn); stroke
 .event-item,.alert-item { min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:10px;
   background:var(--bg) } .event-head { display:flex; justify-content:space-between; align-items:center; gap:8px }
 .event-item small { display:block; overflow-wrap:anywhere; font-size:11px; margin-top:5px }
-.event-item strong { font:700 12px ui-monospace,SFMono-Regular,Consolas,monospace }
+.event-item strong { font:700 13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif }
 .alert-item { border-left:3px solid var(--warn); padding:13px 15px }
 .alert-item.info { border-left-color:var(--accent) }
 .alert-head { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:7px }
@@ -227,9 +231,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
     <section class="panel"><div class="panel-head"><h2>Alerts & guidance</h2>
       <span class="panel-caption">Meaning and next step</span></div><div id="alerts" class="list"></div></section>
-    <section class="panel"><div class="panel-head"><h2>Current worker check</h2>
+    <section class="panel" id="probe-panel"><div class="panel-head"><h2>Current worker check</h2>
       <span class="panel-caption">On demand only</span></div><p class="muted">The page refresh reads saved records. Use Check workers now to contact active workers.</p>
-      <div id="probe-result" class="list"></div></section>
+      <p id="probe-time" class="muted"></p><div id="probe-result" class="list"></div>
+      <div class="small-actions"><button id="probe-top" type="button">Back to top</button>
+        <button id="probe-clear" type="button">Clear</button></div></section>
     <section class="panel wide" id="dispatch-panel"><div class="panel-head"><h2>Start a task</h2>
       <span class="panel-caption">One send attempt after your confirmation</span></div>
       <p class="muted" id="dispatch-note"></p>
@@ -357,9 +363,15 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       'No send recorded';
   }
   function detailLine(root, label, value) { add(root, 'p', '', label + ': ' + (value ?? 'not recorded')); }
-  function technical(root, label) {
-    const details = add(root, 'details', 'technical'); add(details, 'summary', '', label); return details;
+  // Auto refresh rebuilds every list; remember what the reader opened so it stays open.
+  const openKeys = new Set(), resultCache = new Map();
+  function technical(root, label, key) {
+    const details = add(root, 'details', 'technical'); add(details, 'summary', '', label);
+    if (key) { details.open = openKeys.has(key);
+      details.addEventListener('toggle', () => details.open ? openKeys.add(key) : openKeys.delete(key)); }
+    return details;
   }
+  function taskName(data, taskId) { return (data.task_details[taskId] || {}).title || taskId; }
   function warningInfo(code, task) {
     const finished = task && ['accepted', 'closed'].includes(task.phase);
     if (code === 'no_monitor_observation') return finished ? {
@@ -394,10 +406,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function alertCard(root, taskIds, info) {
     const card = add(root, 'article', 'alert-item ' + info.tone);
     const head = add(card, 'div', 'alert-head');
-    add(head, 'strong', '', taskIds.length === 1 ? taskIds[0] : taskIds.length + ' tasks');
+    add(head, 'strong', '', taskIds.length === 1 ? taskName(lastData, taskIds[0]) : taskIds.length + ' tasks');
     add(head, 'span', 'badge', info.tone === 'info' ? 'For reference' : 'Check needed');
     add(card, 'h3', '', info.title);
-    if (taskIds.length > 1) add(card, 'p', 'alert-technical', 'Tasks: ' + taskIds.join(', '));
+    if (taskIds.length > 1) add(card, 'p', 'alert-technical', 'Tasks: ' + taskIds.map(x => taskName(lastData, x)).join('; '));
     add(card, 'p', '', info.explanation);
     add(card, 'p', 'alert-next', 'Next: ' + info.next);
     if (info.technical) add(card, 'p', 'alert-technical', 'Ledger detail: ' + info.technical);
@@ -416,9 +428,9 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         (purpose[current.mode] || 'Assigned workflow role') : 'No active agent connection');
       add(card, 'p', 'role-tasks', role.tasks.length ?
         role.tasks.length + ' open task' + (role.tasks.length === 1 ? '' : 's') + ': ' +
-          role.tasks.map(t => t.task_id).join(', ') : 'No open tasks');
+          role.tasks.map(t => taskName(data, t.task_id)).join('; ') : 'No open tasks');
       if (role.bindings.length) {
-        const extra = technical(card, 'Connection details');
+        const extra = technical(card, 'Connection details', 'conn:' + role.role);
         for (const b of role.bindings) {
           const binding = add(extra, 'div', 'binding');
           if (role.bindings.length > 1) add(binding, 'span', 'badge ' + b.status, named(b.status, {active:'Assigned', pending:'Setup pending'}));
@@ -452,7 +464,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 8; return; }
     for (const t of data.tasks) {
       const tr = add(root, 'tr', 'task-row');
-      add(tr, 'td', '', t.task_id); const phase = add(tr, 'td');
+      const info = data.task_details[t.task_id] || {};
+      const name = add(tr, 'td', 'task-name'); add(name, 'span', 'task-title', info.title || t.task_id);
+      if (info.excerpt) add(name, 'span', 'task-excerpt', info.excerpt);
+      if (info.title) add(name, 'span', 'task-id', t.task_id);
+      const phase = add(tr, 'td');
       add(phase, 'span', 'badge ' + t.phase, named(t.phase, stageNames));
       add(tr, 'td', '', t.worker_role);
       add(tr, 'td', '', deliveryText(t));
@@ -465,10 +481,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         notes.map(note => note.label).join('; ') || 'No notes');
       [...tr.cells].forEach((cell, index) => { cell.dataset.label =
         ['Task', 'Stage', 'Assigned to', 'Delivery', 'Review', 'Next step', 'Last check', 'Note'][index]; });
-      const detailRow = add(root, 'tr', 'detail-row hidden'); const td = add(detailRow, 'td'); td.colSpan = 8;
+      const detailRow = add(root, 'tr', 'detail-row' + (openKeys.has('row:' + t.task_id) ? '' : ' hidden'));
+      const td = add(detailRow, 'td'); td.colSpan = 8;
       const detail = add(td, 'div', 'detail');
-      const info = data.task_details[t.task_id] || {};
-      if (t.dependencies?.length) detailLine(detail, 'Starts after', t.dependencies.join(', '));
+      if (t.dependencies?.length) detailLine(detail, 'Starts after', t.dependencies.map(d =>
+        taskName(data, data.dags[t.run]?.tasks?.[d]?.task_id || d)).join('; '));
       if (t.blocking_reason) detailLine(detail, 'Why it could not start', t.blocking_reason);
       for (const code of t.warnings) {
         const note = warningInfo(code, t), box = add(detail, 'div', 'detail-note');
@@ -479,19 +496,23 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       const results = add(detail, 'div', 'results');
       const view = add(results, 'button', '', 'View result files'); view.type = 'button';
       const output = add(results, 'div');
+      if (resultCache.has(t.task_id)) resultFiles(output, resultCache.get(t.task_id));
       view.addEventListener('click', async event => {
         event.stopPropagation(); view.disabled = true; empty(output, 'Reading result files...');
-        try { resultFiles(output, await api('/api/artifacts?task=' + encodeURIComponent(t.task_id))); }
+        try { const files = await api('/api/artifacts?task=' + encodeURIComponent(t.task_id));
+          resultCache.set(t.task_id, files); resultFiles(output, files); }
         catch (error) { empty(output, error.message); } finally { view.disabled = false; }
       });
-      const extra = technical(detail, 'Technical record');
+      const extra = technical(detail, 'Technical record', 'record:' + t.task_id);
+      detailLine(extra, 'Task ID', t.task_id);
       detailLine(extra, 'Phase', t.phase); detailLine(extra, 'Harness / adapter', t.harness + ' / ' + t.adapter);
       detailLine(extra, 'Dispatch', t.dispatch); detailLine(extra, 'Resource reservation', t.claim_held ? 'held' : 'none');
       detailLine(extra, 'Review verdicts', t.review_verdicts.join(', ') || 'none');
       detailLine(extra, 'Next action', t.next_action); detailLine(extra, 'Working folder', info.cwd || 'unknown');
       const journal = (info.journal || []).map(j => [j.at, j.kind, j.actor].join(' | ')).join('\n');
       add(extra, 'pre', '', journal || 'No journal entries');
-      tr.addEventListener('click', () => detailRow.classList.toggle('hidden'));
+      tr.addEventListener('click', () => { const key = 'row:' + t.task_id;
+        detailRow.classList.toggle('hidden') ? openKeys.delete(key) : openKeys.add(key); });
     }
   }
   const svgEl = tag => document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -539,7 +560,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     if (!data.inbox.length) empty(inbox, 'No completion updates yet');
     else for (const e of data.inbox) {
       const item = add(inbox, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
-      add(head, 'strong', '', e.task_id); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
+      add(head, 'strong', '', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
       add(item, 'p', 'role-summary', named(e.report_status, reportNames));
       if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
       else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
@@ -551,7 +572,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         const received = new Date(e.created_at);
         add(item, 'small', '', 'Received ' + (Number.isNaN(received.getTime()) ? e.created_at : received.toLocaleString()));
       }
-      const extra = technical(item, 'Event details'); detailLine(extra, 'Event ID', e.event_id);
+      const extra = technical(item, 'Event details', 'event:' + e.event); detailLine(extra, 'Event ID', e.event_id);
       detailLine(extra, 'Inbox status', e.status); detailLine(extra, 'Report status', e.report_status);
     }
     const alerts = id('alerts'); alerts.replaceChildren();
@@ -588,10 +609,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   }
   function workers(data) {
     const select = id('worker-role'), selected = select.value;
+    const names = data.roles.filter(role => role.bindings.some(b => b.status === 'active' && b.mode === 'worker'))
+      .map(role => role.role);
+    // Rebuilding options closes an open dropdown; only touch it when the choices change.
+    if (names.join('\n') === [...select.options].map(x => x.value).join('\n')) return;
     select.replaceChildren();
-    for (const role of data.roles) if (role.bindings.some(b => b.status === 'active' && b.mode === 'worker')) {
-      const option = el('option', '', role.role); option.value = role.role; select.append(option);
-    }
+    for (const name of names) { const option = el('option', '', name); option.value = name; select.append(option); }
     if ([...select.options].some(x => x.value === selected)) select.value = selected;
   }
   function picker(data, open) {
@@ -669,7 +692,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function openReview(e, data) {
     reviewEvent = e; reviewInvalidate(); id('review-error').textContent = ''; id('review-status').textContent = '';
     id('review-target').textContent = (e.status === 'pending' ? 'Acknowledge the update for ' :
-      'Record a review for ') + e.task_id + ' (event ' + e.event_id + ').';
+      'Record a review for ') + taskName(data, e.task_id) + ' (' + e.task_id + ').';
     const select = id('review-verdict'); select.replaceChildren();
     for (const v of data.verdicts) { const option = add(select, 'option', '', named(v, reviewNames)); option.value = v; }
     show('review-verdict-row', e.status === 'acknowledged');
@@ -707,7 +730,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   });
   id('probe').addEventListener('click', async () => {
     id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active workers...');
+    id('probe-time').textContent = ''; id('probe-panel').scrollIntoView({behavior:'smooth', block:'start'});
     try { const data = await api('/api/probe', {}); root.replaceChildren();
+      id('probe-time').textContent = 'Checked at ' + new Date().toLocaleTimeString() +
+        '. Shows live worker status only; tasks appear above only when dispatched through this workflow ledger.';
       if (!data.workers.length) empty(root, 'No active workers to check');
       for (const w of data.workers) {
         const item = add(root, 'div', 'list-item');
@@ -722,6 +748,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       }
     } catch (error) { empty(root, error.message); } finally { id('probe').disabled = false; }
   });
+  id('probe-top').addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
+  id('probe-clear').addEventListener('click', () => { id('probe-result').replaceChildren(); id('probe-time').textContent = ''; });
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     await navigator.clipboard.writeText(id(button.dataset.copy).textContent); button.textContent = 'Copied';
   }));
