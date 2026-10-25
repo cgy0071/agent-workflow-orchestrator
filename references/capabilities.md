@@ -13,6 +13,8 @@ template. Every operation is `unverified`, `unsupported`, or `verified`.
 | receipt | run_job one-shot | absent | absent | status file | absent | output file | absent |
 
 This table describes this package's interfaces, not verified client versions.
+
+For the optional [OMP one-shot bridge](omp.md), the installed 18.12.6 CLI completed a real two-task DAG with independent reviews through `command` and `receipt`; a separate real OMP probe used the `write` tool. The failed JSONL/exit/receipt path was also observed with an expired provider credential. `status` and `collect` refer to the orchestrator-managed job, not an interactive OMP session. Conversation resume, live message send, Swarm, and explicit cancel are not supported by this bridge.
 Binding an identity does not resume a harness conversation. A status observation
 timestamp is not a native worker heartbeat. Unsupported operations raise errors;
 the scheduler does not guess provider commands or provision sessions.

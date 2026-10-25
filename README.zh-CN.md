@@ -230,6 +230,7 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 | 默认角色及如何修改 | [roles.zh-CN.md](references/roles.zh-CN.md) |
 | 设置、绑定、会话策略、切换窗口、恢复 | [setup-and-switching.zh-CN.md](references/setup-and-switching.zh-CN.md) |
 | 适配器约定（Herdr、command、receipt） | [harness-adapters.zh-CN.md](references/harness-adapters.zh-CN.md) |
+| 可选 OMP 单次执行桥接 | [omp.zh-CN.md](references/omp.zh-CN.md) |
 | 监控行为、结果类型、后台运行 | [monitoring.zh-CN.md](references/monitoring.zh-CN.md) |
 | 单次派发、并行 DAG、资源占用 | [scheduling.zh-CN.md](references/scheduling.zh-CN.md) |
 | 任务状态与事件 | [task-state-machine.zh-CN.md](references/task-state-machine.zh-CN.md) |

@@ -1,4 +1,4 @@
-"""Real native Codex/Pi Command + Receipt acceptance. Herdr is never invoked."""
+"""Real native Codex/Pi/OMP Command + Receipt acceptance. Herdr is never invoked."""
 import argparse
 import hashlib
 import json
@@ -90,6 +90,8 @@ def prepare(root, harness, executable, mode, timeout, evidence_class="native", p
         raise ValueError("unknown evidence class")
     if evidence_class == "native" and os.environ.get("HERDR_ENV") == "1":
         raise ValueError("native-only acceptance requires a caller outside Herdr; no Herdr command was invoked")
+    if harness == "omp" and mode != "one-shot":
+        raise ValueError("OMP native bridge supports only one-shot execution")
     native_worker.selection(harness, provider, model)
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -329,12 +331,12 @@ def execute(root, budget=None, recover_dispatch=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", required=True)
-    parser.add_argument("--harness", choices=("codex", "pi"))
+    parser.add_argument("--harness", choices=("codex", "pi", "omp"))
     parser.add_argument("--executable")
     parser.add_argument("--mode", choices=("one-shot", "session"), default="one-shot")
     parser.add_argument("--timeout", type=float, default=45)
-    parser.add_argument("--provider", help="Pi per-invocation provider; requires --model")
-    parser.add_argument("--model", help="Pi per-invocation model; does not change global settings")
+    parser.add_argument("--provider", help="Pi/OMP per-invocation provider; requires --model")
+    parser.add_argument("--model", help="Pi/OMP per-invocation model; does not change global settings")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--recover-dispatch", action="store_true", help="inspect exact native task/nonce and reconcile an uncertain send; never resend")
     parser.add_argument("--crash-after-send", action="store_true", help="explicit acceptance fault injection: exit after first send")
@@ -349,7 +351,9 @@ def main():
     try:
         if not args.resume:
             if not args.harness: parser.error("--harness is required for a new validation run")
-            executable = args.executable or shutil.which(args.harness + (".cmd" if sys.platform == "win32" else ""))
+            candidates = ([args.harness + suffix for suffix in (".exe", ".cmd", "")]
+                          if sys.platform == "win32" else [args.harness])
+            executable = args.executable or next((found for name in candidates if (found := shutil.which(name))), None)
             if not executable: parser.error("native CLI executable not found")
             prepare(root, args.harness, executable, args.mode, args.timeout, provider=args.provider, model=args.model)
         if args.crash_after_send: write_new(root / "crash-after-send", "explicit acceptance fault injection\n")

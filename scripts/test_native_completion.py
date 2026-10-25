@@ -54,7 +54,7 @@ class CompletionTests(unittest.TestCase):
 
     def test_complete_turn_retains_actual_nonzero_exit(self):
         receipt = run_job.run(self.job(CODEX, tail="sys.exit(7)"))
-        self.assertEqual((receipt["status"], receipt["completion_seq"], receipt["returncode"]), ("done", 1, 7))
+        self.assertEqual((receipt["status"], receipt["completion_seq"], receipt["returncode"]), ("failed", 0, 7))
         self.assertEqual(receipt["process_status"], "nonzero_exit")
         self.assertEqual(receipt["native_turn"]["text"], "323")
 
@@ -84,11 +84,11 @@ class CompletionTests(unittest.TestCase):
         state = {"status": "failed", "completion_seq": 0, "returncode": 1, "timed_out": True,
                  "process_status": "terminated_on_timeout"}
         result = run_job.finalize({"completion_contract": {"type": "native_turn", "harness": "codex"}}, state, directory)
-        self.assertEqual((result["status"], result["completion_seq"], result["returncode"]), ("done", 1, 1))
+        self.assertEqual((result["status"], result["completion_seq"], result["returncode"]), ("failed", 0, 1))
         self.assertTrue(result["timed_out"])
         self.assertEqual(result["native_turn"]["text"], "323")
         self.assertEqual(result["native_turn"]["output_sha256"], hashlib.sha256(data).hexdigest())
-        self.assertIn("CLI did not exit", result["warning"])
+        self.assertIn("not clean", result["warning"])
 
     def test_owned_hanging_child_retains_answer_without_hiding_uncertain_cleanup(self):
         worker = self.root / "native-worker"
@@ -109,7 +109,7 @@ class CompletionTests(unittest.TestCase):
             self.assertEqual(receipt["completion_seq"], 0)
             self.assertEqual(result["status"], "blocked")
         else:
-            self.assertEqual((receipt["status"], result["status"]), ("done", "done"))
+            self.assertEqual((receipt["status"], result["status"]), ("failed", "failed"))
 
     def test_truncated_completion_and_later_failure_cannot_pass(self):
         raw = "\n".join(json.dumps(e) for e in CODEX[:-1]) + '\n{"type":"turn.completed"'

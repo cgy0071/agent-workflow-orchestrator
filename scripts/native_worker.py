@@ -20,6 +20,11 @@ def cli_prefix(executable):
         # Avoid cmd.exe reinterpretation of prompts. Resolve the inspected Node
         # launchers and continue with an argv array, never shell=True.
         candidates = [path.parent / "pi-launcher.js", path.parent / "node_modules" / "@openai" / "codex" / "bin" / "codex.js"]
+        omp = path.parent / "node_modules" / "@oh-my-pi" / "pi-coding-agent" / "dist" / "cli.js"
+        if omp.is_file():
+            bun = shutil.which("bun")
+            if not bun: raise ValueError("OMP Windows launcher requires Bun")
+            return [bun, str(omp)]
         script = next((item for item in candidates if item.is_file()), None)
         node = shutil.which("node")
         if not script or not node: raise ValueError("unverified Windows native launcher")
@@ -28,28 +33,38 @@ def cli_prefix(executable):
 
 
 def selection(harness, provider=None, model=None):
-    if harness != "pi" and (provider is not None or model is not None):
-        raise ValueError("provider/model overrides currently require Pi")
+    if harness not in ("pi", "omp") and (provider is not None or model is not None):
+        raise ValueError("provider/model overrides currently require Pi or OMP")
     for value in (provider, model):
         if value is not None and (not isinstance(value, str) or not value.strip() or value.startswith("-")
                                   or any(ord(char) < 32 for char in value)):
             raise ValueError("provider/model must be nonempty CLI values")
     if provider is not None and model is None:
-        raise ValueError("Pi --provider requires --model")
+        raise ValueError("--provider requires --model")
     return {"provider": provider, "model": model}
 
 
+def omp_version(executable):
+    checked = subprocess.run(cli_prefix(executable) + ["--version"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=15)
+    if checked.returncode or not checked.stdout.strip().startswith("omp/"):
+        raise ValueError("executable did not identify as OMP")
+    return checked.stdout.strip()
+
+
 def initialize(directory, harness, executable, mode="one-shot", timeout=45, provider=None, model=None):
-    if harness not in ("codex", "pi") or mode not in ("one-shot", "session"):
+    if harness not in ("codex", "pi", "omp") or mode not in ("one-shot", "session") or (harness == "omp" and mode != "one-shot"):
         raise ValueError("unsupported native harness or execution mode")
     from monitor_task import number
     number(timeout, "native test timeout", maximum=3600)
     requested = selection(harness, provider, model)
+    version = omp_version(executable) if harness == "omp" else None
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=False)
     identity = {"kind": harness, "terminal": "native-bridge-" + uuid.uuid4().hex, "launch_cwd": str(root)}
     config = {"harness": harness, "executable": str(Path(executable).resolve()), "mode": mode,
-              "timeout_seconds": timeout, "identity": identity, "native_session_id": None, **requested}
+              "timeout_seconds": timeout, "identity": identity, "native_session_id": None,
+              "harness_version": version, **requested}
     save_json(root / "config.json", config)
     script = str(Path(__file__).resolve())
     base = [sys.executable, "-B", script, "--worker", str(root)]
@@ -64,13 +79,15 @@ def status(directory):
     active = read_json(root / "active.json") if (root / "active.json").exists() else None
     result = {"identity": config["identity"], "status": "idle", "completion_seq": 0,
               "execution_semantics": config["mode"], "identity_origin": "bridge",
-              "native_session_id": config.get("native_session_id")}
+              "native_session_id": config.get("native_session_id"),
+              "harness_version": config.get("harness_version")}
     if active:
         result.update(task_id=active["task_id"], nonce=active["nonce"], completion_seq=active["baseline"])
         job = Path(active["directory"])
         receipt = read_json(job / "receipt" / "status.json") if (job / "receipt" / "status.json").exists() else {}
         result.update(status="working", execution_started=bool(receipt.get("pid")), receipt_status=receipt.get("status"),
-                      receipt_path=str(job / "receipt" / "status.json"), output_path=str(job / "receipt" / "output.log"))
+                      receipt_path=str(job / "receipt" / "status.json"), output_path=str(job / "receipt" / "output.log"),
+                      stderr_path=str(job / "receipt" / "stderr.log"))
         if (job / "outcome.json").exists():
             outcome = read_json(job / "outcome.json")
             result.update(status="idle" if outcome["status"] == "done" else outcome["status"],
@@ -81,6 +98,16 @@ def status(directory):
 
 def argv_for(config, payload, root):
     executable = config.get("argv_prefix") or cli_prefix(config["executable"])
+    if config["harness"] == "omp":
+        if config["mode"] != "one-shot": raise ValueError("OMP session reuse is not verified")
+        cwd = Path(payload["cwd"])
+        if not cwd.is_absolute() or not cwd.is_dir(): raise ValueError("OMP requires an existing absolute cwd")
+        argv = executable + ["--print", "--mode", "json", "--cwd", str(cwd.resolve()), "--no-session",
+                             "--auto-approve", "--tools=read,bash,edit,write,grep,glob",
+                             "--no-extensions", "--no-skills", "--no-rules"]
+        for key, value in selection("omp", config.get("provider"), config.get("model")).items():
+            if value is not None: argv += ["--" + key, value]
+        return argv + [payload["prompt"]]
     if config["harness"] == "codex":
         if config["mode"] == "session" and config.get("native_session_id"):
             return executable + ["exec", "resume", config["native_session_id"], "--json", "--skip-git-repo-check", payload["prompt"]]
@@ -121,11 +148,14 @@ def send(directory, payload):
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
         config = read_json(root / "config.json")
+        if config["harness"] == "omp" and omp_version(config["executable"]) != config.get("harness_version"):
+            raise ValueError("OMP version changed since worker initialization")
         argv = argv_for(config, payload, root)
         directory = root / "jobs" / task_key(payload)
         directory.mkdir(parents=True, exist_ok=False)
         job = dict(payload, argv=argv, identity=config["identity"],
                    output_dir=str(directory / "receipt"), timeout_seconds=config["timeout_seconds"],
+                   harness_version=config.get("harness_version"),
                    completion_contract={"type": "native_turn", "harness": config["harness"]})
         save_json(directory / "job.json", job)
         save_json(root / "active.json", {"task_id": payload["task_id"], "nonce": payload["nonce"],
@@ -149,6 +179,8 @@ def run(directory, job_path):
         if turn.get("status") != "completed":
             raise ValueError(turn.get("error", "native turn did not complete"))
         text, session = turn["text"], turn["native_session_id"]
+        if config["harness"] == "omp" and receipt["status"] != "done":
+            raise ValueError("OMP output is not accepted without a clean process exit")
         # Preserve a completed answer even when process cleanup remains blocked.
         # The blocked outcome below still prevents review/continuation/reuse.
         output = Path(job["cwd"])

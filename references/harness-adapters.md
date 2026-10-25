@@ -6,7 +6,7 @@ English | [Chinese](harness-adapters.zh-CN.md)
 
 ```text
 role: planner | executor | paper-lead | another configured role
-harness: codex | pi | claude | dsh-tui | grok | another actual client
+harness: codex | pi | omp | claude | dsh-tui | grok | another actual client
 model: actual model, or unknown
 transport: herdr | command | receipt
 ```
@@ -21,7 +21,7 @@ Choose an interface based on verified capabilities:
 
 1. **Native Herdr:** discover pane, terminal, agent kind, and cwd; normalize get responses. Read bounded output only on completion or exception. Verify the actual agent kind rather than hardcoding codex.
 2. **Official CLI/API adapter:** inspect current-version help and read-only identity queries. Supply status/identity commands that emit canonical JSON and a prompt/resume command targeting a verified session. Execute argument arrays rather than shell strings. The bundled command adapter does not guess provider commands.
-3. **One-shot CLI job:** `run_job.py` starts a verified noninteractive command and emits task-bound status, the real exit code, and stdout. The receipt adapter reads them. A persistent interactive TUI is not a one-shot job: process existence alone proves neither working nor completion.
+3. **One-shot CLI job:** `run_job.py` starts a verified noninteractive command and emits task-bound status, the real exit code, stdout, and separate stderr. The receipt adapter reads them. See [OMP one-shot bridge](omp.md) for the optional OMP integration. A persistent interactive TUI is not a one-shot job: process existence alone proves neither working nor completion.
 
 A TUI without official lifecycle events needs a verified plugin or controlled bridge. Until then, report ADAPTER_NOT_VERIFIED. Do not fill that gap with blind key injection, approval-dialog answers, or configuration changes.
 

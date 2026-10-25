@@ -230,6 +230,7 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 | Default roles and how to change them | [roles.md](references/roles.md) |
 | Setup, bindings, conversation policies, switching windows, recovery | [setup-and-switching.md](references/setup-and-switching.md) |
 | Adapter contracts (Herdr, command, receipt) | [harness-adapters.md](references/harness-adapters.md) |
+| Optional OMP one-shot bridge | [omp.md](references/omp.md) |
 | Monitor behavior, outcomes, background runs | [monitoring.md](references/monitoring.md) |
 | Single-attempt dispatch, parallel DAGs, resource claims | [scheduling.md](references/scheduling.md) |
 | Task states and events | [task-state-machine.md](references/task-state-machine.md) |

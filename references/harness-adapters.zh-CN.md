@@ -8,7 +8,7 @@
 
 ```text
 role: planner | executor | paper-lead
-harness: codex | pi | claude | dsh-tui | grok | 其他实际工具
+harness: codex | pi | omp | claude | dsh-tui | grok | 其他实际工具
 model: 实际模型，未知时标 unknown
 transport: herdr | command | receipt
 ```
@@ -23,7 +23,7 @@ transport: herdr | command | receipt
 
 1. **Herdr 原生状态/消息接口**：实时发现 pane / terminal / agent / cwd，将 get 返回值转成统一状态；只在完成/异常时读取有限终端输出。工具名可以任意，按 Herdr 实际返回的 agent 类型核验，不硬编码 codex。
 2. **工具官方 CLI/API 适配**：先用当前版本的帮助和只读身份查询确认命令，再提供返回统一 JSON 的状态/身份命令及精确会话的 prompt/resume 命令。参数列表执行，不拼 shell 字符串。随附 monitor 的 command 适配接受这些合同，但不会猜测各工具命令。
-3. **独立单次 CLI 作业**：可使用 `run_job.py` 启动经确认的非交互命令，产生任务绑定的状态、真实进程返回码和 stdout 完成标记，再由 receipt 适配读取。适合提供单次运行模式的任意 harness。交互 TUI 不因进程存在就视为正在执行任务，也不因进程未退出而永远假定任务未完成。
+3. **独立单次 CLI 作业**：可使用 `run_job.py` 启动经确认的非交互命令，产生任务绑定的状态、真实进程返回码、stdout 和独立 stderr，再由 receipt 适配读取。可选 OMP 用法见 [OMP 单次执行桥接](omp.zh-CN.md)。交互 TUI 不因进程存在就视为正在执行任务，也不因进程未退出而永远假定任务未完成。
 
 只有交互 TUI、无官方状态/完成事件时，需要已经验证的 TUI 插件或受控外层桥接；在其就绪前标 `ADAPTER_NOT_VERIFIED`。不要通过盲目键盘注入、回答批准对话框或更改配置来补“兼容性”。
 

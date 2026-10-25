@@ -4,9 +4,11 @@ import json
 
 
 def inspect_turn(harness, raw):
-    if harness not in ("codex", "pi"):
+    if harness not in ("codex", "pi", "omp"):
         raise ValueError("unsupported native completion contract")
     data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
+    if harness == "omp":
+        return inspect_omp(data)
     raw = data.decode("utf-8", errors="replace")
     result = {"status": "incomplete", "text": "", "native_session_id": None,
               "provider": None, "model": None,
@@ -57,6 +59,63 @@ def inspect_turn(harness, raw):
             result["status"] = "completed"
         else:
             result["error"] = "missing native completion event or final assistant message"
+    return result
+
+
+def inspect_omp(data):
+    """Validate OMP's JSON print stream, including its terminal agent_end."""
+    result = {"status": "incomplete", "text": "", "native_session_id": None,
+              "provider": None, "model": None,
+              "output_sha256": hashlib.sha256(data).hexdigest()}
+    try:
+        raw = data.decode("utf-8")
+        if not raw.endswith("\n"):
+            raise ValueError("JSONL stream has no complete final line")
+        events = [json.loads(line) for line in raw.splitlines()]
+        if not events or any(not isinstance(item, dict) for item in events):
+            raise ValueError("JSONL stream contains a non-event")
+    except (UnicodeError, ValueError) as exc:
+        result.update(status="failed", error="invalid OMP JSONL: " + str(exc))
+        return result
+    terminal = None
+    for event in events:
+        kind = event.get("type")
+        if kind == "session": result["native_session_id"] = event.get("id")
+        if kind in ("error", "turn.failed"):
+            result.update(status="failed", error="OMP reported an error event")
+        if kind == "agent_start": terminal = None
+        if kind == "agent_end": terminal = event
+    if result["status"] == "failed": return result
+    if terminal is None:
+        result["error"] = "missing OMP agent_end event"
+        return result
+    if terminal.get("isTerminal") is not True:
+        result["error"] = "OMP agent_end is not terminal"
+        return result
+    messages = terminal.get("messages")
+    if not isinstance(messages, list):
+        result["error"] = "OMP agent_end lacks messages"
+        return result
+    assistants = [item for item in messages if isinstance(item, dict) and item.get("role") == "assistant"]
+    if not assistants:
+        result["error"] = "OMP agent_end lacks assistant response"
+        return result
+    message = assistants[-1]
+    if message.get("stopReason") != "stop":
+        result.update(status="failed", error="OMP assistant did not stop normally")
+        return result
+    content = message.get("content")
+    if not isinstance(content, list):
+        result["error"] = "OMP assistant content is missing"
+        return result
+    result["text"] = "".join(item.get("text", "") for item in content
+                             if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str))
+    result["provider"] = message.get("provider")
+    result["model"] = message.get("model")
+    if result["text"].strip():
+        result["status"] = "completed"
+    else:
+        result["error"] = "OMP final assistant response is empty"
     return result
 
 

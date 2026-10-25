@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
 import signal
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 from monitor_task import read_json, save_json
 
@@ -20,13 +22,16 @@ def finalize(job, state, directory):
         output = directory / "output.log"
         raw = output.read_bytes() if output.exists() else b""
         state["native_turn"] = inspect_turn(contract["harness"], raw)
-        complete = state["native_turn"]["status"] == "completed"
+        complete = (state["native_turn"]["status"] == "completed" and
+                    state.get("process_status") == "clean_exit" and
+                    state.get("returncode") == 0 and not state.get("timed_out"))
         if state["status"] != "blocked":
             state.update(status="done" if complete else "failed", completion_seq=int(complete))
-        if state.get("timed_out") and complete:
-            state["warning"] = "native turn completed; CLI did not exit before deadline"
-        elif complete and state.get("returncode"):
-            state["warning"] = "native turn completed; process exited with nonzero status"
+        if state["native_turn"]["status"] == "completed" and not complete:
+            state["warning"] = "native turn content was retained, but process completion was not clean"
+    stderr = directory / "stderr.log"
+    if stderr.exists(): state["stderr_sha256"] = hashlib.sha256(stderr.read_bytes()).hexdigest()
+    state["finished_at"] = datetime.now(timezone.utc).isoformat()
     save_json(directory / "status.json", state)
     return state
 
@@ -39,7 +44,7 @@ def run(job):
         raise ValueError("argv must be a nonempty string list")
     contract = job.get("completion_contract")
     if contract is not None and (not isinstance(contract, dict) or contract.get("type") != "native_turn"
-                                 or contract.get("harness") not in ("codex", "pi")):
+                                 or contract.get("harness") not in ("codex", "pi", "omp")):
         raise ValueError("unsupported completion_contract")
     timeout = job.get("timeout_seconds")
     if timeout is not None:
@@ -50,12 +55,15 @@ def run(job):
     directory = Path(job["output_dir"]).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     state = {"task_id": job["task_id"], "nonce": job["nonce"], "identity": job["identity"],
-             "status": "working", "completion_seq": 0, "argv": argv, "cwd": job["cwd"]}
+             "status": "working", "completion_seq": 0, "argv": argv, "cwd": job["cwd"],
+             "started_at": datetime.now(timezone.utc).isoformat(),
+             "harness_version": job.get("harness_version"),
+             "output_path": str(directory / "output.log"), "stderr_path": str(directory / "stderr.log")}
     save_json(directory / "status.json", state)
     proc = None
     try:
-        with (directory / "output.log").open("wb") as log:
-            proc = subprocess.Popen(argv, cwd=job["cwd"], stdout=log, stderr=subprocess.STDOUT, shell=False,
+        with (directory / "output.log").open("wb") as log, (directory / "stderr.log").open("wb") as err:
+            proc = subprocess.Popen(argv, cwd=job["cwd"], stdout=log, stderr=err, shell=False,
                                     stdin=subprocess.DEVNULL,
                                     start_new_session=os.name != "nt",
                                     creationflags=0x08000000 if os.name == "nt" else 0)
@@ -68,7 +76,7 @@ def run(job):
                 # explicit bounded-job authorization. Monitor timeouts never do this.
                 if os.name == "nt":
                     stopped = subprocess.run(["taskkill.exe", "/PID", str(proc.pid), "/T", "/F"],
-                                             stdout=log, stderr=log, timeout=10, creationflags=0x08000000)
+                                             stdout=err, stderr=err, timeout=10, creationflags=0x08000000)
                     if stopped.returncode:
                         # The retained Popen handle permits stopping our direct
                         # child even when OpenProcess/taskkill is denied. Do not
@@ -83,7 +91,8 @@ def run(job):
                     os.killpg(proc.pid, signal.SIGKILL)
                 code = proc.wait(timeout=5)
                 state["timed_out"] = True
-        state.update(status="done" if code == 0 and not state.get("timed_out") else "failed", completion_seq=1, returncode=code)
+        success = code == 0 and not state.get("timed_out")
+        state.update(status="done" if success else "failed", completion_seq=int(success), returncode=code)
         state["process_status"] = ("terminated_on_timeout" if state.get("timed_out") else
                                    "clean_exit" if code == 0 else "nonzero_exit")
     except Exception as exc:
