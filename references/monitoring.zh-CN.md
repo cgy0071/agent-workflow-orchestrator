@@ -80,7 +80,7 @@ Herdr 优先读取 completion_seq，缺失时读取 state_change_seq；计数器
 
 ## 状态面板
 
-标准库本地面板仅监听回环地址，打印每次启动生成的带令牌地址，并用默认浏览器打开（加 `--no-browser` 则只打印）。可双击 `dashboard.cmd`（Windows）或 `dashboard.command`（macOS），或运行：
+默认情况下，标准库面板仅监听回环地址，打印每次启动生成的带令牌地址，并用默认浏览器打开（加 `--no-browser` 则只打印）。可双击 `dashboard.cmd`（Windows）或 `dashboard.command`（macOS），或运行：
 
 ```sh
 python -B scripts/dashboard.py --state /absolute/workflow-state
@@ -95,6 +95,14 @@ python -B scripts/dashboard.py --state /absolute/workflow-state
 任务详情中的 **View result files** 只读取该任务声明的文件（绑定文件、交付文件、审核文件），每个最多 200000 字节，并与完成回执中的哈希比对。派发模式下，属于 actor 自身审核角色的完成更新会显示 **Acknowledge** 和 **Record review**。两者都先做只读预览，再一次性确认，确认时以绑定的 actor 调用 `workflow_control.acknowledge` 或 `record_review`，并重新执行全部审核门检查。页面从不写入审核文件：请自行编写 `REVIEW.md`（或冻结的 `review_path`），包含任务 ID、nonce 和 `Verdict:` 行；文件在预览后改动会使预览失效。页面不执行 reconcile、绑定切换、续派检查或 DAG tick。
 
 要使用 **与角色对话**，启动时与 `--state` 一起加 `--allow-chat --actor INSTANCE --version 1 --context main`（可与 `--allow-dispatch` 同时使用）；默认关闭，并且状态目录固定。发送者必须是当前有效的控制者。可以选择任意已激活角色作为目标；每次发送前重新检查双方绑定和目标的实时身份。向忙碌的 Worker 发送需要单独确认；不支持提示输入的适配器不能发送。每条消息只尝试一次，不自动重试；结果为 `SENT` 或 `SEND_UNCERTAIN`。`dashboard_chat` 审计记录发送者、目标角色和绑定版本、忙碌确认、字符数与 SHA-256，不保存正文。**读取最近输出**只按需读取当前选中角色的输出。
+
+要让**同一可信局域网**中的手机只读查看，可运行 `python -B scripts/dashboard.py --state /absolute/workflow-state --lan auto --no-browser`。`auto` 仅在本机恰有一个私有 IPv4 时自动选中；若有多个，错误信息会列出候选，请改用 `--lan 192.168.x.x`。服务只监听所选地址。手机或本机打开输出中的 `Dashboard (LAN): https://IP:端口/#token`；此模式两者均使用 HTTPS。默认端口 8765 被占用时自动选择空闲端口。首次运行使用 OpenSSL（也可使用 Git for Windows 附带的版本）生成有效期 365 天、SAN 包含所选 IP 的自签证书；有效证书和私钥保存在 `~/.agent-workflow-orchestrator/tls/` 并在下次复用。也可同时指定 `--tls-cert /path/cert.pem --tls-key /path/key.pem`。
+
+要从局域网执行操作，必须明确承认风险，例如 `python -B scripts/dashboard.py --state /absolute/workflow-state --lan 192.168.1.23 --allow-chat --actor INSTANCE --version 1 --context main --lan-allow-control --no-browser`。需要派发时再加 `--allow-dispatch` 及其常规控制者、任务目录参数。同一局域网内任何取得令牌地址的人都能指挥 agent。只在可信家庭或办公网络使用，不要在公共 Wi-Fi 开启控制。重启会生成新令牌，使旧地址失效。TLS 保护传输中的令牌，但不能阻止持有地址的人操作。
+
+Android Chrome 首次打开自签证书页面可能显示 **您的连接不是私密连接**：先查看证书并核对启动时打印的 SHA-256 指纹；确认一致且浏览器提供该选项时，才选择 **高级 > 继续访问**。iPhone Safari 可在警告的证书详情中先核对指纹；仅在提供该选项时选择 **显示详细信息 > 访问此网站**。若无法核对指纹或浏览器不允许继续，应使用该设备信任的证书并通过 `--tls-cert/--tls-key` 指定；不要为了看板安装通用信任配置。参见 [Chrome 证书错误](https://support.google.com/chrome/answer/95669)和 [Safari 证书警告](https://support.apple.com/en-ca/guide/iphone/iph1b914c6d4/27/ios/27)。Windows 首次监听可能提示防火墙许可，只允许 **专用网络**；macOS 可在防火墙的传入连接提示中审核，仅在可信网络允许 Python 进程。看板不会改动防火墙设置。
+
+`--lan` 在一个私有网卡地址上直接提供 HTTPS；`--public-origin` 则为只监听回环的面板授权一个独立的私有 HTTPS 反向代理；SSH 隧道把本机 HTTP 转发到自己的设备，不需要前两项。按要打开看板的设备选择接入方式。
 
 要从另一台电脑查看，在那台电脑运行 `ssh -L 8765:127.0.0.1:8765 <看板所在主机>`，再打开打印出的 `http://127.0.0.1:8765/#token` 地址。无需 `--public-origin`；如果 8765 已被占用，请使用实际打印的端口。要从同一 tailnet 的手机或其他设备查看，在看板主机运行 `tailscale serve --bg 8765`，启动看板时加 `--public-origin https://<机器名>.<tailnet>.ts.net`，然后在设备上打开额外打印的 HTTPS 地址。看板仍只监听本机，仅接受配置的 HTTPS 代理 Host 和 Origin。代理命令参见 [Tailscale Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve)；不要使用会暴露到公网的 Tailscale Funnel。
 

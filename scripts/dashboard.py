@@ -2,15 +2,22 @@
 
 import argparse
 import copy
+import errno
 import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 import os
 from pathlib import Path
 import re
 import secrets
+import shutil
+import socket
+import ssl
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -34,6 +41,151 @@ CHAT_MESSAGE_LIMIT = 20000  # characters in one chat message
 CHAT_OUTPUT_LIMIT = 60000  # characters of recent role output shown in the page
 PUBLIC_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\Z")
 PUBLIC_NETLOC = re.compile(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?\Z")
+TLS_DIR = Path.home() / ".agent-workflow-orchestrator" / "tls"
+
+
+def _private_lan_ip(value):
+    try:
+        address = ipaddress.IPv4Address(value)
+    except (ipaddress.AddressValueError, TypeError) as exc:
+        raise ValueError("--lan needs a private IPv4 address (10/8, 172.16/12, or 192.168/16)") from exc
+    if not any(address in network for network in (
+            ipaddress.IPv4Network("10.0.0.0/8"), ipaddress.IPv4Network("172.16.0.0/12"),
+            ipaddress.IPv4Network("192.168.0.0/16"))):
+        raise ValueError("--lan rejects loopback, public, link-local, and wildcard addresses; use a private IPv4")
+    return str(address)
+
+
+def _lan_candidates():
+    """Find locally configured addresses without contacting another host."""
+    found = set()
+    if os.name == "nt":
+        import winreg
+        root = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, root) as interfaces:
+            for index in range(winreg.QueryInfoKey(interfaces)[0]):
+                with winreg.OpenKey(interfaces, winreg.EnumKey(interfaces, index)) as interface:
+                    for name in ("IPAddress", "DhcpIPAddress"):
+                        try:
+                            value = winreg.QueryValueEx(interface, name)[0]
+                        except OSError:
+                            continue
+                        found.update(value if isinstance(value, list) else [value])
+    else:
+        import ctypes
+
+        class Ifaddrs(ctypes.Structure):
+            pass
+
+        Ifaddrs._fields_ = [("next", ctypes.POINTER(Ifaddrs)), ("name", ctypes.c_char_p),
+                            ("flags", ctypes.c_uint), ("addr", ctypes.c_void_p),
+                            ("netmask", ctypes.c_void_p), ("dstaddr", ctypes.c_void_p),
+                            ("data", ctypes.c_void_p)]
+        libc = ctypes.CDLL(None)
+        libc.getifaddrs.argtypes = [ctypes.POINTER(ctypes.POINTER(Ifaddrs))]
+        libc.getifaddrs.restype = ctypes.c_int
+        libc.freeifaddrs.argtypes = [ctypes.POINTER(Ifaddrs)]
+        head = ctypes.POINTER(Ifaddrs)()
+        if libc.getifaddrs(ctypes.byref(head)) != 0:
+            raise OSError("could not enumerate local network adapters")
+        try:
+            current = head
+            while current:
+                address = current.contents.addr
+                if address:
+                    raw = ctypes.string_at(address, 8)
+                    family = raw[1] if sys.platform == "darwin" else raw[0]
+                    if family == socket.AF_INET:
+                        found.add(socket.inet_ntoa(raw[4:8]))
+                current = current.contents.next
+        finally:
+            libc.freeifaddrs(head)
+    candidates = set()
+    for value in found:
+        try:
+            address = _private_lan_ip(value)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind((address, 0))  # Reject stale adapter entries without sending any packets.
+            candidates.add(address)
+        except (ValueError, OSError):
+            continue
+    return sorted(candidates, key=lambda value: int(ipaddress.IPv4Address(value)))
+
+
+def _choose_lan(value, candidates=None):
+    if value != "auto":
+        return _private_lan_ip(value)
+    addresses = _lan_candidates() if candidates is None else sorted(set(candidates))
+    if not addresses:
+        raise ValueError("--lan auto found no local private IPv4 address; specify --lan ADDRESS after connecting")
+    if len(addresses) > 1:
+        raise ValueError("--lan auto found " + str(len(addresses)) + " private IPv4 addresses (" +
+                         ", ".join(addresses) + "); specify --lan ADDRESS explicitly")
+    return _private_lan_ip(addresses[0])
+
+
+def _cert_valid(cert, key, address):
+    if not cert.is_file() or not key.is_file():
+        return False
+    try:
+        info = ssl._ssl._test_decode_cert(str(cert))
+        if ("IP Address", address) not in info.get("subjectAltName", ()):
+            return False
+        if ssl.cert_time_to_seconds(info["notAfter"]) <= time.time() + 86400:
+            return False
+        if ssl.cert_time_to_seconds(info["notBefore"]) > time.time():
+            return False
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(str(cert), str(key))
+        return True
+    except (OSError, ValueError, ssl.SSLError):
+        return False
+
+
+def _openssl_executable():
+    command = shutil.which("openssl")
+    if command:
+        return command
+    if os.name == "nt":
+        git = shutil.which("git")
+        if git:
+            root = Path(git).resolve().parent.parent
+            for candidate in (root / "usr" / "bin" / "openssl.exe", root / "mingw64" / "bin" / "openssl.exe"):
+                if candidate.is_file():
+                    return str(candidate)
+    return None
+
+
+def _lan_certificate(address, directory=TLS_DIR):
+    directory = Path(directory).expanduser()
+    cert, key = directory / (address + ".crt"), directory / (address + ".key")
+    if _cert_valid(cert, key, address):
+        return cert, key
+    openssl = _openssl_executable()
+    if not openssl:
+        raise ValueError("OpenSSL is required to generate a LAN certificate; install it or provide --tls-cert and --tls-key")
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(directory, 0o700)
+    with tempfile.TemporaryDirectory(prefix="dashboard-tls-", dir=directory) as temporary:
+        generated_cert, generated_key = Path(temporary) / "cert.pem", Path(temporary) / "key.pem"
+        command = [openssl, "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes", "-days", "365",
+                   "-subj", "/CN=" + address, "-addext", "subjectAltName=IP:" + address,
+                   "-keyout", str(generated_key), "-out", str(generated_cert)]
+        try:
+            subprocess.run(command, check=True, capture_output=True, timeout=30)
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            raise ValueError("OpenSSL could not generate a LAN certificate; provide --tls-cert and --tls-key") from exc
+        if not _cert_valid(generated_cert, generated_key, address):
+            raise ValueError("generated LAN certificate failed validation")
+        os.chmod(generated_key, 0o600)
+        os.replace(generated_key, key)
+        os.replace(generated_cert, cert)
+    return cert, key
+
+
+def _certificate_fingerprint(cert):
+    pem = Path(cert).read_text(encoding="ascii")
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
 
 
 def _public_origin(value):
@@ -1125,10 +1277,13 @@ class DashboardServer(ThreadingHTTPServer):
     allow_reuse_address = os.name != "nt"
 
     def __init__(self, address, state=None, *, allow_dispatch=False, allow_chat=False, actor=None, version=None,
-                 context=None, tasks_root=None, transport_factory=Transport, recent_file=None, public_origins=()):
+                 context=None, tasks_root=None, transport_factory=Transport, recent_file=None, public_origins=(),
+                 lan_tls=None):
         host, port = address
-        if host not in ("127.0.0.1", "localhost"):
+        if lan_tls is None and host not in ("127.0.0.1", "localhost"):
             raise ValueError("dashboard host must be loopback: 127.0.0.1 or localhost")
+        if lan_tls is not None and host not in ("127.0.0.1", "localhost"):
+            _private_lan_ip(host)
         if type(port) is not int or not 0 <= port <= 65535:
             raise ValueError("port must be between 0 and 65535")
         if state is None and allow_dispatch:
@@ -1141,6 +1296,7 @@ class DashboardServer(ThreadingHTTPServer):
         self.allow_chat = bool(allow_chat)
         self.public_origins = tuple(dict.fromkeys(_public_origin(value) for value in public_origins))
         self.public_hosts = {urlsplit(value).netloc for value in self.public_origins}
+        self.lan_tls = lan_tls is not None
         self.actor, self.version, self.context = actor, version, context
         self.tasks_root = None
         self.transport_factory = transport_factory
@@ -1172,8 +1328,29 @@ class DashboardServer(ThreadingHTTPServer):
             except PermissionError as exc:
                 raise ValueError(str(exc)) from exc
         super().__init__((host, port), DashboardHandler)
+        if lan_tls is not None:
+            try:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                context.load_cert_chain(str(lan_tls[0]), str(lan_tls[1]))
+                self.socket = context.wrap_socket(self.socket, server_side=True, do_handshake_on_connect=False)
+            except Exception:
+                self.server_close()
+                raise
         if self.state is not None:
             _remember(self.recent_file, self.state)
+
+    def get_request(self):
+        client, address = super().get_request()
+        if self.lan_tls:
+            client.settimeout(5)
+        return client, address
+
+    def handle_error(self, request, client_address):
+        if self.lan_tls and isinstance(sys.exc_info()[1], (ssl.SSLError, TimeoutError,
+                                                            ConnectionResetError, BrokenPipeError)):
+            return  # Bad handshakes and interrupted clients must not disrupt later requests.
+        super().handle_error(request, client_address)
 
     def chat_binding(self):
         """The active controller binding named at startup; rechecked before every chat call."""
@@ -1266,7 +1443,7 @@ class DashboardServer(ThreadingHTTPServer):
         return result
 
     def origin(self, host=None):
-        return "http://" + (host or self.server_address[0] + ":" + str(self.server_port))
+        return ("https://" if self.lan_tls else "http://") + (host or self.server_address[0] + ":" + str(self.server_port))
 
     def status_data(self):
         state = self.state
@@ -1557,9 +1734,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self._json(status, {"error": message})
 
     def _host(self):
-        allowed = {"127.0.0.1:" + str(self.server.server_port),
-                   "localhost:" + str(self.server.server_port)}
-        allowed.update(self.server.public_hosts)
+        if self.server.lan_tls:
+            allowed = {self.server.server_address[0] + ":" + str(self.server.server_port)}
+        else:
+            allowed = {"127.0.0.1:" + str(self.server.server_port),
+                       "localhost:" + str(self.server.server_port)}
+            allowed.update(self.server.public_hosts)
         return self.headers.get("Host", "").lower() in allowed
 
     def _token(self):
@@ -1568,6 +1748,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _origin(self):
         host = self.headers.get("Host", "").lower()
+        if self.server.lan_tls:
+            return (host == self.server.server_address[0] + ":" + str(self.server.server_port)
+                    and self.headers.get("Origin") == "https://" + host)
         local = {"127.0.0.1:" + str(self.server.server_port),
                  "localhost:" + str(self.server.server_port)}
         expected = "http://" + host if host in local else "https://" + host
@@ -1685,8 +1868,8 @@ def open_server(host, port, state, **options):
     """Bind the requested port; when the default port is busy, fall back to a free one."""
     try:
         return DashboardServer((host, port), state, **options)
-    except OSError:
-        if port != DEFAULT_PORT:
+    except OSError as exc:
+        if port != DEFAULT_PORT or exc.errno not in (errno.EADDRINUSE, 10048):
             raise
         return DashboardServer((host, 0), state, **options)
 
@@ -1695,6 +1878,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", help="workflow state directory; omit to choose one in the page")
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--lan", metavar="ADDRESS", help="listen on a private IPv4 address over HTTPS; use auto only when unique")
+    parser.add_argument("--tls-cert", metavar="PATH", help="LAN HTTPS certificate PEM; requires --tls-key")
+    parser.add_argument("--tls-key", metavar="PATH", help="LAN HTTPS private key PEM; requires --tls-cert")
+    parser.add_argument("--lan-allow-control", action="store_true", help="acknowledge that LAN token holders can control agents")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true", help="print the URL without opening a browser")
     parser.add_argument("--public-origin", action="append", default=[], metavar="URL",
@@ -1708,16 +1895,30 @@ def main(argv=None):
     parser.add_argument("--tasks-root")
     args = parser.parse_args(argv)
     try:
-        server = open_server(args.host, args.port, args.state, allow_dispatch=args.allow_dispatch,
+        if bool(args.tls_cert) != bool(args.tls_key):
+            raise ValueError("--tls-cert and --tls-key must be provided together")
+        if args.lan is None and (args.tls_cert or args.lan_allow_control):
+            raise ValueError("--tls-cert, --tls-key, and --lan-allow-control require --lan")
+        if args.lan is not None and args.host != "127.0.0.1":
+            raise ValueError("--lan cannot be combined with --host")
+        if args.lan is not None and args.public_origin:
+            raise ValueError("--lan and --public-origin are separate access modes; choose one")
+        if args.lan is not None and (args.allow_chat or args.allow_dispatch) and not args.lan_allow_control:
+            raise ValueError("LAN token holders can direct agents; add --lan-allow-control only after accepting this risk")
+        host = _choose_lan(args.lan) if args.lan is not None else args.host
+        lan_tls = ((Path(args.tls_cert), Path(args.tls_key)) if args.tls_cert else _lan_certificate(host)) if args.lan else None
+        server = open_server(host, args.port, args.state, allow_dispatch=args.allow_dispatch,
                              allow_chat=args.allow_chat,
                              actor=args.actor, version=args.version, context=args.context,
                              tasks_root=args.tasks_root, recent_file=RECENT_FILE,
-                             public_origins=args.public_origin)
-    except (ValueError, OSError) as exc:
+                             public_origins=args.public_origin, lan_tls=lan_tls)
+    except (ValueError, OSError, ssl.SSLError) as exc:
         parser.exit(2, "dashboard: " + str(exc) + "\n")
     with server:
         url = server.origin() + "/#" + server.token
-        print("Dashboard: " + url, flush=True)
+        print(("Dashboard (LAN): " if server.lan_tls else "Dashboard: ") + url, flush=True)
+        if server.lan_tls:
+            print("Certificate SHA-256: " + _certificate_fingerprint(lan_tls[0]), flush=True)
         for public in server.public_origins:
             print("Dashboard (remote): " + public + "/#" + server.token, flush=True)
         print("State: " + (str(server.state) if server.state else "choose in the page"), flush=True)

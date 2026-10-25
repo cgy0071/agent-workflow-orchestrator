@@ -8,7 +8,10 @@ import io
 import json
 from pathlib import Path
 import re
+import socket
+import ssl
 import threading
+import tempfile
 import sys
 import unittest
 from unittest.mock import patch
@@ -625,6 +628,113 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("TASK_DONE DASH-DEMO 1234567890abcdef", (output / "HANDOFF.md").read_text())
         with self.assertRaises(ValueError), redirect_stdout(io.StringIO()):
             demo_scheduler.worker(folder, message)
+
+
+class LanHttpsTests(unittest.TestCase):
+    def test_address_rules_and_auto_selection(self):
+        for address in ("10.1.2.3", "172.16.0.1", "172.31.255.254", "192.168.1.2"):
+            self.assertEqual(dashboard._private_lan_ip(address), address)
+        for address in ("0.0.0.0", "127.0.0.1", "8.8.8.8", "169.254.1.2", "172.32.0.1",
+                        "::1", "localhost", "example.com"):
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                dashboard._private_lan_ip(address)
+        with patch.object(dashboard, "_lan_candidates", return_value=["10.1.2.3"]):
+            self.assertEqual(dashboard._choose_lan("auto"), "10.1.2.3")
+        with patch.object(dashboard, "_lan_candidates", return_value=["10.1.2.3", "192.168.1.2"]):
+            with self.assertRaisesRegex(ValueError, "10.1.2.3, 192.168.1.2"):
+                dashboard._choose_lan("auto")
+        with patch.object(dashboard, "_lan_candidates", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "no local private"):
+                dashboard._choose_lan("auto")
+
+    def test_cli_rejects_control_without_acknowledgment_and_partial_certificate(self):
+        for argv, error in ((["--lan", "10.1.2.3", "--allow-chat"], "--lan-allow-control"),
+                            (["--lan", "10.1.2.3", "--allow-dispatch"], "--lan-allow-control"),
+                            (["--lan", "10.1.2.3", "--tls-cert", "cert.pem"], "together"),
+                            (["--lan", "10.1.2.3", "--tls-key", "key.pem"], "together")):
+            with self.subTest(argv=argv), patch.object(sys, "stderr", io.StringIO()) as errors:
+                with self.assertRaises(SystemExit):
+                    dashboard.main(argv)
+                self.assertIn(error, errors.getvalue())
+
+    @unittest.skipUnless(dashboard._openssl_executable(), "OpenSSL unavailable; HTTPS fallback check skipped")
+    def test_https_default_port_falls_back_but_invalid_bind_does_not(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cert, key = dashboard._lan_certificate("127.0.0.1", Path(folder))
+            with socket.socket() as occupied:
+                occupied.bind(("127.0.0.1", 0))
+                occupied.listen()
+                port = occupied.getsockname()[1]
+                with patch.object(dashboard, "DEFAULT_PORT", port):
+                    server = dashboard.open_server("127.0.0.1", port, None, lan_tls=(cert, key))
+                try:
+                    self.assertNotEqual(server.server_port, port)
+                    self.assertTrue(server.lan_tls)
+                finally:
+                    server.server_close()
+            with self.assertRaises(OSError):
+                dashboard.open_server("10.254.254.254", port, None, lan_tls=(cert, key))
+
+    @unittest.skipUnless(dashboard._openssl_executable(), "OpenSSL unavailable; certificate and HTTPS checks skipped")
+    def test_certificate_reuse_rotation_and_https_origin(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cert, key = dashboard._lan_certificate("127.0.0.1", root / "tls")
+            first = cert.read_bytes()
+            self.assertEqual(dashboard._lan_certificate("127.0.0.1", root / "tls"), (cert, key))
+            self.assertEqual(cert.read_bytes(), first)
+            other, _ = dashboard._lan_certificate("10.1.2.3", root / "tls")
+            self.assertNotEqual(other.read_bytes(), first)
+            self.assertIn(("IP Address", "10.1.2.3"), ssl._ssl._test_decode_cert(str(other))["subjectAltName"])
+            self.assertTrue(dashboard._certificate_fingerprint(cert))
+            with redirect_stdout(io.StringIO()):
+                demo_scheduler.demo(root / "demo")
+            state = root / "demo" / "state"
+            server = dashboard.DashboardServer(("127.0.0.1", 0), state, lan_tls=(cert, key))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            host = "127.0.0.1:" + str(server.server_port)
+
+            def request(method, *, supplied_host=host, origin=None):
+                con = http.client.HTTPSConnection("127.0.0.1", server.server_port, timeout=5,
+                                                context=ssl._create_unverified_context())
+                headers = {"Host": supplied_host, "X-Dashboard-Token": server.token}
+                body = None
+                if method == "POST":
+                    headers.update({"Origin": origin or "https://" + host,
+                                    "Content-Type": "application/json"})
+                    body = json.dumps({"state": str(state)})
+                try:
+                    con.request(method, "/api/status" if method == "GET" else "/api/state", body=body,
+                                headers=headers)
+                    response = con.getresponse()
+                    response.read()
+                    return response.status
+                finally:
+                    con.close()
+
+            try:
+                self.assertEqual(server.origin(), "https://" + host)
+                self.assertGreaterEqual(server.socket.context.minimum_version, ssl.TLSVersion.TLSv1_2)
+                self.assertEqual(request("GET"), 200)
+                self.assertEqual(request("POST"), 200)
+                self.assertEqual(request("GET", supplied_host="evil.example"), 403)
+                self.assertEqual(request("POST", supplied_host="evil.example"), 403)
+                self.assertEqual(request("POST", origin="http://" + host), 403)
+                with socket.create_connection(("127.0.0.1", server.server_port), timeout=5) as plain:
+                    plain.sendall(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+                    try:
+                        plain.recv(1024)
+                    except (OSError, ConnectionError):
+                        pass
+                self.assertEqual(request("GET"), 200)
+                with socket.create_connection(("127.0.0.1", server.server_port), timeout=5):
+                    pass  # Client disconnects before the TLS handshake.
+                self.assertEqual(request("GET"), 200)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=5)
 
 
 if __name__ == "__main__":
