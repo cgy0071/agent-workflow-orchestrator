@@ -45,7 +45,7 @@ With workflow_state enabled, register the frozen request before monitoring and p
 
 Record blocked states, missing delivery, changed identities, failures, and uncertain notifications separately. Never answer approval dialogs or blindly resend. Stopping the monitor does not stop the worker; handle cancellation separately under the configured authorization.
 
-When the user asks to see the dashboard or a visual status view, start `python -B scripts/dashboard.py --state /abs/state` as a background process. It opens the local browser; also give the printed token URL to the user only. Do not add `--allow-dispatch` unless the user explicitly asks for form dispatch or dashboard review actions in this conversation. Stop the process when the user is done.
+When the user asks to see the dashboard or a visual status view, start `python -B scripts/dashboard.py --state /abs/state` as a background process. It opens the local browser; also give the printed token URL to the user only. Do not add `--allow-dispatch` unless the user explicitly asks for form dispatch or dashboard review actions in this conversation. Likewise, add `--allow-chat` only when the user explicitly asks to chat with the controller from the page. Stop the process when the user is done.
 
 ## Review and continuation
 

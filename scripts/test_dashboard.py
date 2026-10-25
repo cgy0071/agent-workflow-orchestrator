@@ -7,6 +7,7 @@ import http.client
 import io
 import json
 from pathlib import Path
+import re
 import threading
 import sys
 import unittest
@@ -24,10 +25,17 @@ class CountingTransport(FakeTransport):
     def __init__(self):
         super().__init__()
         self.status_calls = 0
+        self.identity_drift = False
 
     def status(self, spec):
         self.status_calls += 1
-        return super().status(spec)
+        result = super().status(spec)
+        if self.identity_drift:
+            result["identity"] = dict(result["identity"], terminal="someone-else")
+        return result
+
+    def output(self, spec):
+        return "recent output for " + spec["role"]
 
 
 class DashboardTests(unittest.TestCase):
@@ -178,6 +186,72 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(data["dags"], {})
         self.assertEqual(data["task_details"]["CHILD"]["parent_task"], "PARENT")
         self.assertIsNone(data["task_details"]["PARENT"]["parent_task"])
+
+    def chat_server(self):
+        if self.server:
+            self.server.shutdown()
+            self.server.server_close()
+            self.thread.join(timeout=5)
+        self.server = dashboard.DashboardServer(("127.0.0.1", 0), self.state, allow_chat=True,
+                                                actor=self.controller["instance_id"], version=self.controller["version"],
+                                                context="main", transport_factory=lambda _request: self.fake,
+                                                recent_file=None)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
+        self.thread.start()
+
+    def test_chat_disabled_by_default_and_needs_controller(self):
+        for path in ("/api/chat/send", "/api/chat/output"):
+            self.assertEqual(self.http("POST", path, {"message": "hi"})[0], 403)
+        self.assertEqual(self.fake.messages, [])
+        self.assertFalse(self.http("GET", "/api/status")[1]["allow_chat"])
+        for options in ({}, {"actor": self.controller["instance_id"], "version": 1, "context": "side"},
+                        {"actor": "wrong", "version": 1, "context": "main"}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                dashboard.DashboardServer(("127.0.0.1", 0), self.state, allow_chat=True, **options)
+        with self.assertRaises(ValueError):
+            dashboard.DashboardServer(("127.0.0.1", 0), None, allow_chat=True, actor=self.controller["instance_id"],
+                                      version=self.controller["version"], context="main")
+
+    def test_chat_sends_once_to_controller_and_audits_hash_only(self):
+        self.chat_server()
+        data = self.http("GET", "/api/status")[1]
+        self.assertEqual((data["allow_chat"], data["actor_role"], data["can_switch"]), (True, "planner", False))
+        self.assertFalse(data["allow_dispatch"])
+        self.assertEqual(self.http("POST", "/api/dispatch/preview", self.form())[0], 403)
+        for bad in ({}, {"message": "   "}, {"message": 5}, {"message": "x" * 20001}):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.http("POST", "/api/chat/send", bad)[0], 400)
+        self.assertEqual(self.fake.messages, [])
+        status, result, _ = self.http("POST", "/api/chat/send", {"message": "How is TASK-A going?\r\n"})
+        self.assertEqual((status, result["status"], result["role"]), (200, "SENT", "planner"))
+        self.assertEqual(self.fake.messages, ["How is TASK-A going?"])
+        status, output, _ = self.http("POST", "/api/chat/output", {})
+        self.assertEqual((status, output["output"]), (200, "recent output for planner"))
+        with control.database(self.state) as con:
+            rows = [json.loads(r[0]) for r in con.execute("SELECT data FROM audit WHERE action='dashboard_chat'")]
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("TASK-A", json.dumps(rows))
+        self.fake.error = RuntimeError("pane closed")
+        status, result, _ = self.http("POST", "/api/chat/send", {"message": "again"})
+        self.assertEqual((status, result["status"]), (200, "SEND_UNCERTAIN"))
+        self.assertEqual(self.fake.messages, ["How is TASK-A going?", "again"])
+        self.fake.error = None
+        self.fake.identity_drift = True
+        self.assertEqual(self.http("POST", "/api/chat/send", {"message": "third"})[0], 400)
+        self.assertEqual(len(self.fake.messages), 2)
+
+    def test_page_embeds_inert_chinese_dictionary(self):
+        status, html, _ = self.http("GET", "/")
+        self.assertEqual(status, 200)
+        block = html.split('<script type="application/json" id="i18n-zh">', 1)[1].split("</script>", 1)[0]
+        self.assertTrue(block.isascii())
+        data = json.loads(block)
+        self.assertEqual(data["exact"]["Refresh page"], "刷新页面")
+        for source, target in data["patterns"]:
+            re.compile(source)
+            self.assertTrue(target)
+        self.assertIn('id="chat-panel"', html)
+        self.assertIn('id="lang"', html)
 
     def test_task_summary_prefers_human_text_and_never_raises(self):
         import workflow_status

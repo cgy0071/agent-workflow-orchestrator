@@ -30,6 +30,11 @@ TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
 NONCE = re.compile(r"[0-9a-f]{16}\Z")
 EVENT_ID = re.compile(r"[0-9a-f]{64}\Z")
 ARTIFACT_LIMIT = 200000  # bytes of each delivery file shown in the page
+CHAT_MESSAGE_LIMIT = 20000  # characters in one chat message to the controller
+CHAT_OUTPUT_LIMIT = 60000  # characters of recent controller output shown in the page
+# UI translations live beside this file; JSON-in-script stays inert and cannot close its tag.
+I18N_ZH = json.dumps(json.loads((Path(__file__).resolve().parent / "dashboard_i18n.zh-CN.json")
+                                .read_text(encoding="utf-8")), ensure_ascii=True).replace("</", "<\\/")
 HTML = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -138,6 +143,8 @@ tr.task-row td:last-child { color:var(--warn) } tr.task-row td.info-note { color
   display:-webkit-box !important; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden }
 .task-id { margin-top:3px; font:400 10px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--muted) }
 .result-file pre { max-height:360px; overflow:auto }
+#chat-output { max-height:420px; overflow:auto } #chat-input { min-height:80px } .chat-entry p { margin:3px 0 0; white-space:pre-wrap }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
 pre { margin:7px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
   background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:9px; max-height:320px; overflow:auto }
 .dag-run { min-width:0 } .dag-title { display:flex; align-items:center; gap:9px; margin:0 0 11px }
@@ -192,10 +199,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
 <body>
 <div class="shell">
   <header class="masthead"><div class="hero-copy"><div class="eyebrow">Local workflow status</div>
-    <h1>Workflow Dashboard</h1><p class="sub state-path" id="state">Loading state...</p>
+    <h1>Workflow Dashboard</h1><p class="sub state-path" id="state" translate="no">Loading state...</p>
     <p class="sub" id="goal"></p></div>
     <div class="toolbar"><label class="inline-label"><input id="auto" type="checkbox" checked>Update page every 5s</label>
       <button id="refresh" type="button">Refresh page</button><button id="probe" type="button">Check workers now</button>
+      <button id="chat-open" type="button" class="hidden">Chat</button>
+      <button id="lang" type="button" translate="no" aria-label="Language">&#x4e2d;&#x6587;</button>
       <button id="switch" type="button" class="hidden">Choose workflow</button></div></header>
   <section class="overview" id="overview" aria-label="Workflow overview">
     <div class="metric"><span class="metric-label">Tasks</span><strong id="metric-tasks" class="metric-value">--</strong>
@@ -217,6 +226,17 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       <button id="open-state" class="primary" type="button">Open</button></div>
     <p id="picker-error" class="error" role="alert"></p></section>
   <div class="grid" id="main">
+    <section class="panel wide hidden" id="chat-panel"><div class="panel-head"><h2>Chat with the controller</h2>
+      <span class="panel-caption" id="chat-caption">Sent as one message to the bound controller</span></div>
+      <p class="muted">Messages go straight to the controller agent's session; it treats them like typed owner input.
+        Each send is one attempt and is recorded in the ledger audit (hash and length only).</p>
+      <label class="full"><span class="sr-only">Message</span>
+        <textarea id="chat-input" maxlength="20000" placeholder="Ask the controller about progress, or give an instruction. Ctrl+Enter sends."></textarea></label>
+      <div class="actions"><button id="chat-send" class="primary" type="button">Send</button>
+        <button id="chat-read" type="button">Read recent output</button></div>
+      <p id="chat-status" role="status"></p>
+      <div id="chat-log" class="list"></div>
+      <pre id="chat-output" class="hidden"></pre></section>
     <section class="panel wide"><div class="panel-head"><h2>People and agents</h2>
       <span class="panel-caption">Who can work on these tasks</span></div><div id="roles" class="cards"></div></section>
     <section class="panel wide"><div class="panel-head"><h2>Tasks</h2>
@@ -282,21 +302,87 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       </div></section>
   </div>
 </div>
+<script type="application/json" id="i18n-zh">__I18N_ZH__</script>
 <script nonce="__CSP_NONCE__">
 (() => {
   const id = name => document.getElementById(name);
   const token = location.hash.slice(1) || sessionStorage.getItem('dashboard-token') || '';
-  if (token) { sessionStorage.setItem('dashboard-token', token); history.replaceState(null, '', location.pathname); }
+  if (token) { sessionStorage.setItem('dashboard-token', token); history.replaceState(null, '', location.pathname + location.search); }
   let preview = null;
   let lastData = null;
+  // Elements that show ledger or agent data; the translator leaves them as written.
+  const RAW = new Set(['task-title', 'task-excerpt', 'task-id', 'meta-value', 'role-mark', 'raw']);
   const el = (tag, className, value) => {
     const x = document.createElement(tag);
     if (className) x.className = className;
+    if (className && className.split(' ').some(c => RAW.has(c))) x.setAttribute('translate', 'no');
     if (value !== undefined && value !== null) x.textContent = String(value);
     return x;
   };
   const add = (parent, tag, className, value) => { const x = el(tag, className, value); parent.append(x); return x; };
   const show = (name, visible) => id(name).classList.toggle('hidden', !visible);
+  // Language: English source text, translated in place. Ledger data is marked translate="no" and left alone.
+  const zh = JSON.parse(id('i18n-zh').textContent);
+  const patterns = zh.patterns.map(([source, target]) => [new RegExp(source), target]);
+  let lang = 'en';
+  try { lang = localStorage.getItem('dashboard-lang') === 'zh' ? 'zh' : 'en'; } catch {}
+  const asked = new URLSearchParams(location.search).get('lang');
+  if (asked === 'zh' || asked === 'en') lang = asked;
+  function tr(text) {
+    const key = text.replace(/\s+/g, ' ').trim();
+    if (lang !== 'zh' || !key) return text;
+    if (zh.exact[key] !== undefined) return text.match(/^\s*/)[0] + zh.exact[key] + text.match(/\s*$/)[0];
+    for (const [re, target] of patterns) {
+      const m = key.match(re);
+      if (m) return target.replace(/([$#])(\d)/g, (_, kind, n) => kind === '$' ? m[+n] : tr(m[+n]));
+    }
+    const parts = key.split('; ');
+    if (parts.length > 1) { const done = parts.map(tr); if (done.some((x, i) => x !== parts[i])) return done.join('；'); }
+    const at = key.indexOf(': ');
+    if (at > 0 && zh.exact[key.slice(0, at)] !== undefined)
+      return zh.exact[key.slice(0, at)] + '：' + tr(key.slice(at + 2));
+    if (at > 0 && zh.exact[key.slice(at + 2)] !== undefined) return key.slice(0, at) + '：' + zh.exact[key.slice(at + 2)];
+    return text;
+  }
+  const baseText = new WeakMap(), baseAttr = new WeakMap(), ATTRS = ['placeholder', 'title', 'aria-label'];
+  const skipped = node => { const p = node.nodeType === 1 ? node : node.parentElement;
+    return !p || !!p.closest('script,style,pre,textarea,[translate="no"]'); };
+  function localizeText(node) {
+    if (skipped(node)) return;
+    if (!baseText.has(node) || baseText.get(node).shown !== node.data) baseText.set(node, {source: node.data, shown: null});
+    const record = baseText.get(node), next = lang === 'zh' ? tr(record.source) : record.source;
+    record.shown = next; if (node.data !== next) node.data = next;
+  }
+  function localizeAttrs(element) {
+    if (element.closest('[translate="no"]')) return;
+    const saved = baseAttr.get(element) || {}; baseAttr.set(element, saved);
+    for (const name of ATTRS) {
+      const value = element.getAttribute(name); if (value === null) continue;
+      if (!saved[name] || saved[name].shown !== value) saved[name] = {source: value, shown: null};
+      const next = lang === 'zh' ? tr(saved[name].source) : saved[name].source;
+      saved[name].shown = next; if (value !== next) element.setAttribute(name, next);
+    }
+  }
+  function localize(root) {
+    if (root.nodeType === 3) { localizeText(root); return; }
+    if (root.nodeType !== 1) return;
+    localizeAttrs(root);
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode())
+      node.nodeType === 3 ? localizeText(node) : localizeAttrs(node);
+  }
+  new MutationObserver(records => { for (const r of records) {
+    if (r.type === 'childList') r.addedNodes.forEach(localize);
+    else if (r.type === 'characterData') localizeText(r.target);
+    else if (r.type === 'attributes') localizeAttrs(r.target);
+  } }).observe(document.documentElement, {childList:true, subtree:true, characterData:true,
+    attributes:true, attributeFilter:ATTRS});
+  function setLang(next) {
+    lang = next; try { localStorage.setItem('dashboard-lang', next); } catch {}
+    document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
+    id('lang').textContent = next === 'zh' ? 'English' : '中文';
+    localize(document.documentElement);
+  }
   async function api(path, payload) {
     if (!token) throw new Error('Open the URL printed by the dashboard server.');
     const options = {headers: {'X-Dashboard-Token': token}};
@@ -415,7 +501,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   function alertCard(root, taskIds, info) {
     const card = add(root, 'article', 'alert-item ' + info.tone);
     const head = add(card, 'div', 'alert-head');
-    add(head, 'strong', '', taskIds.length === 1 ? taskName(lastData, taskIds[0]) : taskIds.length + ' tasks');
+    add(head, 'strong', taskIds.length === 1 ? 'raw' : '', taskIds.length === 1 ? taskName(lastData, taskIds[0]) : taskIds.length + ' tasks');
     add(head, 'span', 'badge', info.tone === 'info' ? 'For reference' : 'Check needed');
     add(card, 'h3', '', info.title);
     if (taskIds.length > 1) add(card, 'p', 'alert-technical', 'Tasks: ' + taskIds.map(x => taskName(lastData, x)).join('; '));
@@ -427,7 +513,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     const root = id('roles'); root.replaceChildren();
     for (const role of data.roles) {
       const card = add(root, 'article', 'role'); const top = add(card, 'div', 'role-top');
-      add(top, 'span', 'role-mark', role.role.slice(0, 1)); add(top, 'h3', '', role.role);
+      add(top, 'span', 'role-mark', role.role.slice(0, 1)); add(top, 'h3', 'raw', role.role);
       const current = role.bindings.find(b => b.status === 'active') || role.bindings[0];
       const purpose = {worker:'Runs assigned tasks', controller:'Coordinates tasks and next steps',
         reviewer:'Checks delivered work'};
@@ -582,7 +668,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         rect.setAttribute('class', state); svg.append(rect);
         const text = label(name), short = text.length > 20 ? text.slice(0, 19) + '...' : text;
         const caption = svgEl('text'); caption.setAttribute('x', x + 12); caption.setAttribute('y', y + 26);
-        caption.textContent = short; svg.append(caption);
+        caption.textContent = short; caption.setAttribute('translate', 'no'); svg.append(caption);
         const sub = svgEl('text'); sub.setAttribute('x', x + 12); sub.setAttribute('y', y + 49);
         sub.textContent = named(state, {...stageNames, ...dagNames}); svg.append(sub);
         const tip = svgEl('title'); tip.textContent = text + ' (' + name + '): ' + named(state, stageNames); rect.append(tip);
@@ -594,7 +680,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     if (!data.inbox.length) empty(inbox, 'No completion updates yet');
     else for (const e of data.inbox) {
       const item = add(inbox, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
-      add(head, 'strong', '', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
+      add(head, 'strong', 'raw', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
       add(item, 'p', 'role-summary', named(e.report_status, reportNames));
       if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
       else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
@@ -681,6 +767,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       id('updated').textContent = 'Page updated: ' + new Date().toLocaleTimeString();
       metrics(data); roles(data); taskTable(data); dagGraph(data); lists(data); workers(data);
       show('dispatch-form', data.allow_dispatch);
+      show('chat-panel', data.allow_chat); show('chat-open', data.allow_chat);
+      if (data.allow_chat) id('chat-caption').textContent = 'Talking to ' + data.actor_role;
       id('dispatch-note').textContent = data.allow_dispatch ?
         'Preview checks that the worker is available. Confirm sends the task once; check the result before taking another action.' :
         'Starting tasks is off for this dashboard session. To enable it, restart the server with --allow-dispatch and the required coordinator identity and task-folder options.';
@@ -783,6 +871,38 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     } catch (error) { empty(root, error.message); } finally { id('probe').disabled = false; }
   });
   id('probe-top').addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
+  async function chatRead() {
+    const out = id('chat-output'); id('chat-read').disabled = true;
+    try { const data = await api('/api/chat/output', {});
+      out.textContent = (data.truncated ? '[earlier output omitted]\n' : '') + (data.output || '(no output)');
+      show('chat-output', true); out.scrollTop = out.scrollHeight;
+      id('chat-status').textContent = data.role + ' is ' + named(data.status, {idle:'idle', working:'working',
+        blocked:'blocked', done:'done'}) + ' (read ' + new Date().toLocaleTimeString() + ')';
+      id('chat-status').className = 'muted';
+    } catch (error) { id('chat-status').textContent = error.message; id('chat-status').className = 'error'; }
+    finally { id('chat-read').disabled = false; }
+  }
+  async function chatSend() {
+    const input = id('chat-input'), text = input.value.trim(); if (!text) return;
+    id('chat-send').disabled = true; id('chat-status').textContent = 'Sending...'; id('chat-status').className = 'muted';
+    try { const result = await api('/api/chat/send', {message: text});
+      const entry = add(id('chat-log'), 'div', 'list-item chat-entry');
+      add(entry, 'small', '', new Date().toLocaleTimeString() + ' to ' + result.role +
+        (result.status === 'SENT' ? '' : ' - delivery uncertain'));
+      add(entry, 'p', 'raw', text);
+      if (result.status === 'SENT') { input.value = '';
+        id('chat-status').textContent = 'Sent. Reading the reply shortly...'; setTimeout(chatRead, 3000); }
+      else { id('chat-status').textContent = 'Delivery uncertain: ' + (result.error || 'unknown') +
+        '. Read the output before sending again.'; id('chat-status').className = 'error'; }
+    } catch (error) { id('chat-status').textContent = error.message; id('chat-status').className = 'error'; }
+    finally { id('chat-send').disabled = false; }
+  }
+  id('chat-send').addEventListener('click', chatSend);
+  id('chat-read').addEventListener('click', chatRead);
+  id('chat-input').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); chatSend(); } });
+  id('chat-open').addEventListener('click', () => { id('chat-panel').scrollIntoView({behavior:'smooth', block:'start'});
+    id('chat-input').focus(); });
   id('probe-clear').addEventListener('click', () => { id('probe-result').replaceChildren(); id('probe-time').textContent = ''; });
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     await navigator.clipboard.writeText(id(button.dataset.copy).textContent); button.textContent = 'Copied';
@@ -792,6 +912,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   id('state-input').addEventListener('keydown', event => { if (event.key === 'Enter') openState(id('state-input').value); });
   id('refresh').addEventListener('click', refresh);
   setInterval(() => { if (id('auto').checked) refresh(); }, 5000);
+  id('lang').addEventListener('click', () => { setLang(lang === 'zh' ? 'en' : 'zh'); if (lastData) refresh(); });
+  setLang(lang);
   refresh();
 })();
 </script>
@@ -902,8 +1024,8 @@ class DashboardServer(ThreadingHTTPServer):
     # Windows SO_REUSEADDR lets a second socket bind an in-use port; keep port conflicts visible there.
     allow_reuse_address = os.name != "nt"
 
-    def __init__(self, address, state=None, *, allow_dispatch=False, actor=None, version=None, context=None,
-                 tasks_root=None, transport_factory=Transport, recent_file=None):
+    def __init__(self, address, state=None, *, allow_dispatch=False, allow_chat=False, actor=None, version=None,
+                 context=None, tasks_root=None, transport_factory=Transport, recent_file=None):
         host, port = address
         if host not in ("127.0.0.1", "localhost"):
             raise ValueError("dashboard host must be loopback: 127.0.0.1 or localhost")
@@ -911,9 +1033,12 @@ class DashboardServer(ThreadingHTTPServer):
             raise ValueError("port must be between 0 and 65535")
         if state is None and allow_dispatch:
             raise ValueError("dispatch needs --state")
+        if state is None and allow_chat:
+            raise ValueError("chat needs --state")
         self.state = None if state is None else _state_path(str(Path(state).resolve()))
         self.recent_file = recent_file
         self.allow_dispatch = bool(allow_dispatch)
+        self.allow_chat = bool(allow_chat)
         self.actor, self.version, self.context = actor, version, context
         self.tasks_root = None
         self.transport_factory = transport_factory
@@ -922,6 +1047,7 @@ class DashboardServer(ThreadingHTTPServer):
         self.preview_records = {}
         self.preview_lock = threading.Lock()
         self.review_lock = threading.Lock()
+        self.chat_lock = threading.Lock()
         self.actor_role = None
         self.task_locks = {}
         if self.allow_dispatch:
@@ -936,9 +1062,67 @@ class DashboardServer(ThreadingHTTPServer):
                 if binding["mode"] != "controller":
                     raise ValueError("actor is not the active controller")
             self.actor_role = binding["role"]
+        if self.allow_chat:
+            if not actor or type(version) is not int or version < 1 or context != "main":
+                raise ValueError("chat needs --actor, --version, and --context main")
+            try:
+                self.actor_role = self.chat_binding()["role"]
+            except PermissionError as exc:
+                raise ValueError(str(exc)) from exc
         super().__init__((host, port), DashboardHandler)
         if self.state is not None:
             _remember(self.recent_file, self.state)
+
+    def chat_binding(self):
+        """The active controller binding named at startup; rechecked before every chat call."""
+        with scheduler._read_database(self.state) as con:
+            row = con.execute("SELECT data FROM bindings WHERE id=? AND version=? AND status='active'",
+                              (self.actor, self.version)).fetchone()
+        if not row:
+            raise PermissionError("stale or unregistered controller binding")
+        binding = json.loads(row[0])
+        if binding["mode"] != "controller":
+            raise PermissionError("chat actor is not the active controller")
+        return binding
+
+    def chat_target(self):
+        binding = self.chat_binding()
+        spec = binding["spec"]
+        transport = self.transport_factory({"monitor": {"command_timeout_seconds": 15}})
+        observed = transport.status(spec)
+        if not identity_matches(observed.get("identity", {}), spec["expected_identity"]):
+            raise ValueError("controller identity changed; rebind before chatting")
+        return binding, spec, transport, observed
+
+    def chat_output(self):
+        binding, spec, transport, observed = self.chat_target()
+        text = transport.output(spec)
+        return {"role": binding["role"], "status": observed.get("status"),
+                "output": text[-CHAT_OUTPUT_LIMIT:], "truncated": len(text) > CHAT_OUTPUT_LIMIT}
+
+    def chat_send(self, payload):
+        message = payload.get("message") if isinstance(payload, dict) else None
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("message is empty")
+        message = message.replace("\r\n", "\n").strip()
+        if len(message) > CHAT_MESSAGE_LIMIT or "\x00" in message:
+            raise ValueError("message must be at most " + str(CHAT_MESSAGE_LIMIT) + " characters of text")
+        with self.chat_lock:
+            binding, spec, transport, _ = self.chat_target()
+            record = {"actor": self.actor, "version": self.version, "role": binding["role"],
+                      "message_sha256": hashlib.sha256(message.encode("utf-8")).hexdigest(), "chars": len(message)}
+            try:
+                transport.send(spec, message)
+                record["status"] = "SENT"
+            except Exception as exc:
+                # One attempt only: an uncertain send is reported, never retried.
+                record.update(status="SEND_UNCERTAIN", error=str(exc)[:300])
+            with control.database(self.state) as con:
+                control.audit(con, "dashboard_chat", record)
+        result = {key: record[key] for key in ("status", "role", "chars")}
+        if "error" in record:
+            result["error"] = record["error"]
+        return result
 
     def origin(self, host=None):
         return "http://" + (host or self.server_address[0] + ":" + str(self.server_port))
@@ -946,8 +1130,9 @@ class DashboardServer(ThreadingHTTPServer):
     def status_data(self):
         state = self.state
         recent = [value for value in _recent(self.recent_file) if (Path(value) / "workflow.sqlite3").is_file()]
-        base = {"allow_dispatch": self.allow_dispatch, "can_switch": not self.allow_dispatch, "recent": recent,
-                "actor_role": self.actor_role if self.allow_dispatch else None}
+        fixed = self.allow_dispatch or self.allow_chat
+        base = {"allow_dispatch": self.allow_dispatch, "allow_chat": self.allow_chat, "can_switch": not fixed,
+                "recent": recent, "actor_role": self.actor_role if fixed else None}
         if state is None:
             return dict(base, read_only=True, state=None)
         summary = workflow_status.summarize(state)
@@ -956,8 +1141,8 @@ class DashboardServer(ThreadingHTTPServer):
 
     def select_state(self, payload):
         # Viewing only: dispatch mode is bound to the controller checked at startup.
-        if self.allow_dispatch:
-            raise PermissionError("state is fixed while dispatch is enabled")
+        if self.allow_dispatch or self.allow_chat:
+            raise PermissionError("state is fixed while dispatch or chat is enabled")
         state = _state_path(payload.get("state"))
         self.state = state
         _remember(self.recent_file, state)
@@ -1273,7 +1458,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         path = urlsplit(self.path).path
         if path == "/":
-            body = HTML.replace("__CSP_NONCE__", self.server.csp_nonce).encode("utf-8")
+            body = HTML.replace("__CSP_NONCE__", self.server.csp_nonce).replace("__I18N_ZH__", I18N_ZH).encode("utf-8")
             self._headers(200, "text/html; charset=utf-8", len(body))
             self.wfile.write(body)
             return
@@ -1312,8 +1497,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path.startswith(("/api/dispatch/", "/api/review/")) and not self.server.allow_dispatch:
             self._error(403, "dispatch is disabled")
             return
+        if path.startswith("/api/chat/") and not self.server.allow_chat:
+            self._error(403, "chat is disabled")
+            return
         if path not in ("/api/state", "/api/probe", "/api/dispatch/preview", "/api/dispatch/confirm",
-                        "/api/review/preview", "/api/review/confirm"):
+                        "/api/review/preview", "/api/review/confirm", "/api/chat/send", "/api/chat/output"):
             self._error(404, "not found")
             return
         try:
@@ -1322,6 +1510,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 result = self.server.select_state(payload)
             elif path == "/api/probe":
                 result = self.server.probe()
+            elif path == "/api/chat/send":
+                result = self.server.chat_send(payload)
+            elif path == "/api/chat/output":
+                result = self.server.chat_output()
             elif path == "/api/review/preview":
                 result = self.server.review_preview(payload)
             elif path == "/api/review/confirm":
@@ -1358,6 +1550,8 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true", help="print the URL without opening a browser")
     parser.add_argument("--allow-dispatch", action="store_true")
+    parser.add_argument("--allow-chat", action="store_true",
+                        help="let the page send messages to and read output from the bound controller")
     parser.add_argument("--actor")
     parser.add_argument("--version", type=int)
     parser.add_argument("--context", choices=("main", "side", "unknown"))
@@ -1365,6 +1559,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         server = open_server(args.host, args.port, args.state, allow_dispatch=args.allow_dispatch,
+                             allow_chat=args.allow_chat,
                              actor=args.actor, version=args.version, context=args.context,
                              tasks_root=args.tasks_root, recent_file=RECENT_FILE)
     except (ValueError, OSError) as exc:

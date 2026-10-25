@@ -93,3 +93,7 @@ python -B scripts/dashboard.py --state /absolute/workflow-state
 要启用表单派发，启动时与 `--state` 一起增加 `--allow-dispatch --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks`；此时状态目录固定，不能切换。actor 必须是当前有效控制者；`main` 是操作者的明确声明。预览实时检查空闲 Worker，返回任务绑定请求、nonce、消息与摘要，不写文件。确认时重新检查预览和完成序列，创建新任务目录，并交给 `workflow_scheduler.dispatch` 单次发送；不自动重试不确定派发。独立确认执行后，由操作者自行编写 `EXECUTION.md` 并运行页面显示的 `reconcile` 命令，再启动监控。
 
 任务详情中的 **View result files** 只读取该任务声明的文件（绑定文件、交付文件、审核文件），每个最多 200000 字节，并与完成回执中的哈希比对。派发模式下，属于 actor 自身审核角色的完成更新会显示 **Acknowledge** 和 **Record review**。两者都先做只读预览，再一次性确认，确认时以绑定的 actor 调用 `workflow_control.acknowledge` 或 `record_review`，并重新执行全部审核门检查。页面从不写入审核文件：请自行编写 `REVIEW.md`（或冻结的 `review_path`），包含任务 ID、nonce 和 `Verdict:` 行；文件在预览后改动会使预览失效。页面不执行 reconcile、绑定切换、续派检查或 DAG tick。
+
+要使用 **与控制者对话**，启动时与 `--state` 一起加 `--allow-chat --actor INSTANCE --version 1 --context main`（可与 `--allow-dispatch` 同时使用）；默认关闭，并且状态目录固定。actor 必须是当前有效控制者。每次发送前都会重新检查该绑定和实时身份，只发送一次，从不重试；结果为 `SENT` 或 `SEND_UNCERTAIN`。每次发送都会写入审计记录 `dashboard_chat`，只记录角色、字符数和 SHA-256，不保存消息正文。**读取最近输出**按需读取控制者最近的终端输出。消息会被当作 Owner 亲自输入，因此只能把令牌地址交给 Owner 本人。
+
+右上角的语言按钮可在英文（默认）和中文之间切换，选择保存在浏览器中；也可以在地址中加 `?lang=zh` 或 `?lang=en`。翻译只作用于界面文字，台账中的任务标题、路径、角色名和 agent 输出保持原文。
