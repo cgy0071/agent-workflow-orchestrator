@@ -103,9 +103,10 @@ def dashboard_details(state, summary=None):
                 "bound_at": data.get("created_at"),
             })
         inbox = []
-        for row in con.execute("SELECT id,task,status,data FROM events ORDER BY rowid DESC"):
+        for row in con.execute("SELECT id,task,role,status,data FROM events ORDER BY rowid DESC"):
             data = json.loads(row["data"])
-            inbox.append({"event_id": row["id"][:12], "task_id": row["task"], "status": row["status"],
+            inbox.append({"event_id": row["id"][:12], "event": row["id"], "role": row["role"],
+                          "task_id": row["task"], "status": row["status"],
                           "created_at": data.get("created_at"),
                           "report_status": (data.get("report") or {}).get("status")})
         for row in con.execute("SELECT id,worker,status,data FROM tasks WHERE status!='resolved' ORDER BY id"):
@@ -126,6 +127,7 @@ def dashboard_details(state, summary=None):
         for name, plan in dag["tasks"].items():
             task_details.setdefault(plan["task_id"], {"cwd": cwd_by_task.get(plan["task_id"]), "journal": []})
     return {"goal": config.get("goal", ""), "roles": list(roles.values()), "inbox": inbox,
+            "verdicts": sorted(config.get("workflow", {}).get("transitions", {})),
             "dags": raw["dags"], "scheduling_blocks": raw["scheduling_blocks"], "task_details": task_details}
 
 

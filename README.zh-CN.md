@@ -195,6 +195,8 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 - 对控制者 Agent 说“打开状态面板”，Skill 已写明做法。
 - 运行 `python -B scripts/dashboard.py`，可加 `--state /abs/state`。
 
+![离线演示后的状态面板：目标、三个已绑定角色、三个已通过的任务，以及 A/B 到 JOIN 的任务计划](docs/images/dashboard.png)
+
 表单派发需要显式启用，仍须独立观察执行并运行 `reconcile`；详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
 任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。主要阶段如下：

@@ -44,7 +44,8 @@ def demo(directory, completion_status="idle"):
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=False)
     state = root / "state"
-    config = {"roles": {"planner": {}, "executor": {}, "second": {}},
+    config = {"goal": "Offline demo: run A and B in parallel, then JOIN after both are accepted",
+              "roles": {"planner": {}, "executor": {}, "executor-b": {}},
               "workflow": {"reviewer_role": "planner", "transitions": {"accept": "next", "reject": "stop"}},
               "scheduler": {"max_concurrency": 2, "resources": {}}}
     control.initialize(state, config)
@@ -61,10 +62,10 @@ def demo(directory, completion_status="idle"):
                        "output_argv": status_argv, "prompt_argv": status_argv + ["--message", "{message}"]}
     controller = control.bind(state, "planner", specs["planner"], Transport({}).reviewer_identity(specs["planner"]), "controller")
     who = (controller["instance_id"], controller["version"], "main")
-    for role in ("executor", "second"):
+    for role in ("executor", "executor-b"):
         control.bind(state, role, specs[role], Transport({}).status(specs[role])["identity"])
     nodes = []
-    for name, role, deps, baseline in (("A", "executor", [], 0), ("B", "second", [], 0), ("JOIN", "executor", ["A", "B"], 1)):
+    for name, role, deps, baseline in (("A", "executor", [], 0), ("B", "executor-b", [], 0), ("JOIN", "executor", ["A", "B"], 1)):
         cwd = root / "delivery" / name
         cwd.mkdir(parents=True)
         req = {"task_id": name, "nonce": "nonce-" + name, "generation": 1, "cwd": str(cwd),

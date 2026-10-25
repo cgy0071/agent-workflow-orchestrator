@@ -10,6 +10,7 @@ from pathlib import Path
 import threading
 import sys
 import unittest
+from unittest.mock import patch
 
 import dashboard
 import demo_scheduler
@@ -138,6 +139,27 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("DAG-B", data["task_details"])
         self.assertEqual(self.fake.status_calls, 2)
 
+    def test_artifacts_reads_only_declared_files_without_writes(self):
+        request = self.request("ART-1", "executor")
+        self.assertEqual(scheduler.dispatch(self.state, request, "ART-1 " + request["nonce"],
+                                            *self.actor(), transport=self.fake)["status"], "SUBMITTED")
+        cwd = Path(request["cwd"])
+        (cwd / "RESULT.md").write_bytes(b"<b>done</b>\n")
+        (cwd / "secret.txt").write_text("not declared\n", encoding="utf-8")
+        database = self.state / "workflow.sqlite3"
+        before = database.read_bytes()
+        status, data, _ = self.http("GET", "/api/artifacts?task=ART-1")
+        self.assertEqual(status, 200)
+        files = {f["name"]: f for f in data["files"]}
+        self.assertEqual(set(files), {"HANDOFF.md", "RESULT.md"})
+        self.assertEqual(files["RESULT.md"]["text"], "<b>done</b>\n")
+        self.assertFalse(files["HANDOFF.md"]["exists"])
+        self.assertNotIn("not declared", json.dumps(data))
+        self.assertEqual(database.read_bytes(), before)
+        self.assertEqual(self.http("GET", "/api/artifacts?task=../x")[0], 400)
+        self.assertEqual(self.http("GET", "/api/artifacts?task=NOPE")[0], 400)
+        self.assertEqual(self.http("GET", "/api/artifacts?task=ART-1", token=False)[0], 403)
+
     def test_startup_rejects_public_host_or_incomplete_controller(self):
         with self.assertRaises(ValueError):
             dashboard.DashboardServer(("0.0.0.0", 0), self.state)
@@ -154,6 +176,70 @@ class DashboardTests(unittest.TestCase):
         status, html, _ = self.http("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn('id="dispatch-form" class="hidden"', html)
+
+    def review_event(self, name):
+        request = self.request(name, "executor")
+        self.assertEqual(scheduler.dispatch(self.state, request, name + " " + request["nonce"],
+                                            *self.actor(), transport=self.fake)["status"], "SUBMITTED")
+        note = Path(request["cwd"]) / "EXECUTION.md"
+        note.write_text(name + " " + request["nonce"] + "\nOutcome: running\nObserved offline.\n", encoding="utf-8")
+        confirmed = scheduler.reconcile(self.state, name, "running", note, *self.actor())["request"]
+        return confirmed, control.publish_event(self.state, confirmed, {"status": "review_ready"})
+
+    def test_review_actions_disabled_by_default(self):
+        _, event = self.review_event("REV-OFF")
+        for path in ("/api/review/preview", "/api/review/confirm"):
+            self.assertEqual(self.http("POST", path, {"event_id": event})[0], 403)
+        self.assertEqual(self.http("GET", "/api/status")[1]["inbox"][0]["status"], "pending")
+
+    def test_review_preview_confirm_is_one_time_and_gated(self):
+        request, event = self.review_event("REV-1")
+        self.start_server(True)
+        database = self.state / "workflow.sqlite3"
+        self.assertEqual(self.http("POST", "/api/review/preview", {"event_id": "short"})[0], 400)
+        forged = self.http("POST", "/api/review/confirm", {"event_id": event, "preview_sha256": "0" * 64})
+        self.assertEqual(forged[0], 400)
+        self.assertIn("changed", forged[1]["error"])
+        before = database.read_bytes()
+        status, step, _ = self.http("POST", "/api/review/preview", {"event_id": event})
+        self.assertEqual((status, step["step"]), (200, "acknowledge"))
+        self.assertEqual(database.read_bytes(), before)
+        confirm = {"event_id": event, "preview_sha256": step["preview_sha256"]}
+        # A confirm that fails in the gate still consumes the preview, even though the ledger is unchanged.
+        with patch.object(dashboard.control, "acknowledge", side_effect=ValueError("gate refused")):
+            self.assertEqual(self.http("POST", "/api/review/confirm", confirm)[1]["error"], "gate refused")
+        reused = self.http("POST", "/api/review/confirm", confirm)
+        self.assertEqual(reused[0], 400)
+        self.assertIn("preview missing", reused[1]["error"])
+        step = self.http("POST", "/api/review/preview", {"event_id": event})[1]
+        confirm = {"event_id": event, "preview_sha256": step["preview_sha256"]}
+        self.assertEqual(self.http("POST", "/api/review/confirm", confirm)[1]["status"], "ACKNOWLEDGED")
+        self.assertEqual(self.http("POST", "/api/review/confirm", confirm)[0], 400)
+        review = Path(request["cwd"]) / "REVIEW.md"
+        self.assertEqual(self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "accept"})[0], 400)
+        review.write_text("REV-1 " + request["nonce"] + "\nVerdict: reject\n", encoding="utf-8")
+        status, data, _ = self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "accept"})
+        self.assertEqual(status, 400)
+        self.assertIn("Verdict: accept", data["error"])
+        status, data, _ = self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "nope"})
+        self.assertEqual(status, 400)
+        self.assertIn("workflow.transitions", data["error"])
+        review.write_text("REV-1 " + request["nonce"] + "\nVerdict: accept\n", encoding="utf-8")
+        status, step, _ = self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "accept"})
+        self.assertEqual((status, step["step"], step["review_path"]), (200, "record_review", str(review.resolve())))
+        review.write_text("REV-1 " + request["nonce"] + "\nChanged after preview.\nVerdict: accept\n", encoding="utf-8")
+        stale = {"event_id": event, "verdict": "accept", "preview_sha256": step["preview_sha256"]}
+        self.assertEqual(self.http("POST", "/api/review/confirm", stale)[0], 400)
+        step = self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "accept"})[1]
+        status, result, _ = self.http("POST", "/api/review/confirm",
+                                      {"event_id": event, "verdict": "accept", "preview_sha256": step["preview_sha256"]})
+        self.assertEqual((status, result["status"], result["verdict"]), (200, "REVIEW_RECORDED", "accept"))
+        self.assertEqual(result["actor"]["instance_id"], self.controller["instance_id"])
+        data = self.http("GET", "/api/status")[1]
+        self.assertEqual(data["inbox"][0]["status"], "reviewed")
+        self.assertEqual(data["actor_role"], "planner")
+        self.assertEqual(data["verdicts"], ["accept", "reject", "repair"])
+        self.assertEqual(self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "accept"})[0], 400)
 
     def test_preview_is_read_only_and_returns_bound_request(self):
         self.start_server(True)

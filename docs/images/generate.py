@@ -127,11 +127,11 @@ def terminal(demo_line, status_lines):
             '<title>Offline demo output</title>%s%s</svg>\n' % (width, height, width, height, STYLE, "".join(body)))
 
 
-D = {"en": {"title": "Demo task graph", "a": ("A", ["worker: executor"]), "b": ("B", ["worker: second"]),
+D = {"en": {"title": "Demo task graph", "a": ("A", ["worker: executor"]), "b": ("B", ["worker: executor-b"]),
             "join": ("JOIN", ["worker: executor", "needs A and B"]),
             "p1": "pass 1: A and B dispatched together", "p2": "pass 2: JOIN becomes eligible",
             "gate": "only after both reviews = accept", "acc": "accepted"},
-     "zh": {"title": "演示任务图", "a": ("A", ["Worker：executor"]), "b": ("B", ["Worker：second"]),
+     "zh": {"title": "演示任务图", "a": ("A", ["Worker：executor"]), "b": ("B", ["Worker：executor-b"]),
             "join": ("JOIN", ["Worker：executor", "依赖 A 和 B"]),
             "p1": "第 1 轮：A 与 B 同时派发", "p2": "第 2 轮：JOIN 才可派发",
             "gate": "仅当两份审核均为 accept", "acc": "accepted"}}

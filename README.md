@@ -195,6 +195,8 @@ For a local ledger view, open the optional dashboard. It shows bindings, tasks, 
 - Ask the controller agent to "open the dashboard"; the Skill tells it how.
 - Run `python -B scripts/dashboard.py`, optionally with `--state /abs/state`.
 
+![Dashboard after the offline demo: goal, three assigned roles, three accepted tasks, and the A/B to JOIN task plan](docs/images/dashboard.png)
+
 Authorized form dispatch is opt-in and still requires an independently observed `reconcile` step; see [monitoring.md](references/monitoring.md).
 
 At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action. The main phases:

@@ -13,7 +13,7 @@ import secrets
 import sys
 import threading
 import time
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 import workflow_control as control
@@ -28,6 +28,8 @@ RECENT_FILE = Path.home() / ".agent-workflow-orchestrator" / "dashboard-recent.j
 RECENT_LIMIT = 10
 TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
 NONCE = re.compile(r"[0-9a-f]{16}\Z")
+EVENT_ID = re.compile(r"[0-9a-f]{64}\Z")
+ARTIFACT_LIMIT = 200000  # bytes of each delivery file shown in the page
 HTML = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -130,6 +132,8 @@ tr.task-row { cursor:pointer; transition:background .15s } tr.task-row:hover { b
 tr.task-row td:last-child { color:var(--warn) } tr.task-row td.info-note { color:var(--muted) }
 .task-row td:nth-child(6) { min-width:170px }
 .detail { background:var(--bg); padding:13px; border-radius:9px; overflow-wrap:anywhere }
+.results { margin:9px 0 } .result-file { margin-top:10px } .result-file p { margin:3px 0 }
+.result-file pre { max-height:360px; overflow:auto }
 pre { margin:7px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;
   background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:9px; max-height:320px; overflow:auto }
 .dag-run { min-width:0 } .dag-title { display:flex; align-items:center; gap:9px; margin:0 0 11px }
@@ -257,6 +261,18 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
           <button type="button" data-copy="reconcile-command">Copy</button></div><pre id="reconcile-command"></pre>
           <div class="small-actions"><strong>Then monitor</strong><button type="button" data-copy="monitor-command">Copy</button></div>
           <pre id="monitor-command"></pre></div>
+      </div></section>
+    <section class="panel wide hidden" id="review-panel"><div class="panel-head"><h2>Review gate</h2>
+      <span class="panel-caption">One ledger write after your confirmation</span></div>
+      <p id="review-target" class="muted">Choose Acknowledge or Record review on a completion update.</p>
+      <div id="review-form" class="hidden">
+        <div class="form-grid" id="review-verdict-row"><label><span>Verdict (must match the Verdict: line in the review file)</span>
+          <select id="review-verdict"></select></label></div>
+        <div class="actions"><button id="review-preview" class="primary" type="button">Check and preview</button>
+          <button id="review-confirm" type="button" disabled>Confirm once</button></div>
+        <p id="review-error" class="error" role="alert"></p>
+        <div id="review-output" class="hidden"><p id="review-summary" class="notice"></p><pre id="review-text"></pre></div>
+        <p id="review-status"></p>
       </div></section>
   </div>
 </div>
@@ -415,6 +431,22 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       }
     }
   }
+  function resultFiles(root, data) {
+    root.replaceChildren();
+    const kinds = {binding:'Handoff file', artifact:'Result file', review:'Review file'};
+    for (const f of data.files) {
+      const box = add(root, 'div', 'result-file');
+      add(box, 'strong', '', (kinds[f.kind] || 'File') + ': ' + f.name);
+      if (f.error) { add(box, 'p', 'error', f.error); continue; }
+      if (!f.exists) { add(box, 'p', 'muted', 'Not written yet'); continue; }
+      const notes = [f.bytes + ' bytes'];
+      if (f.matches_receipt === true) notes.push('matches the completion receipt');
+      if (f.matches_receipt === false) notes.push('changed since the completion receipt');
+      if (f.truncated) notes.push('showing the first part only');
+      add(box, 'p', f.matches_receipt === false ? 'error' : 'muted', notes.join('; '));
+      add(box, 'pre', '', f.text);
+    }
+  }
   function taskTable(data) {
     const root = id('tasks'); root.replaceChildren();
     if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 8; return; }
@@ -444,6 +476,14 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         add(box, 'p', '', note.explanation + ' Next: ' + note.next);
         if (note.technical) add(box, 'p', 'muted', 'Ledger detail: ' + note.technical);
       }
+      const results = add(detail, 'div', 'results');
+      const view = add(results, 'button', '', 'View result files'); view.type = 'button';
+      const output = add(results, 'div');
+      view.addEventListener('click', async event => {
+        event.stopPropagation(); view.disabled = true; empty(output, 'Reading result files...');
+        try { resultFiles(output, await api('/api/artifacts?task=' + encodeURIComponent(t.task_id))); }
+        catch (error) { empty(output, error.message); } finally { view.disabled = false; }
+      });
       const extra = technical(detail, 'Technical record');
       detailLine(extra, 'Phase', t.phase); detailLine(extra, 'Harness / adapter', t.harness + ' / ' + t.adapter);
       detailLine(extra, 'Dispatch', t.dispatch); detailLine(extra, 'Resource reservation', t.claim_held ? 'held' : 'none');
@@ -503,6 +543,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       add(item, 'p', 'role-summary', named(e.report_status, reportNames));
       if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
       else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
+      if (data.allow_dispatch && e.role === data.actor_role && ['pending','acknowledged'].includes(e.status)) {
+        const open = add(item, 'button', '', e.status === 'pending' ? 'Acknowledge...' : 'Record review...');
+        open.type = 'button'; open.addEventListener('click', () => openReview(e, data));
+      }
       if (e.created_at) {
         const received = new Date(e.created_at);
         add(item, 'small', '', 'Received ' + (Number.isNaN(received.getTime()) ? e.created_at : received.toLocaleString()));
@@ -619,6 +663,47 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       show('dispatch-output', true); await refresh();
     } catch (error) { id('dispatch-error').textContent = error.message + ' Inspect the ledger before trying another task.'; }
     preview = null;
+  });
+  let reviewEvent = null, reviewPreview = null;
+  function reviewInvalidate() { reviewPreview = null; id('review-confirm').disabled = true; show('review-output', false); }
+  function openReview(e, data) {
+    reviewEvent = e; reviewInvalidate(); id('review-error').textContent = ''; id('review-status').textContent = '';
+    id('review-target').textContent = (e.status === 'pending' ? 'Acknowledge the update for ' :
+      'Record a review for ') + e.task_id + ' (event ' + e.event_id + ').';
+    const select = id('review-verdict'); select.replaceChildren();
+    for (const v of data.verdicts) { const option = add(select, 'option', '', named(v, reviewNames)); option.value = v; }
+    show('review-verdict-row', e.status === 'acknowledged');
+    show('review-panel', true); show('review-form', true);
+    id('review-panel').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  id('review-verdict').addEventListener('input', reviewInvalidate);
+  id('review-preview').addEventListener('click', async () => {
+    if (!reviewEvent) return; reviewInvalidate(); id('review-error').textContent = '';
+    id('review-preview').disabled = true;
+    const payload = {event_id: reviewEvent.event};
+    if (reviewEvent.status === 'acknowledged') payload.verdict = id('review-verdict').value;
+    try { reviewPreview = await api('/api/review/preview', payload);
+      id('review-summary').textContent = reviewPreview.step === 'acknowledge' ?
+        'Confirm marks this update as received by ' + reviewPreview.actor + '. It does not accept the work.' :
+        'Confirm records ' + named(reviewPreview.verdict, reviewNames) + ' (next: ' + reviewPreview.action +
+        ') from ' + reviewPreview.review_path + ' (sha256 ' + reviewPreview.review_sha256.slice(0, 12) + ').';
+      id('review-text').textContent = reviewPreview.review_text || '';
+      show('review-output', true); id('review-confirm').disabled = false;
+    } catch (error) { id('review-error').textContent = error.message; }
+    finally { id('review-preview').disabled = false; }
+  });
+  id('review-confirm').addEventListener('click', async () => {
+    if (!reviewPreview) return; id('review-confirm').disabled = true; id('review-error').textContent = '';
+    const payload = {event_id: reviewPreview.event_id, preview_sha256: reviewPreview.preview_sha256};
+    if (reviewPreview.verdict) payload.verdict = reviewPreview.verdict;
+    try { const result = await api('/api/review/confirm', payload);
+      id('review-status').textContent = result.status === 'ACKNOWLEDGED' ?
+        'Acknowledged. Write the review file, then record the review.' :
+        'Review recorded: ' + named(result.verdict, reviewNames) + '.';
+      id('review-status').className = 'success'; show('review-form', true); reviewEvent = null;
+      show('review-output', false); await refresh();
+    } catch (error) { id('review-error').textContent = error.message; }
+    reviewPreview = null;
   });
   id('probe').addEventListener('click', async () => {
     id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active workers...');
@@ -774,6 +859,8 @@ class DashboardServer(ThreadingHTTPServer):
         self.csp_nonce = secrets.token_urlsafe(16)
         self.preview_records = {}
         self.preview_lock = threading.Lock()
+        self.review_lock = threading.Lock()
+        self.actor_role = None
         self.task_locks = {}
         if self.allow_dispatch:
             if not actor or type(version) is not int or version < 1 or context != "main" or tasks_root is None:
@@ -786,6 +873,7 @@ class DashboardServer(ThreadingHTTPServer):
                 binding = control.guard(con, actor, version, context, "dispatch")
                 if binding["mode"] != "controller":
                     raise ValueError("actor is not the active controller")
+            self.actor_role = binding["role"]
         super().__init__((host, port), DashboardHandler)
         if self.state is not None:
             _remember(self.recent_file, self.state)
@@ -796,7 +884,8 @@ class DashboardServer(ThreadingHTTPServer):
     def status_data(self):
         state = self.state
         recent = [value for value in _recent(self.recent_file) if (Path(value) / "workflow.sqlite3").is_file()]
-        base = {"allow_dispatch": self.allow_dispatch, "can_switch": not self.allow_dispatch, "recent": recent}
+        base = {"allow_dispatch": self.allow_dispatch, "can_switch": not self.allow_dispatch, "recent": recent,
+                "actor_role": self.actor_role if self.allow_dispatch else None}
         if state is None:
             return dict(base, read_only=True, state=None)
         summary = workflow_status.summarize(state)
@@ -811,6 +900,51 @@ class DashboardServer(ThreadingHTTPServer):
         self.state = state
         _remember(self.recent_file, state)
         return {"state": str(state)}
+
+    def artifacts(self, task_id):
+        """Read only the delivery files the ledger declares for one task; never writes or polls."""
+        if self.state is None:
+            raise ValueError("open a workflow state first")
+        if not isinstance(task_id, str) or not TASK_ID.fullmatch(task_id):
+            raise ValueError("invalid task ID")
+        with scheduler._read_database(self.state) as con:
+            row = con.execute("SELECT data FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if not row:
+                raise ValueError("unknown task")
+            request = json.loads(row["data"])["request"]
+            receipt = {}
+            for event in con.execute("SELECT data FROM events WHERE task=? ORDER BY id", (task_id,)):
+                receipt = json.loads(event[0]).get("receipt") or receipt
+        cwd = Path(request["cwd"]).resolve()
+        completion = request["completion"]
+        names = [("binding", completion["binding_artifact"])] + [("artifact", x) for x in completion.get("artifacts", [])]
+        if request.get("review_path"):
+            names.append(("review", request["review_path"]))
+        received = {}
+        for item in receipt.get("artifacts", []) + [receipt.get("binding_artifact", {})]:
+            if item.get("path"):
+                received[str(Path(item["path"]).resolve())] = item.get("sha256")
+        files = []
+        for kind, item in names:
+            name = item if isinstance(item, str) else item["path"]
+            entry = {"kind": kind, "name": name, "exists": False}
+            files.append(entry)
+            try:
+                path = (cwd / name).resolve()
+                path.relative_to(cwd)  # Reject traversal and escaping symlinks.
+            except (OSError, ValueError):
+                entry["error"] = "path is outside the task directory"
+                continue
+            entry["path"] = str(path)
+            if not path.is_file():
+                continue
+            raw = path.read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            entry.update(exists=True, bytes=len(raw), sha256=digest, truncated=len(raw) > ARTIFACT_LIMIT,
+                         text=raw[:ARTIFACT_LIMIT].decode("utf-8", errors="replace"))
+            if str(path) in received:
+                entry["matches_receipt"] = received[str(path)] == digest
+        return {"task_id": task_id, "cwd": str(cwd), "files": files}
 
     def probe(self):
         if self.state is None:
@@ -940,6 +1074,71 @@ class DashboardServer(ThreadingHTTPServer):
                     "execution_template": "Task ID: " + request["task_id"] + "\nNonce: " + request["nonce"] +
                     "\nOutcome: running\nObserved execution: \n"}
 
+    def prepare_review(self, payload):
+        """Read-only check of one review gate step; workflow_control repeats every check on confirm."""
+        if not isinstance(payload, dict) or not isinstance(payload.get("event_id"), str) \
+                or not EVENT_ID.fullmatch(payload["event_id"]):
+            raise ValueError("invalid event ID")
+        event_id = payload["event_id"]
+        with scheduler._read_database(self.state) as con:
+            who = control.guard(con, self.actor, self.version, self.context, "review")
+            event = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+            if not event or event["role"] != who["role"]:
+                raise ValueError("event belongs to another reviewer role")
+            request = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (event["task"],)).fetchone()[0])["request"]
+            transitions = control.config_of(con).get("workflow", {}).get("transitions", {})
+            status = event["status"]
+        base = {"event_id": event_id, "task_id": event["task"], "nonce": event["nonce"], "event_status": status,
+                "actor": self.actor, "version": self.version}
+        if status == "pending":
+            step = dict(base, step="acknowledge")
+        elif status == "acknowledged":
+            verdict = payload.get("verdict")
+            if verdict not in transitions:
+                raise ValueError("choose a verdict configured in workflow.transitions")
+            # Only the frozen review_path, or REVIEW.md in the task folder; the page never writes it.
+            path = Path(request.get("review_path") or Path(request["cwd"]) / "REVIEW.md").resolve()
+            if not path.is_file():
+                raise ValueError("write " + str(path) + " before recording the review")
+            raw = path.read_bytes()
+            if len(raw) > ARTIFACT_LIMIT:
+                raise ValueError("review file is too large to preview")
+            text = raw.decode("utf-8-sig")
+            if event["task"] not in text or event["nonce"] not in text:
+                raise ValueError("review file must contain the task ID and nonce")
+            if not re.search(r"^Verdict:\s*" + re.escape(verdict) + r"\s*$", text, re.M):
+                raise ValueError("review file needs the line: Verdict: " + verdict)
+            step = dict(base, step="record_review", verdict=verdict, action=transitions[verdict],
+                        review_path=str(path), review_sha256=hashlib.sha256(raw).hexdigest(), review_text=text)
+        else:
+            raise ValueError("this event is already " + status)
+        step["preview_sha256"] = control.digest(step)
+        return step
+
+    def review_preview(self, payload):
+        result = self.prepare_review(payload)
+        with self.preview_lock:
+            self.preview_records["review:" + result["preview_sha256"]] = time.monotonic()
+        return result
+
+    def review_confirm(self, payload):
+        if not isinstance(payload, dict) or not isinstance(payload.get("preview_sha256"), str):
+            raise ValueError("preview_sha256 is required")
+        with self.review_lock:
+            result = self.prepare_review(payload)
+            digest = result["preview_sha256"]
+            if not hmac.compare_digest(payload["preview_sha256"], digest):
+                raise ValueError("review step changed; preview again")
+            with self.preview_lock:
+                created = self.preview_records.pop("review:" + digest, None)
+            if created is None or time.monotonic() - created > 600:
+                raise ValueError("preview missing or expired; preview again")
+            if result["step"] == "acknowledge":
+                return control.acknowledge(self.state, result["event_id"], self.actor, self.version, self.context)
+            recorded = control.record_review(self.state, result["event_id"], self.actor, self.version, self.context,
+                                             result["review_path"], result["verdict"])
+            return dict(recorded, status="REVIEW_RECORDED")
+
 
 class DashboardHandler(BaseHTTPRequestHandler):
     server: DashboardServer
@@ -979,16 +1178,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "").lower()
         return self.headers.get("Origin") == "http://" + host
 
-    def _body(self):
+    def _read_raw(self):
+        # Consume the bounded body before any reply: on Windows, closing with unread bytes sends RST, not FIN.
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return None
+        if not 0 < length <= 100000:
+            return None
+        try:
+            return self.rfile.read(length)
+        except OSError:
+            return None
+
+    def _body(self, raw):
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             raise ValueError("Content-Type must be application/json")
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError as exc:
             raise ValueError("invalid Content-Length") from exc
-        if not 0 < length <= 100000:
+        if not 0 < length <= 100000 or raw is None or len(raw) != length:
             raise ValueError("request body must be 1 to 100000 bytes")
-        value = json.loads(self.rfile.read(length))
+        value = json.loads(raw)
         if not isinstance(value, dict):
             raise ValueError("request body must be a JSON object")
         return value
@@ -1006,6 +1218,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not self._token():
             self._error(403, "invalid dashboard token")
             return
+        if path == "/api/artifacts":
+            try:
+                task = parse_qs(urlsplit(self.path).query).get("task", [None])[0]
+                self._json(200, self.server.artifacts(task))
+            except ValueError as exc:
+                self._error(400, str(exc)[:300])
+            except Exception:
+                self._error(500, "result file read failed")
+            return
         if path != "/api/status":
             self._error(404, "not found")
             return
@@ -1015,6 +1236,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._error(500, "status read failed")
 
     def do_POST(self):
+        raw = self._read_raw()
         if not self._host():
             self._error(403, "invalid Host")
             return
@@ -1025,18 +1247,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._error(403, "invalid dashboard token")
             return
         path = urlsplit(self.path).path
-        if path.startswith("/api/dispatch/") and not self.server.allow_dispatch:
+        if path.startswith(("/api/dispatch/", "/api/review/")) and not self.server.allow_dispatch:
             self._error(403, "dispatch is disabled")
             return
-        if path not in ("/api/state", "/api/probe", "/api/dispatch/preview", "/api/dispatch/confirm"):
+        if path not in ("/api/state", "/api/probe", "/api/dispatch/preview", "/api/dispatch/confirm",
+                        "/api/review/preview", "/api/review/confirm"):
             self._error(404, "not found")
             return
         try:
-            payload = self._body()
+            payload = self._body(raw)
             if path == "/api/state":
                 result = self.server.select_state(payload)
             elif path == "/api/probe":
                 result = self.server.probe()
+            elif path == "/api/review/preview":
+                result = self.server.review_preview(payload)
+            elif path == "/api/review/confirm":
+                result = self.server.review_confirm(payload)
             elif path.endswith("/preview"):
                 result = self.server.preview(payload)
             else:
