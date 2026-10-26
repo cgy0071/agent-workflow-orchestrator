@@ -5,6 +5,7 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false  # Report every OS/Python result instead of cancelling on the first failure.
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ['3.10', '3.12']

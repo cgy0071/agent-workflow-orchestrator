@@ -568,7 +568,8 @@ class DashboardTests(unittest.TestCase):
         for task_id in ("../x", "a/b", "", "x" * 65):
             with self.subTest(task_id=task_id):
                 self.assertEqual(self.http("POST", "/api/dispatch/preview", self.form(task_id))[0], 400)
-        for path in ("../outside", "C:\\outside", "", "."):
+        for path in ("../outside", "C:\\outside", "C:outside", "\\\\server\\share\\x", "/etc/outside",
+                     "sub\\..\\..\\outside", "", "."):
             with self.subTest(path=path):
                 form = self.form()
                 form["binding_artifact"] = path

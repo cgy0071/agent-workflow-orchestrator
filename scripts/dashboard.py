@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import secrets
 import shutil
@@ -1216,7 +1216,9 @@ def _artifact_path(value, cwd):
     if not isinstance(value, str) or not value or value in (".", ".."):
         raise ValueError("delivery path must be a nonempty file path")
     path = Path(value)
-    if path.is_absolute() or any(part in (".", "..") for part in path.parts):
+    # Requests move between machines: reject Windows and POSIX absolute forms on every platform.
+    windows = PureWindowsPath(value)
+    if path.is_absolute() or windows.anchor or any(part in (".", "..") for part in path.parts + windows.parts):
         raise ValueError("delivery path must stay inside the task directory")
     resolved = (cwd / path).resolve()
     if resolved == cwd.resolve():
