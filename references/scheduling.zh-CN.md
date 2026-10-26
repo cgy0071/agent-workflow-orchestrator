@@ -155,6 +155,29 @@ retry_max_seconds 默认 60 秒；此策略不重试发送操作。
 事件 ID 保证去重。监控超时只结束观测。系统时钟变化会影响时间判断，但不会产生
 审核或派工许可。
 
+## 中途停顿、权限提示与受限继续
+
+`incomplete`（Worker 空闲但没有有效交付，常见于额度、限流或网络中断后）、`blocked`
+（通常是 harness 权限/审批提示或用量上限）和 `adapter_error`（查询持续失败）属于暂停，
+不是结束。监控在每次停顿中只发布一个事件、发送一次通知，然后继续观察同一次尝试；之后
+完成的交付仍会变成 `review_ready`。停顿期间同样受整体监控超时限制。控制者关闭本次尝试
+（`reconcile --outcome terminated` 或 `release`）后，监控停止，不再产生事件。
+
+尝试未关闭时，停顿事件不能登记审核，避免对暂停的结论盖过真正的交付。对 `incomplete`，
+控制者可在 Worker 恢复可用后发送一次受限的继续消息：
+
+```sh
+python scripts/workflow_scheduler.py --state STATE continue --task TASK-ID --actor INSTANCE --version 1 --context main
+```
+
+前提：派发已确认执行、最新观测为 `incomplete`、Worker 绑定未变、实时身份一致、Worker
+空闲且能接收输入。它发送同一任务 ID 和 nonce，不是新任务；每次停顿最多一次，每次尝试最多
+`scheduler.max_continue_prompts` 次（默认 2，设为 0 关闭）。发送前先记入日志
+（`continue_reserved`）；发送不确定也计入次数，且不重试。`blocked` 和 `adapter_error`
+不会被继续：权限提示由 Owner 在 Worker 自己的 harness 中处理，Worker 继续后监控自动接上。
+如果是 harness 拒绝了权限，继续消息无济于事，应修改 harness 权限或关闭本次尝试。
+Worker 显示权限提示时派发会在发送前被拒绝，并给出这一原因。
+
 ## 本地演示
 
 ```sh

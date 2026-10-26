@@ -1,7 +1,9 @@
 """Offline dispatch crash, concurrency, isolation, and reviewed DAG regression tests."""
+from contextlib import redirect_stdout
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -32,8 +34,34 @@ class FakeTransport:
         return "submitted"
 
 
+class FakeLabels:
+    """Stands in for Herdr rename/list so binding tests never touch a real Herdr on PATH."""
+    def __init__(self, agents=None):
+        self.calls, self.listed = [], agents
+
+    def label(self, spec, name=None):
+        self.calls.append((spec.get("pane"), name))
+        return "{}"
+
+    def agents(self, spec):
+        if self.listed is None:
+            identity = spec["expected_identity"]
+            return [{"terminal_id": identity.get("terminal"), "pane_id": spec.get("pane"),
+                     "agent": identity.get("kind"), "cwd": identity.get("launch_cwd"), "name": None}]
+        return self.listed
+
+
+def fake_labels(test, agents=None):
+    labels = FakeLabels(agents)
+    patcher = patch.object(control, "label_transport", return_value=labels)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return labels
+
+
 class SchedulerTests(unittest.TestCase):
     def setUp(self):
+        self.labels = fake_labels(self)
         self.sandbox = (Path(__file__).resolve().parents[1] / "runtime").resolve()
         self.sandbox.mkdir(exist_ok=True)
         self.root = self.sandbox / ("test-scheduler-" + uuid.uuid4().hex)
@@ -537,6 +565,156 @@ class SchedulerTests(unittest.TestCase):
         evidence.write_text("changed")
         with self.assertRaises(ValueError): scheduler.validate_capabilities(profile, self.root)
 
+    def stall_fixture(self):
+        """A confirmed task whose worker went idle without delivery (quota/network pause)."""
+        req = self.request(); self.send(req); req = self.confirm(req)
+        reqfile = Path(req["cwd"]) / "request.json"
+        reqfile.write_text(json.dumps(req), encoding="utf-8")
+        return req, reqfile
+
+    def test_stalled_worker_is_continued_once_and_delivery_reaches_review(self):
+        req, reqfile = self.stall_fixture()
+        test = self
+        class Worker:
+            phase, sent = "idle", []
+            def __init__(inner, request=None): pass
+            def status(inner, spec):
+                seq = 12 if Worker.phase == "done" else 10
+                return {"identity": spec["expected_identity"], "status": "idle", "completion_seq": seq}
+            def send(inner, spec, message):
+                Worker.sent.append(message)
+                for name in ("HANDOFF.md", "RESULT.md"):  # The resumed worker finishes the same task.
+                    (Path(req["cwd"]) / name).write_text(test.message(req), encoding="utf-8")
+                Worker.phase = "done"
+                return "accepted"
+        clock = iter(range(1000, 100000, 200))
+        def planner_wakes(seconds):
+            view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
+            if view["last_observation"]["status"] != "incomplete" or Worker.sent:
+                return  # The planner acts once, after the stall is reported.
+            event = next(e["id"] for e in view["events"] if e["data"]["report"]["status"] == "incomplete")
+            control.acknowledge(self.state, event, *self.actor())
+            review = Path(req["cwd"]) / "REVIEW.md"
+            review.write_text(self.message(req) + "\nVerdict: repair\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "still open"):  # A pause is not reviewable.
+                control.record_review(self.state, event, *self.actor(), review, "repair")
+            self.assertEqual(scheduler.continue_task(self.state, req["task_id"], *self.actor(),
+                                                     transport=Worker())["status"], "CONTINUE_SUBMITTED")
+            with self.assertRaisesRegex(ValueError, "already received"):
+                scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=Worker())
+        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), \
+                patch.object(monitor, "Transport", Worker), \
+                patch.object(monitor.time, "time", side_effect=lambda: next(clock)), \
+                patch.object(monitor.time, "sleep", side_effect=planner_wakes), redirect_stdout(io.StringIO()):
+            monitor.main()
+        self.assertEqual(len(Worker.sent), 1)
+        self.assertIn("Continue task " + req["task_id"], Worker.sent[0])
+        self.assertIn(req["nonce"], Worker.sent[0])
+        view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
+        self.assertEqual([e["data"]["report"]["status"] for e in view["events"]], ["incomplete", "review_ready"])
+        kinds = [j["kind"] for j in view["journal"]]
+        self.assertLess(kinds.index("continue_reserved"), kinds.index("continue_submitted"))
+        self.assertEqual(json.loads((reqfile.parent / "monitor_summary.json").read_text())["status"], "review_ready")
+        ready = next(e["id"] for e in view["events"] if e["data"]["report"]["status"] == "review_ready")
+        control.acknowledge(self.state, ready, *self.actor())
+        review = Path(req["cwd"]) / "REVIEW.md"
+        review.write_text(self.message(req) + "\nVerdict: accept\n", encoding="utf-8")
+        control.record_review(self.state, ready, *self.actor(), review, "accept")
+        self.assertTrue(scheduler.snapshot(self.state, req["task_id"])["tasks"][0]["acceptance_valid"])
+
+    def test_continue_refuses_unsafe_or_repeated_prompts(self):
+        req, _ = self.stall_fixture()
+        def observe(status, episode=1):
+            scheduler.record_observation(self.state, req, {"task_id": req["task_id"], "nonce": req["nonce"],
+                                                           "status": status, "stall_episode": episode})
+        for status in ("blocked", "adapter_error", "working"):
+            observe(status)
+            with self.subTest(status=status), self.assertRaisesRegex(ValueError, "only while"):
+                scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=self.fake)
+        observe("incomplete")
+        busy = FakeTransport(); busy.status = lambda spec: {"identity": spec["expected_identity"], "status": "working",
+                                                             "completion_seq": 10}
+        with self.assertRaisesRegex(ValueError, "not idle"):
+            scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=busy)
+        moved = FakeTransport(); moved.status = lambda spec: {"identity": dict(spec["expected_identity"], terminal="x"),
+                                                               "status": "idle", "completion_seq": 10}
+        with self.assertRaisesRegex(ValueError, "identity changed"):
+            scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=moved)
+        with self.assertRaises(ValueError):
+            scheduler.continue_task(self.state, req["task_id"], self.controller["instance_id"],
+                                    self.controller["version"], "side", transport=self.fake)
+        self.assertEqual(self.fake.messages, [self.message(req)])  # Only the original dispatch was sent.
+        self.fake.error = TimeoutError("send lost")
+        self.assertEqual(scheduler.continue_task(self.state, req["task_id"], *self.actor(),
+                                                 transport=self.fake)["status"], "CONTINUE_UNCERTAIN")
+        self.fake.error = None
+        with self.assertRaisesRegex(ValueError, "already received"):  # Uncertain counts; never retried.
+            scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=self.fake)
+        observe("incomplete", 2)
+        self.assertEqual(scheduler.continue_task(self.state, req["task_id"], *self.actor(),
+                                                 transport=self.fake)["status"], "CONTINUE_SUBMITTED")
+        observe("incomplete", 3)
+        with self.assertRaisesRegex(ValueError, "budget exhausted"):
+            scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=self.fake)
+        self.assertEqual(len(self.fake.messages), 3)
+
+    def test_permission_prompt_blocks_dispatch_with_owner_action_and_no_send(self):
+        req = self.request()
+        blocked = FakeTransport()
+        blocked.status = lambda spec: {"identity": spec["expected_identity"], "status": "blocked", "completion_seq": 10}
+        with self.assertRaisesRegex(ValueError, "permission/approval prompt.*nothing was sent"):
+            scheduler.dispatch(self.state, req, self.message(req), *self.actor(), transport=blocked)
+        self.assertEqual(blocked.messages, [])
+        self.assertEqual(self.send(req)["status"], "SUBMITTED")  # After the Owner answers, dispatch works.
+
+    def test_permission_prompt_mid_task_escalates_once_and_monitor_resumes(self):
+        req, reqfile = self.stall_fixture()
+        test = self
+        states = iter(["blocked", "blocked", "working", "done"])
+        class Worker:
+            def __init__(inner, request=None): pass
+            def status(inner, spec):
+                state = next(states)
+                if state == "done":
+                    for name in ("HANDOFF.md", "RESULT.md"):
+                        (Path(req["cwd"]) / name).write_text(test.message(req), encoding="utf-8")
+                    return {"identity": spec["expected_identity"], "status": "idle", "completion_seq": 11}
+                return {"identity": spec["expected_identity"], "status": state, "completion_seq": 10}
+        out = io.StringIO()
+        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), patch.object(monitor, "Transport", Worker), \
+                patch.object(monitor.time, "sleep"), redirect_stdout(out):
+            monitor.main()
+        reports = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual([r["status"] for r in reports], ["blocked", "blocked", "working", "review_ready"])
+        self.assertIn("permission/approval prompt", reports[0]["anomaly_summary"])
+        view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
+        self.assertEqual([e["data"]["report"]["status"] for e in view["events"]], ["blocked", "review_ready"])
+        with self.assertRaisesRegex(ValueError, "already|only while|running"):
+            scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=self.fake)
+
+    def test_closing_a_stalled_attempt_stops_its_monitor_without_new_events(self):
+        req, reqfile = self.stall_fixture()
+        class Idle:
+            def __init__(inner, request=None): pass
+            def status(inner, spec): return {"identity": spec["expected_identity"], "status": "idle", "completion_seq": 10}
+        clock = iter(range(1000, 100000, 200))
+        def planner_closes(seconds):
+            if scheduler.snapshot(self.state, req["task_id"])["tasks"][0]["last_observation"]["status"] != "incomplete":
+                return
+            note = Path(req["cwd"]) / "TERMINATION.md"
+            note.write_text(req["task_id"] + " " + req["nonce"] + "\nOutcome: terminated\nInspected: worker out of quota.\n",
+                            encoding="utf-8")
+            scheduler.reconcile(self.state, req["task_id"], "terminated", note, *self.actor())
+        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), patch.object(monitor, "Transport", Idle), \
+                patch.object(monitor.time, "time", side_effect=lambda: next(clock)), \
+                patch.object(monitor.time, "sleep", side_effect=planner_closes), redirect_stdout(io.StringIO()):
+            monitor.main()
+        summary = json.loads((reqfile.parent / "monitor_summary.json").read_text())
+        self.assertEqual(summary["status"], "monitoring_stopped")
+        view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
+        self.assertEqual([e["data"]["report"]["status"] for e in view["events"]], ["incomplete"])
+        self.assertFalse(view["claim_held"])
+
     def test_monitor_crash_restores_delivery_grace_instead_of_resetting_it(self):
         req = self.request(); self.send(req); req = self.confirm(req)
         reqfile = Path(req["cwd"]) / "request.json"
@@ -552,11 +730,15 @@ class SchedulerTests(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt): monitor.main()
         checkpoint = json.loads((reqfile.parent / "monitor_checkpoint.json").read_text())
         self.assertEqual(checkpoint["idle_since"]["delivery_since"], 1000)
+        stop = lambda seconds: (reqfile.parent / "STOP_MONITOR").write_text("stop", encoding="utf-8")
         with patch.object(sys, "argv", argv), patch.object(monitor, "Transport", MissingDelivery), \
-                patch.object(monitor.time, "time", return_value=1121):
+                patch.object(monitor.time, "time", return_value=1121), \
+                patch.object(monitor.time, "sleep", side_effect=stop):
             monitor.main()
         view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
-        self.assertEqual(view["last_observation"]["status"], "incomplete")
+        stalls = [e["data"]["report"] for e in view["events"] if e["data"]["report"]["status"] == "incomplete"]
+        self.assertEqual(len(stalls), 1)
+        self.assertEqual(stalls[0]["elapsed_seconds"], 121)
         self.assertTrue(view["claim_held"])
 
     def test_monitor_crash_after_summary_replays_event_without_query_or_send(self):
@@ -592,12 +774,17 @@ class SchedulerTests(unittest.TestCase):
         with patch.object(sys, "argv", argv), patch.object(monitor, "Transport", Lost), \
                 patch.object(monitor.time, "sleep", side_effect=KeyboardInterrupt("crash")):
             with self.assertRaises(KeyboardInterrupt): monitor.main()
+        sleeps = []
+        def stop(seconds):  # Let the outage escalate once, then end this fixture.
+            sleeps.append(seconds)
+            if len(sleeps) == 2: (reqfile.parent / "STOP_MONITOR").write_text("stop", encoding="utf-8")
         with patch.object(sys, "argv", argv), patch.object(monitor, "Transport", Lost), \
-                patch.object(monitor.time, "sleep") as sleep:
+                patch.object(monitor.time, "sleep", side_effect=stop):
             monitor.main()
-        self.assertEqual(sleep.call_args_list[0].args[0], 10)
+        self.assertEqual(sleeps[0], 10)
         view = scheduler.snapshot(self.state)["tasks"][0]
-        self.assertEqual(view["last_observation"]["consecutive_errors"], 3)
+        outage = [e["data"]["report"] for e in view["events"] if e["data"]["report"]["status"] == "adapter_error"]
+        self.assertEqual([r["consecutive_errors"] for r in outage], [3])
         self.assertTrue(view["claim_held"])
 
 

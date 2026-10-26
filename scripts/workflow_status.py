@@ -86,7 +86,9 @@ def summarize(state, task=None, stale_after=900, now=None):
             phase, role, action = "awaiting_review", reviewer, "acknowledge_and_review"
         elif observation.get("status") in ("failed", "exited") or any(value in ("failed", "exited") for value in reports):
             phase, role, action = "failed", controller, "inspect_termination"
-        elif observation.get("status") in ("adapter_error", "monitor_timeout", "incomplete", "identity_changed", "unknown_status", "monitoring_stopped"):
+        elif observation.get("status") == "incomplete":
+            phase, role, action = "needs_inspection", controller, "continue_or_close"
+        elif observation.get("status") in ("adapter_error", "monitor_timeout", "blocked", "identity_changed", "unknown_status", "monitoring_stopped"):
             phase, role, action = "needs_inspection", controller, "inspect_monitor_and_worker"
         else:
             phase, role, action = "executing", worker, "await_delivery"
@@ -141,6 +143,7 @@ def dashboard_details(state, summary=None):
             roles.setdefault(row["role"], {"role": row["role"], "bindings": [], "tasks": []})["bindings"].append({
                 "status": row["status"], "mode": data["mode"], "harness": spec.get("harness", "unknown"),
                 "adapter": spec["adapter"], "version": data["version"],
+                "pane": spec.get("pane") if spec["adapter"] == "herdr" else None,
                 "context_policy": data["context_policy"], "instance_id": data["instance_id"][:8],
                 "bound_at": data.get("created_at"),
             })

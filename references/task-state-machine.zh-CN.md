@@ -35,3 +35,8 @@ finished 使旧接口的角色槽位在交付／失败后可用，但调度器�
 
 返工新建限定范围任务，使用新 ID／nonce，按需要填写新 generation 和已封存父审核。
 调度器不自动重做失败任务，不根据缺少更新推断取消。
+
+`incomplete`、`blocked` 和 `adapter_error` 是可恢复的暂停：每次停顿一个事件，监控继续，
+尝试未关闭时不能审核。受限的 `continue`（日志依次为 `continue_reserved`，然后是
+`continue_submitted`、`continue_uncertain` 或 `continue_not_sent`）让同一次尝试在
+`incomplete` 后继续，不是新的派工。

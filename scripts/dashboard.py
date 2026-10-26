@@ -26,7 +26,7 @@ import webbrowser
 import workflow_control as control
 import workflow_scheduler as scheduler
 import workflow_status
-from monitor_task import Transport, identity_matches, sequence, validate_request
+from monitor_task import STALLED, Transport, identity_matches, sequence, validate_request
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -283,6 +283,7 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
   padding:11px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); font-size:12px }
 .meta-key { color:var(--muted) } .meta-value { font-weight:650; overflow-wrap:anywhere }
 .role-tasks { margin:10px 0 0; font-size:12px; color:var(--muted); overflow-wrap:anywhere }
+.role-pane { margin:6px 0 0; font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--accent) }
 .role-summary { margin:5px 0; font-size:12px; color:var(--muted) }
 .technical { margin-top:9px; font-size:12px; color:var(--muted) }
 .technical summary { cursor:pointer; font-weight:700; color:var(--accent) }
@@ -376,7 +377,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     <h1>Workflow Dashboard</h1><p class="sub state-path" id="state" translate="no">Loading state...</p>
     <p class="sub" id="goal"></p></div>
     <div class="toolbar"><label class="inline-label"><input id="auto" type="checkbox" checked>Update page every 5s</label>
-      <button id="refresh" type="button">Refresh page</button><button id="probe" type="button">Check workers now</button>
+      <button id="refresh" type="button">Refresh page</button><button id="probe" type="button">Check agents now</button>
       <button id="chat-open" type="button" class="hidden">Chat</button>
       <button id="lang" type="button" translate="no" aria-label="Language">&#x4e2d;&#x6587;</button>
       <button id="switch" type="button" class="hidden">Choose workflow</button></div></header>
@@ -428,8 +429,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
     <section class="panel"><div class="panel-head"><h2>Alerts & guidance</h2>
       <span class="panel-caption">Meaning and next step</span></div><div id="alerts" class="list"></div></section>
-    <section class="panel" id="probe-panel"><div class="panel-head"><h2>Current worker check</h2>
-      <span class="panel-caption">On demand only</span></div><p class="muted">The page refresh reads saved records. Use Check workers now to contact active workers.</p>
+    <section class="panel" id="probe-panel"><div class="panel-head"><h2>Current agent check</h2>
+      <span class="panel-caption">On demand only</span></div><p class="muted">The page refresh reads saved records. Use Check agents now to contact active agents.</p>
       <p id="probe-time" class="muted"></p><div id="probe-result" class="list"></div>
       <div class="small-actions"><button id="probe-top" type="button">Back to top</button>
         <button id="probe-clear" type="button">Clear</button></div></section>
@@ -488,6 +489,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   let preview = null;
   let lastData = null;
   const chatSessions = new Map();
+  const checkedNames = new Map();
+  let checkedState = null;
+  const paneKey = (role, binding) => role + ':' + binding.instance_id;
+  const sourceName = source => ({awo:'AWO name', custom:'Custom name', none:'No name',
+    awo_stale:'Name differs from role'})[source] || 'Name unavailable';
   let chatBusyKey = '';
   const chatSession = role => {
     if (!chatSessions.has(role)) chatSessions.set(role, {draft:'', entries:[], output:null, status:''});
@@ -611,6 +617,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     acknowledge_and_review:'Acknowledge the update and review the evidence',
     inspect_termination:'Inspect why the worker stopped',
     inspect_monitor_and_worker:'Check the monitor record and worker',
+    continue_or_close:'Worker stopped before delivery: continue it once, or close the attempt',
     await_delivery:'Wait for the worker to deliver its result',
     inspect_notification_and_inbox:'Check the reviewer inbox; do not resend blindly',
     resolve_scheduling_block:'Resolve the start blocker',
@@ -659,13 +666,13 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     } : {
       label:'No live check yet', title:'No monitoring update yet', tone:'info',
       explanation:'The ledger has no saved monitoring check for this task. A missing check alone does not mean the worker stopped.',
-      next:'If you need a current status, use Check workers now before taking action.'
+      next:'If you need a current status, use Check agents now before taking action.'
     };
     if (code === 'observation_stale') return {
       label:'Live check is old', title:'Last monitoring update is old', tone:finished ? 'info' : 'check',
       explanation:'The latest saved check is older than 15 minutes. It is a past observation, not proof of the worker\'s current state.',
       next:finished ? 'No action is needed unless you are reviewing this task\'s history.' :
-        'Use Check workers now for a current check, then review the task\'s monitor record if the status still looks wrong.'
+        'Use Check agents now for a current check, then review the task\'s monitor record if the status still looks wrong.'
     };
     if (code === 'invalid_observation_timestamp') return {
       label:'Check time unavailable', title:'Monitoring time cannot be read', tone:'check',
@@ -707,14 +714,28 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       add(card, 'p', 'role-tasks', role.tasks.length ?
         role.tasks.length + ' open task' + (role.tasks.length === 1 ? '' : 's') + ': ' +
           role.tasks.map(t => taskName(data, t.task_id)).join('; ') : 'No open tasks');
+      if (current && current.pane) {
+        const checked = checkedNames.get(paneKey(role.role, current));
+        const line = add(card, 'p', 'role-pane');
+        add(line, 'span', 'raw', 'Herdr ' + current.pane);
+        if (checked) {
+          add(line, 'span', '', ' / ');
+          if (checked.name) { add(line, 'span', 'raw', checked.name); add(line, 'span', '', ' '); }
+          add(line, 'span', '', '(');
+          add(line, 'span', '', sourceName(checked.label_source));
+          add(line, 'span', '', ')');
+        }
+      }
       if (role.bindings.length) {
         const extra = technical(card, 'Connection details', 'conn:' + role.role);
         for (const b of role.bindings) {
           const binding = add(extra, 'div', 'binding');
           if (role.bindings.length > 1) add(binding, 'span', 'badge ' + b.status, named(b.status, {active:'Assigned', pending:'Setup pending'}));
           const meta = add(binding, 'div', 'role-meta');
-          for (const [key, value] of [['Mode', b.mode], ['Harness', b.harness], ['Adapter', b.adapter],
-            ['Version', b.version], ['Context policy', b.context_policy], ['Instance', b.instance_id], ['Bound', b.bound_at]]) {
+          const rows = [['Mode', b.mode], ['Harness', b.harness], ['Adapter', b.adapter]];
+          if (b.pane) rows.push(['Herdr pane', b.pane]);
+          rows.push(['Version', b.version], ['Context policy', b.context_policy], ['Instance', b.instance_id], ['Bound', b.bound_at]);
+          for (const [key, value] of rows) {
             add(meta, 'span', 'meta-key', key);
             const shown = key === 'Bound' && value && !Number.isNaN(new Date(value).getTime()) ?
               new Date(value).toLocaleString() : value;
@@ -997,6 +1018,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   }
   async function refresh() {
     try { const data = await api('/api/status'); lastData = data; id('error').textContent = '';
+      if (checkedState !== data.state) { checkedNames.clear(); checkedState = data.state; }
       picker(data, picking || data.state === null);
       if (data.state === null) { id('state').textContent = 'No workflow open'; id('goal').textContent = '';
         id('updated').textContent = 'Choose a workflow data folder to begin'; return; }
@@ -1089,23 +1111,29 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     reviewPreview = null;
   });
   id('probe').addEventListener('click', async () => {
-    id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active workers...');
+    id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active agents...');
     id('probe-time').textContent = ''; id('probe-panel').scrollIntoView({behavior:'smooth', block:'start'});
     try { const data = await api('/api/probe', {}); root.replaceChildren();
       id('probe-time').textContent = 'Checked at ' + new Date().toLocaleTimeString() +
-        '. Shows live worker status only; tasks appear above only when dispatched through this workflow ledger.';
-      if (!data.workers.length) empty(root, 'No active workers to check');
-      for (const w of data.workers) {
+        '. Shows live agent status; tasks appear above only when dispatched through this workflow ledger.';
+      if (!data.agents.length) empty(root, 'No active agents to check');
+      for (const w of data.agents) {
+        if (w.instance_id && w.pane && !w.error) checkedNames.set(w.role + ':' + w.instance_id.slice(0, 8),
+          {name:w.name, label_source:w.label_source});
         const item = add(root, 'div', 'list-item');
-        add(item, 'strong', '', w.role + ': ' + (w.error ? 'Could not check worker' :
-          w.identity_matches === false ? 'Worker identity changed; inspect before acting' :
+        add(item, 'strong', '', w.role + ': ' + (w.error ? 'Could not check agent' :
+          w.identity_matches === false ? 'Agent identity changed; inspect before acting' :
           named(w.status, {idle:'Available', working:'Working', blocked:'Needs help',
             failed:'Failed', exited:'Exited', unknown:'Status unknown'})));
         if (w.error) add(item, 'p', 'error', w.error);
         const extra = technical(item, 'Check details');
         detailLine(extra, 'Status', w.status); detailLine(extra, 'Completion sequence', w.completion_seq);
         detailLine(extra, 'Identity matches', w.identity_matches);
+        detailLine(extra, 'Mode', w.mode); detailLine(extra, 'Herdr pane', w.pane);
+        if (w.pane) { detailLine(extra, 'Pane name', w.name || '(unnamed)');
+          detailLine(extra, 'Name source', sourceName(w.label_source)); }
       }
+      if (lastData) roles(lastData);
     } catch (error) { empty(root, error.message); } finally { id('probe').disabled = false; }
   });
   id('probe-top').addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
@@ -1155,7 +1183,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); chatSend(); } });
   id('chat-open').addEventListener('click', () => { id('chat-panel').scrollIntoView({behavior:'smooth', block:'start'});
     id('chat-input').focus(); });
-  id('probe-clear').addEventListener('click', () => { id('probe-result').replaceChildren(); id('probe-time').textContent = ''; });
+  id('probe-clear').addEventListener('click', () => { id('probe-result').replaceChildren(); id('probe-time').textContent = ''; checkedNames.clear(); if (lastData) roles(lastData); });
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     await navigator.clipboard.writeText(id(button.dataset.copy).textContent); button.textContent = 'Copied';
   }));
@@ -1519,18 +1547,42 @@ class DashboardServer(ThreadingHTTPServer):
             raise ValueError("open a workflow state first")
         with scheduler._read_database(self.state) as con:
             bindings = [json.loads(row[0]) for row in con.execute(
-                "SELECT data FROM bindings WHERE status='active' AND mode='worker' ORDER BY role")]
-        result = []
+                "SELECT data FROM bindings WHERE status='active' ORDER BY role")]
+        result, sessions = [], {}
+        transport = self.transport_factory({"monitor": {"command_timeout_seconds": 10}})
         for binding in bindings:
             spec = binding["spec"]
+            item = {"role": binding["role"], "mode": binding["mode"],
+                    "instance_id": binding["instance_id"],
+                    "pane": spec.get("pane") if spec["adapter"] == "herdr" else None,
+                    "name": None, "label_source": "none"}
             try:
-                observed = self.transport_factory({"monitor": {"command_timeout_seconds": 10}}).status(spec)
-                result.append({"role": binding["role"], "status": observed.get("status"),
-                               "completion_seq": observed.get("completion_seq"),
-                               "identity_matches": identity_matches(observed.get("identity", {}), spec["expected_identity"])})
+                observed = transport.status(spec)
+                item.update(status=observed.get("status"), completion_seq=observed.get("completion_seq"),
+                            identity_matches=identity_matches(observed.get("identity", {}), spec["expected_identity"]))
+                if spec["adapter"] == "herdr":
+                    key = (spec["executable"], spec["session"])
+                    if key not in sessions:
+                        try:
+                            sessions[key] = transport.agents(spec)
+                        except Exception as exc:
+                            sessions[key] = exc
+                    agents = sessions[key]
+                    if isinstance(agents, Exception):
+                        item["name_error"] = str(agents)[:300]
+                        item["name"] = observed.get("pane_name")
+                    else:
+                        agent = next((a for a in agents if a.get("terminal_id") == spec["expected_identity"].get("terminal")
+                                      and a.get("pane_id") == spec.get("pane")), None)
+                        if agent is None:
+                            item["name_error"] = "bound pane was not found in Herdr session"
+                        else:
+                            item["name"] = agent.get("name")
+                    item["label_source"] = control.label_source(item["name"], binding["role"])
             except Exception as exc:
-                result.append({"role": binding["role"], "error": str(exc)[:300]})
-        return {"workers": result}
+                item["error"] = str(exc)[:300]
+            result.append(item)
+        return {"agents": result}
 
     def prepare(self, payload, *, confirm=False):
         if confirm and "nonce" not in payload:
@@ -1656,11 +1708,16 @@ class DashboardServer(ThreadingHTTPServer):
             request = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (event["task"],)).fetchone()[0])["request"]
             transitions = control.config_of(con).get("workflow", {}).get("transitions", {})
             status = event["status"]
+            task_status = con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0]
+            delivery = json.loads(event["data"])["report"]["status"]
         base = {"event_id": event_id, "task_id": event["task"], "nonce": event["nonce"], "event_status": status,
                 "actor": self.actor, "version": self.version}
         if status == "pending":
             step = dict(base, step="acknowledge")
         elif status == "acknowledged":
+            if delivery in STALLED and task_status == "running":
+                raise ValueError("delivery is still open (" + delivery + "); wait for review_ready, continue the "
+                                 "worker, or close the attempt before recording a review")
             verdict = payload.get("verdict")
             if verdict not in transitions:
                 raise ValueError("choose a verdict configured in workflow.transitions")

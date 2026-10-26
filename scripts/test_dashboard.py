@@ -28,6 +28,8 @@ class CountingTransport(FakeTransport):
     def __init__(self):
         super().__init__()
         self.status_calls = 0
+        self.agent_calls = 0
+        self.listed = []
         self.identity_drift = False
 
     def status(self, spec):
@@ -39,6 +41,10 @@ class CountingTransport(FakeTransport):
 
     def output(self, spec):
         return "recent output for " + spec["role"]
+
+    def agents(self, spec):
+        self.agent_calls += 1
+        return self.listed
 
 
 class DashboardTests(unittest.TestCase):
@@ -127,7 +133,42 @@ class DashboardTests(unittest.TestCase):
                          {"planner", "executor", "second"})
         self.assertEqual(self.fake.status_calls, 0)
         self.assertEqual(self.http("POST", "/api/probe")[0], 200)
-        self.assertEqual(self.fake.status_calls, 2)
+        self.assertEqual(self.fake.status_calls, 3)
+
+    def test_probe_all_modes_and_one_list_per_herdr_session(self):
+        with control.database(self.state) as con:
+            for role, pane, name in (("planner", "p1", "awo:planner"),
+                                     ("executor", "p2", "My work"), ("second", "p3", None)):
+                row = con.execute("SELECT id,data FROM bindings WHERE role=? AND status='active'", (role,)).fetchone()
+                binding = json.loads(row["data"])
+                spec = binding["spec"]
+                spec.update(adapter="herdr", executable="fake-herdr", session="offline", pane=pane)
+                spec["expected_identity"]["pane"] = pane
+                con.execute("UPDATE bindings SET data=? WHERE id=?", (json.dumps(binding), row["id"]))
+                self.fake.listed.append({"terminal_id": spec["expected_identity"]["terminal"],
+                                         "pane_id": pane, "name": name})
+        self.assertEqual(self.http("GET", "/api/status")[0], 200)
+        self.assertEqual((self.fake.status_calls, self.fake.agent_calls), (0, 0))
+        status, body, _ = self.http("POST", "/api/probe")
+        self.assertEqual(status, 200)
+        self.assertEqual((self.fake.status_calls, self.fake.agent_calls), (3, 1))
+        self.assertEqual({x["mode"] for x in body["agents"]}, {"controller", "worker"})
+        self.assertEqual({x["role"]: (x["name"], x["label_source"]) for x in body["agents"]},
+                         {"planner": ("awo:planner", "awo"), "executor": ("My work", "custom"),
+                          "second": (None, "none")})
+        self.assertTrue(all(x["identity_matches"] for x in body["agents"]))
+
+    def test_probe_failure_for_one_agent_keeps_other_results(self):
+        original = self.fake.status
+        def status(spec):
+            if spec["role"] == "executor":
+                raise RuntimeError("agent unavailable")
+            return original(spec)
+        self.fake.status = status
+        code, body, _ = self.http("POST", "/api/probe")
+        self.assertEqual(code, 200)
+        self.assertIn("agent unavailable", next(x for x in body["agents"] if x["role"] == "executor")["error"])
+        self.assertTrue(next(x for x in body["agents"] if x["role"] == "planner")["identity_matches"])
 
     def test_status_includes_bindings_inbox_dag_dependencies_resources(self):
         first = self.request("DAG-A", "executor")

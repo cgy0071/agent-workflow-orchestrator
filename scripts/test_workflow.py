@@ -1,5 +1,7 @@
 """Offline integration checks for binding, switching, review, and inbox routing."""
+from contextlib import redirect_stdout
 import copy
+import io
 import json
 from pathlib import Path
 import shutil
@@ -15,6 +17,8 @@ import workflow_control as control
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
+        from test_scheduler import fake_labels
+        self.labels = fake_labels(self)
         self.sandbox = (Path(__file__).resolve().parents[1] / "runtime").resolve()
         self.sandbox.mkdir(exist_ok=True)
         self.root = self.sandbox / ("test-workflow-" + uuid.uuid4().hex)
@@ -110,6 +114,94 @@ class WorkflowTests(unittest.TestCase):
         with patch.object(monitor.Transport, "run", return_value=json.dumps({"result": {"agent": agent}})):
             with self.assertRaisesRegex(ValueError, "agent is blocked"):
                 control.activate(self.state, "paper", spec["expected_identity"])
+
+    def herdr_spec(self, role, terminal, pane):
+        spec = self.spec(role)
+        spec.update(adapter="herdr", executable="herdr", session="offline", pane=pane)
+        spec["expected_identity"] = {"kind": "pi", "terminal": terminal, "launch_cwd": str(self.root), "pane": pane}
+        return spec
+
+    def test_active_herdr_binding_names_its_pane_and_switch_clears_only_our_name(self):
+        first = self.herdr_spec("paper", "t-old", "p1")
+        bound = control.bind(self.state, "paper", first, first["expected_identity"], "advisor")
+        self.assertEqual((bound["label"], self.labels.calls), ("awo:paper", [("p1", "awo:paper")]))
+        self.labels.calls.clear()
+        control.bind(self.state, "paper", first, first["expected_identity"], "advisor", defer=True, reason="later")
+        self.assertEqual(self.labels.calls, [])  # A pending binding does not rename anything.
+        with control.database(self.state) as con:
+            con.execute("DELETE FROM bindings WHERE role='paper' AND status='pending'")
+        second = self.herdr_spec("paper", "t-new", "p2")
+        self.labels.listed = [{"terminal_id": "t-old", "pane_id": "p1", "name": "awo:paper"},
+                              {"terminal_id": "t-new", "pane_id": "p2", "name": None}]
+        moved = control.bind(self.state, "paper", second, second["expected_identity"], "advisor", reason="new pane")
+        self.assertEqual(self.labels.calls, [("p2", "awo:paper"), ("p1", None)])
+        self.assertEqual(moved["cleared"], "p1")
+        self.labels.calls.clear()
+        self.labels.listed = [{"terminal_id": "t-new", "pane_id": "p2", "name": "my own name"},
+                              {"terminal_id": "t-third", "pane_id": "p3", "name": None}]
+        third = self.herdr_spec("paper", "t-third", "p3")
+        control.bind(self.state, "paper", third, third["expected_identity"], "advisor", reason="third pane")
+        self.assertEqual(self.labels.calls, [("p3", "awo:paper")])  # A name the user chose is kept.
+
+    def test_failed_rename_never_blocks_binding(self):
+        self.labels.label = lambda spec, name=None: (_ for _ in ()).throw(RuntimeError("herdr unavailable"))
+        spec = self.herdr_spec("paper", "t1", "p1")
+        bound = control.bind(self.state, "paper", spec, spec["expected_identity"], "advisor")
+        self.assertIn("herdr unavailable", bound["label_error"])
+        with control.database(self.state) as con:
+            self.assertEqual(control.active(con, "paper")["instance_id"], bound["instance_id"])
+
+    def test_binding_preserves_custom_name_and_replaces_stale_awo_name(self):
+        spec = self.herdr_spec("paper", "t1", "p1")
+        self.labels.listed = [{"agent": "pi", "cwd": str(self.root),
+                               "terminal_id": "t1", "pane_id": "p1", "name": "My research"}]
+        bound = control.bind(self.state, "paper", spec, spec["expected_identity"], "advisor")
+        self.assertEqual(self.labels.calls, [])
+        self.assertEqual(bound["label_actions"][0],
+                         {"pane": "p1", "original_label": "My research", "action": "kept"})
+        self.labels.listed[0]["name"] = "awo:executor"
+        result = control.label_panes(self.state)
+        self.assertEqual((self.labels.calls, result["panes"][0]["action"]), ([('p1', 'awo:paper')], 'set'))
+        self.assertEqual(next(r for r in control.roles(self.state)["roles"] if r["role"] == "paper")["label_source"],
+                         "awo_stale")
+
+    def test_binding_query_failure_is_nonblocking_and_force_is_explicit(self):
+        spec = self.herdr_spec("paper", "t1", "p1")
+        self.labels.agents = lambda _spec: (_ for _ in ()).throw(RuntimeError("list unavailable"))
+        bound = control.bind(self.state, "paper", spec, spec["expected_identity"], "advisor")
+        self.assertIn("list unavailable", bound["label_error"])
+        self.assertEqual(self.labels.calls, [])
+        self.assertEqual(bound["label_actions"][0]["action"], "failed")
+        del self.labels.agents
+        self.labels.listed = [{"agent": "pi", "terminal_id": "t1", "cwd": str(self.root),
+                               "pane_id": "p1", "name": "My research"}]
+        self.assertEqual(control.label_panes(self.state)["panes"][0]["action"], "kept")
+        self.assertEqual(self.labels.calls, [])
+        forced = control.label_panes(self.state, force=True)
+        self.assertEqual(forced["panes"][0]["action"], "set")
+        self.assertEqual(self.labels.calls, [("p1", "awo:paper")])
+
+    def test_roles_view_maps_panes_and_lists_unbound_agents_then_syncs_labels(self):
+        spec = self.herdr_spec("paper", "t1", "p1")
+        control.bind(self.state, "paper", spec, spec["expected_identity"], "advisor")
+        self.labels.listed = [
+            {"agent": "pi", "terminal_id": "t1", "cwd": str(self.root), "pane_id": "p1", "agent_status": "idle",
+             "name": None, "terminal_title_stripped": "pi - work"},
+            {"agent": "pi", "terminal_id": "t9", "cwd": str(self.root), "pane_id": "p9", "agent_status": "idle",
+             "name": "awo:executor", "terminal_title_stripped": "pi - work"},
+            {"agent": "codex", "terminal_id": "t8", "cwd": str(self.root), "pane_id": "p8", "agent_status": "idle",
+             "name": "notes", "terminal_title_stripped": "codex"}]
+        view = control.roles(self.state)
+        paper = next(r for r in view["roles"] if r["role"] == "paper")
+        self.assertEqual((paper["pane"], paper["live"], paper["expected_label"]), ("p1", "identity matches", "awo:paper"))
+        self.assertEqual(next(r for r in view["roles"] if r["role"] == "executor")["live"], "not a Herdr binding")
+        self.assertEqual({a["pane"] for a in view["unbound"]}, {"p9", "p8"})
+        self.labels.calls.clear()
+        result = control.label_panes(self.state)
+        self.assertEqual(self.labels.calls, [("p1", "awo:paper"), ("p9", None)])  # "notes" is not ours.
+        self.assertEqual(result["status"], "LABELS_SYNCED")
+        self.labels.listed = [a for a in self.labels.listed if a["terminal_id"] != "t1"]
+        self.assertIn("terminal not found", next(r for r in control.roles(self.state)["roles"] if r["role"] == "paper")["live"])
 
     def test_cli_inbox_policy_overrides_spec_before_live_query(self):
         spec = self.spec("paper", True)
@@ -285,23 +377,46 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "monitor_summary.json").read_text())["status"], "review_ready")
         self.assertEqual(json.loads((self.root / "frozen_request.json").read_text()), req)
 
-    def test_error_budget_and_explicit_monitor_resumption(self):
+    def test_query_outage_escalates_once_and_keeps_watching_until_delivery(self):
         for name in ("RESULT.md", "HANDOFF.md"):
             (self.root / name).write_text("TASK-ONE nonce-one", encoding="utf-8")
         req = copy.deepcopy(self.req); req.pop("workflow_state")
         req["monitor"] = {"max_consecutive_errors": 2}
         reqfile = self.root / "request.json"
         reqfile.write_text(json.dumps(req), encoding="utf-8")
-        class Failing:
+        identity = req["worker"]["expected_identity"]
+        class Outage:
             calls = 0
             def __init__(self, request): pass
             def status(self, spec):
-                self.calls += 1
-                raise TimeoutError("query unavailable")
-        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), patch.object(monitor, "Transport", Failing), patch.object(monitor.time, "sleep"):
+                Outage.calls += 1
+                if Outage.calls <= 4: raise TimeoutError("query unavailable")
+                return {"identity": identity, "status": "done", "completion_seq": 11}
+        out = io.StringIO()
+        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), patch.object(monitor, "Transport", Outage), \
+                patch.object(monitor.time, "sleep"), redirect_stdout(out):
             monitor.main()
-        self.assertEqual(json.loads((self.root / "monitor_summary.json").read_text())["status"], "adapter_error")
+        reports = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual([r["status"] for r in reports],
+                         ["transient_error", "adapter_error", "adapter_error", "adapter_error", "review_ready"])
+        self.assertEqual({r.get("stall_episode") for r in reports if r["status"] == "adapter_error"}, {1})
+        self.assertEqual(json.loads((self.root / "monitor_summary.json").read_text())["status"], "review_ready")
+        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile), "--resume"]):
+            with self.assertRaises(ValueError): monitor.main()
+
+    def test_terminal_anomaly_still_needs_explicit_resumption(self):
+        for name in ("RESULT.md", "HANDOFF.md"):
+            (self.root / name).write_text("TASK-ONE nonce-one", encoding="utf-8")
+        req = copy.deepcopy(self.req); req.pop("workflow_state")
+        reqfile = self.root / "request.json"
+        reqfile.write_text(json.dumps(req), encoding="utf-8")
         identity = req["worker"]["expected_identity"]
+        class Other:
+            def __init__(self, request): pass
+            def status(self, spec): return {"identity": dict(identity, terminal="other"), "status": "idle", "completion_seq": 11}
+        with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), patch.object(monitor, "Transport", Other):
+            monitor.main()
+        self.assertEqual(json.loads((self.root / "monitor_summary.json").read_text())["status"], "identity_changed")
         class Ready:
             def __init__(self, request): pass
             def status(self, spec): return {"identity": identity, "status": "done", "completion_seq": 11}

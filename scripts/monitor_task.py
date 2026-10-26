@@ -18,6 +18,38 @@ class AdapterResponseError(ValueError):
     """An invalid read-only response; safe to query again within a finite budget."""
 
 
+# Recoverable anomalies: report once per stall episode, then keep watching the same attempt.
+# Quota, network, and approval pauses often end without any new task being sent.
+STALLED = ("incomplete", "blocked", "adapter_error")
+POLLING = ("working", "settling", "transient_error")
+
+
+def event_guidance(status, task_id="TASK_ID"):
+    """Next step for the controller that receives a delivery event."""
+    if status == "review_ready":
+        return ("Independently review delivery, changes and acceptance evidence; record accept/repair/reject "
+                "or missing evidence, then follow the configured workflow within existing authorization.")
+    if status == "incomplete":
+        return ("The worker went idle without a valid delivery, often after a quota, rate-limit or network "
+                "interruption. The monitor keeps watching this attempt. Do not record a review or resend the task. "
+                "When the worker can run again, send one bounded continuation with `workflow_scheduler.py continue "
+                "--task " + task_id + "`; if it cannot continue, inspect it and close the attempt with reconcile "
+                "--outcome terminated before planning new work.")
+    if status == "blocked":
+        return ("The worker is waiting, usually on a harness permission/approval prompt or a usage limit. "
+                "Ask the Owner to answer it in the worker's own harness; the monitor keeps watching and resumes "
+                "when the worker continues. Never answer approval dialogs automatically, do not resend, and do "
+                "not use continue while it is blocked. If the harness denied the permission instead, a continuation "
+                "cannot help: the Owner must change the harness permissions, or close the attempt.")
+    if status == "adapter_error":
+        return ("The monitor cannot query the worker, often a network or adapter outage. It keeps retrying with "
+                "backoff. This does not prove the worker stopped; do not resend.")
+    if status in ("failed", "exited"):
+        return ("The worker ended without a valid delivery. Inspect it, close the attempt with reconcile "
+                "--outcome terminated, then plan a new scoped task if work remains.")
+    return "Inspect the specific anomaly before any action. Do not resend or treat idle as success."
+
+
 def sequence(value):
     if type(value) is not int or value < 0:
         raise AdapterResponseError("completion sequence must be a nonnegative JSON integer")
@@ -135,7 +167,7 @@ def herdr_prompt_unavailable(agent):
     if agent.get("launch_pending") is True:
         return "agent launch is still pending"
     if agent.get("agent_status") == "blocked":
-        return "agent is blocked"
+        return "agent is blocked (usually a harness permission/approval prompt waiting for the Owner)"
     return None
 
 
@@ -169,7 +201,7 @@ class Transport:
             reason = herdr_prompt_unavailable(agent)
             state = {"identity": identity, "status": agent.get("agent_status"),
                      "completion_seq": sequence(agent.get(source)), "sequence_source": source,
-                     "prompt_available": reason is None}
+                     "prompt_available": reason is None, "pane_name": agent.get("name")}
             if reason: state["prompt_unavailable_reason"] = reason
             return state
         if adapter == "command":
@@ -186,6 +218,16 @@ class Transport:
         with Path(spec["output_path"]).open("rb") as stream:
             stream.seek(max(0, stream.seek(0, 2) - 65536))
             return stream.read().decode("utf-8", errors="replace")
+
+    def agents(self, spec):
+        """Every agent in the binding's Herdr session; read-only."""
+        return json.loads(self.herdr(spec, "list"))["result"]["agents"]
+
+    def label(self, spec, name=None):
+        """Set (or clear) the Herdr display name of the bound pane. The name is not an identity field."""
+        if name is None:
+            return self.herdr(spec, "rename", spec["pane"], "--clear")
+        return self.herdr(spec, "rename", spec["pane"], name)
 
     def reviewer_identity(self, spec):
         if spec["adapter"] == "herdr":
@@ -356,7 +398,10 @@ def inspect_once(request, transport, idle_since=None, now=None):
         # State-change counters can oscillate while one delivery is pending.
         timer = idle_since if state.get("sequence_source") == "state_change_seq" else None
         return "working", "", timer, None
-    if status in ("blocked", "exited", "failed"):
+    if status == "blocked":
+        return status, ("Worker is waiting, usually on a harness permission/approval prompt or usage limit; "
+                        "the Owner must answer it in the worker's harness. No approval answered or task resent."), idle_since, None
+    if status in ("exited", "failed"):
         return status, "Worker requires inspection; no approval answered or task resent.", idle_since, None
     if status not in ("idle", "done"):
         return "unknown_status", "Adapter returned unrecognized status.", idle_since, None
@@ -409,7 +454,10 @@ def notify_once(request, report, directory, transport):
         result = {"status": "inbox_only", "task_id": request["task_id"], "nonce": request["nonce"], "report": report}
         save_json(directory / "pending_event.json", result)
         return result
-    attempt = directory / "notification_attempt.json"
+    # One attempt per final status; a stall episode gets its own, so a later delivery is still announced.
+    episode = report.get("stall_episode") if report.get("status") in STALLED else None
+    attempt = directory / ("notification_attempt.json" if episode is None else
+                           "notification_attempt." + report["status"] + "." + str(episode) + ".json")
     try:
         with attempt.open("x", encoding="utf-8") as stream:
             json.dump({"task_id": request["task_id"], "nonce": request["nonce"],
@@ -426,21 +474,31 @@ def notify_once(request, report, directory, transport):
             message = ("Automatic task-status notification under existing Owner authorization; "
                        "this is not a new Owner instruction. Task " + request["task_id"] + ", nonce " +
                        request["nonce"] + ", status " + report["status"] + ". Read the frozen request "
-                       "and monitor evidence at " + str(directory) + ". If review_ready, independently "
+                       "and monitor evidence at " + str(directory) + ". " +
+                       event_guidance(report["status"], request["task_id"]) + " First "
                        "verify that this is the authorized main context. Side conversations are "
                        "advisory-only: do not acknowledge, accept, or dispatch from a side context. "
-                       "review delivery, changes and acceptance evidence; record accept/repair/reject "
-                       "or missing evidence, then follow the configured workflow within existing "
-                       "authorization. Otherwise inspect the specific anomaly. Never treat idle as "
-                       "success, answer approval dialogs, or blindly resend. One notification only.")
+                       "Never treat idle as success, answer approval dialogs, or blindly resend. "
+                       "One notification only.")
             reply = transport.send(reviewer, message)
             result = {"status": "submitted", "response": reply[:2000]}
     except Exception as exc:
         result = {"status": "delivery_uncertain", "error": str(exc)[:500]}
     result.update(task_id=request["task_id"], nonce=request["nonce"], request_sha256=object_hash(request),
                   authorization_sha256=object_hash(authorization), recorded_at=utc_now())
-    save_json(directory / "notification_result.json", result)
+    save_json(attempt.with_name(attempt.name.replace("notification_attempt", "notification_result")), result)
     return result
+
+
+def attempt_closed(request):
+    """True once the controller closed this attempt in the ledger (termination or release)."""
+    if not request.get("workflow_state"):
+        return False
+    from workflow_scheduler import _read_database
+    with _read_database(request["workflow_state"]) as con:
+        row = con.execute("SELECT status FROM tasks WHERE id=? AND nonce=?",
+                          (request["task_id"], request["nonce"])).fetchone()
+    return bool(row) and row[0] == "resolved"
 
 
 def main():
@@ -509,11 +567,22 @@ def main():
         started = time.time() if args.resume else checkpoint.get("started_at", time.time())
         idle_since = checkpoint.get("idle_since")
         errors = 0 if args.resume else checkpoint.get("consecutive_errors", 0)
+        episode = checkpoint.get("stall_episode", 0)
+        stalled = checkpoint.get("stalled", False)
+        escalated = checkpoint.get("escalated")
         config = request.get("monitor", {})
+
+        def save_checkpoint():
+            save_json(checkpoint_path, {"request_sha256": object_hash(request), "started_at": started,
+                                       "idle_since": idle_since, "consecutive_errors": errors,
+                                       "stall_episode": episode, "stalled": stalled, "escalated": escalated})
+
         while True:
             try:
                 if (directory / "STOP_MONITOR").exists():
                     status, detail, receipt = "monitoring_stopped", "Monitor stopped; worker not cancelled.", None
+                elif attempt_closed(request):
+                    status, detail, receipt = "monitoring_stopped", "Attempt closed in the ledger; worker not cancelled.", None
                 else:
                     status, detail, idle_since, receipt = inspect_once(request, transport, idle_since, now=time.time())
                 errors = 0
@@ -522,32 +591,51 @@ def main():
                 status = "transient_error" if errors < config.get("max_consecutive_errors", 3) else "adapter_error"
                 detail, receipt = str(exc)[:500], None
             except Exception as exc:
+                errors += 1
                 status, detail, receipt = "adapter_error", str(exc)[:500], None
+            if status in STALLED and not stalled:
+                episode, stalled = episode + 1, True
+            elif status in ("working", "settling"):
+                stalled = False  # A transient query error inside a stall does not end it.
             report = {"task_id": request["task_id"], "nonce": request["nonce"],
                       "status": status, "anomaly_summary": detail, "observed_at": utc_now(),
                       "consecutive_errors": errors, "elapsed_seconds": max(0, time.time() - started)}
-            save_json(checkpoint_path, {"request_sha256": object_hash(request), "started_at": started,
-                                       "idle_since": idle_since, "consecutive_errors": errors})
+            if status in STALLED:
+                report["stall_episode"] = episode
+            save_checkpoint()
             if receipt:
                 save_json(directory / "completion_receipt.json", receipt)
             limit = config.get("overall_timeout_seconds")
-            if status in ("working", "settling", "transient_error") and limit is not None and time.time() - started >= limit:
+            if status in POLLING + STALLED and limit is not None and time.time() - started >= limit:
+                report.pop("stall_episode", None)
                 report.update(status="monitor_timeout", anomaly_summary="Configured monitor limit reached; task not cancelled or accepted.")
             save_json(directory / "monitor_status.json", report)
-            if request.get("workflow_state"):
+            if request.get("workflow_state") and not report["anomaly_summary"].startswith("Attempt closed"):
                 from workflow_scheduler import record_observation
                 record_observation(request["workflow_state"], request, report)
             print(json.dumps(report, ensure_ascii=False), flush=True)
-            if report["status"] not in ("working", "settling", "transient_error"):
+            if report["status"] in STALLED:
+                key = report["status"] + ":" + str(episode)
+                if escalated != key:
+                    # Escalate once per stall episode, then keep watching the same attempt.
+                    if request.get("workflow_state"):
+                        from workflow_control import publish_event
+                        publish_event(request["workflow_state"], request, report, None)
+                    if args.notify:
+                        notify_once(request, report, directory, transport)
+                    escalated = key
+                    save_checkpoint()
+            elif report["status"] not in POLLING:
                 save_json(final, report)
-                if request.get("workflow_state"):
+                closed = report["anomaly_summary"].startswith("Attempt closed")
+                if request.get("workflow_state") and not closed:
                     from workflow_control import publish_event
                     publish_event(request["workflow_state"], request, report, receipt)
                 if args.notify and report["status"] != "monitoring_stopped":
                     notify_once(request, report, directory, transport)
                 return
             retry = min(config.get("retry_max_seconds", 60), config.get("retry_interval_seconds", 5) * (2 ** min(max(errors - 1, 0), 16)))
-            time.sleep(retry if status == "transient_error" else config.get("interval_seconds", 300))
+            time.sleep(retry if status in ("transient_error", "adapter_error") else config.get("interval_seconds", 300))
     finally:
         lock.unlink(missing_ok=True)
 
