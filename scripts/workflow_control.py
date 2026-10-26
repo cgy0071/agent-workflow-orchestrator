@@ -57,6 +57,9 @@ def validate_workflow(value):
     if not isinstance(resources, dict) or any(not isinstance(k, str) or not k or type(v) is not int or v < 1
                                               for k, v in resources.items()):
         raise ValueError("scheduler.resources must map names to positive integer capacities")
+    continues = scheduler.get("max_continue_prompts", 2)
+    if type(continues) is not int or not 0 <= continues <= 10:
+        raise ValueError("scheduler.max_continue_prompts must be an integer from 0 to 10")
     return value
 
 
@@ -130,6 +133,87 @@ def prepare_binding_spec(spec, mode, policy, reason):
     return spec
 
 
+LABEL_PREFIX = "awo:"  # Herdr display names owned by this tool; never an identity field.
+
+
+def pane_label(role):
+    return LABEL_PREFIX + role
+
+
+def label_source(name, role=None):
+    if not name:
+        return "none"
+    if name.startswith(LABEL_PREFIX):
+        return "awo_stale" if role and name != pane_label(role) else "awo"
+    return "custom"
+
+
+def live_pane(transport, spec):
+    expected = spec["expected_identity"]
+    return next((agent for agent in transport.agents(spec)
+                 if agent.get("terminal_id") == expected.get("terminal")
+                 and agent.get("pane_id") == spec.get("pane")), None)
+
+
+def label_transport():
+    from monitor_task import Transport
+    return Transport({})
+
+
+def apply_labels(new, old=None):
+    """Name the newly active pane after its role; clear the retired pane only if it still carries our name.
+
+    Best effort and outside any ledger transaction: a failed rename never blocks or undoes a binding.
+    """
+    result = {"label_actions": []}
+    transport = label_transport()
+    if new["spec"]["adapter"] == "herdr":
+        spec = new["spec"]
+        action = {"pane": spec["pane"], "original_label": None, "action": "failed"}
+        result["label_actions"].append(action)
+        try:
+            agent = live_pane(transport, spec)
+            if agent is None:
+                raise ValueError("bound pane was not found in Herdr session")
+            name = agent.get("name")
+            action["original_label"] = name
+            source = label_source(name, new["role"])
+            if source == "custom":
+                action["action"] = "kept"
+            elif source == "awo":
+                action["action"] = "unchanged"
+                result["label"] = name
+            else:
+                transport.label(spec, pane_label(new["role"]))
+                action["action"] = "set"
+                result["label"] = pane_label(new["role"])
+        except Exception as exc:
+            action["error"] = str(exc)[:300]
+            result["label_error"] = action["error"]
+    if old and old["spec"]["adapter"] == "herdr" and \
+            (old["spec"].get("session"), old["spec"].get("pane")) != \
+            (new["spec"].get("session"), new["spec"].get("pane")):
+        action = {"pane": old["spec"]["pane"], "original_label": None, "action": "failed"}
+        result["label_actions"].append(action)
+        try:
+            agent = live_pane(transport, old["spec"])
+            if agent is None:
+                action["action"] = "unchanged"
+            else:
+                name = agent.get("name")
+                action["original_label"] = name
+                if name == pane_label(old["role"]):
+                    transport.label(old["spec"], None)
+                    action["action"] = "cleared"
+                    result["cleared"] = old["spec"]["pane"]
+                else:
+                    action["action"] = "kept" if name else "unchanged"
+        except Exception as exc:
+            action["error"] = str(exc)[:300]
+            result["label_error"] = action["error"]
+    return result
+
+
 def bind(state, role, spec, observed, mode="worker", policy="inbox_only", defer=False, reason=""):
     from monitor_task import Transport, identity_matches, validate_identity
     if mode not in ("controller", "reviewer", "worker", "advisor") or policy not in ("inbox_only", "exact_thread", "dedicated_window"):
@@ -159,12 +243,14 @@ def bind(state, role, spec, observed, mode="worker", policy="inbox_only", defer=
                   "context_policy": policy, "spec": spec, "observed_identity": observed,
                   "reason": reason, "created_at": stamp()}
         status = "pending" if defer else "active"
+        retired = con.execute("SELECT data FROM bindings WHERE role=? AND status='active'", (role,)).fetchone()
         if not defer:
             con.execute("UPDATE bindings SET status='retired' WHERE role=? AND status='active'", (role,))
         con.execute("INSERT INTO bindings VALUES (?,?,?,?,?,?,?)",
                     (record["instance_id"], role, version, mode, policy, status, json.dumps(record)))
         audit(con, "binding_" + status, record)
-        return dict(record, status=status)
+    labels = {} if defer else apply_labels(record, json.loads(retired[0]) if retired else None)
+    return dict(record, status=status, **labels)
 
 
 def activate(state, role, observed):
@@ -182,10 +268,107 @@ def activate(state, role, observed):
             spec = dict(value["spec"], context_policy=value["context_policy"])
             if not identity_matches(Transport({}).reviewer_identity(spec), spec["expected_identity"]):
                 raise ValueError("pending reviewer identity changed during activation")
+        retired = con.execute("SELECT data FROM bindings WHERE role=? AND status='active'", (role,)).fetchone()
         con.execute("UPDATE bindings SET status='retired' WHERE role=? AND status='active'", (role,))
         con.execute("UPDATE bindings SET status='active' WHERE id=?", (value["instance_id"],))
         audit(con, "binding_activated", value)
-        return value
+    return dict(value, **apply_labels(value, json.loads(retired[0]) if retired else None))
+
+
+def roles(state, transport=None):
+    """Live map of every active role to its pane, plus unbound Herdr agents; read-only."""
+    from workflow_scheduler import _read_database
+    with _read_database(state) as con:
+        bindings = [json.loads(row[0]) for row in con.execute(
+            "SELECT data FROM bindings WHERE status='active' ORDER BY role")]
+    from monitor_task import identity_matches
+    transport = transport or label_transport()
+    sessions, rows, bound = {}, [], set()
+    for binding in bindings:
+        spec = binding["spec"]
+        row = {"role": binding["role"], "mode": binding["mode"], "version": binding["version"],
+               "adapter": spec["adapter"], "pane": spec.get("pane"),
+               "terminal": spec["expected_identity"].get("terminal"), "expected_label": None,
+               "label_source": "none"}
+        rows.append(row)
+        if spec["adapter"] != "herdr":
+            row["live"] = "not a Herdr binding"
+            continue
+        row["expected_label"] = pane_label(binding["role"])
+        key = (spec["executable"], spec["session"])
+        try:
+            if key not in sessions:
+                sessions[key] = (spec, transport.agents(spec))
+            live = {a.get("terminal_id"): a for a in sessions[key][1]}
+        except Exception as exc:
+            row["live"] = "query failed: " + str(exc)[:200]
+            continue
+        bound.add((key, row["terminal"]))
+        agent = live.get(row["terminal"])
+        if agent and agent.get("pane_id") != row["pane"]:
+            agent = None
+        if not agent:
+            row["live"] = "terminal not found; the agent was closed or restarted, rebind it"
+            continue
+        observed = {"kind": agent.get("agent"), "terminal": agent.get("terminal_id"),
+                    "launch_cwd": agent.get("cwd"), "pane": agent.get("pane_id")}
+        row.update(live="identity matches" if identity_matches(observed, spec["expected_identity"]) else
+                   "identity differs; inspect before acting", status=agent.get("agent_status"),
+                   label=agent.get("name"), label_source=label_source(agent.get("name"), binding["role"]),
+                   title=agent.get("terminal_title_stripped"))
+    unbound = []
+    for key, (spec, agents) in sessions.items():
+        for agent in agents:
+            if (key, agent.get("terminal_id")) not in bound:
+                unbound.append({"executable": key[0], "session": key[1],
+                                "pane": agent.get("pane_id"), "agent": agent.get("agent"),
+                                "status": agent.get("agent_status"), "label": agent.get("name"),
+                                "label_source": label_source(agent.get("name")),
+                                "title": agent.get("terminal_title_stripped")})
+    return {"roles": rows, "unbound": unbound}
+
+
+def label_panes(state, transport=None, force=False):
+    """Re-apply role names to active Herdr panes and clear stale names this tool set on other panes."""
+    transport = transport or label_transport()
+    view = roles(state, transport)
+    with database(state) as con:
+        specs = {json.loads(row[0])["role"]: json.loads(row[0])["spec"] for row in con.execute(
+            "SELECT data FROM bindings WHERE status='active'")}
+    done, panes = [], []
+    for row in view["roles"]:
+        if row["adapter"] != "herdr":
+            continue
+        entry = {"pane": row["pane"], "original_label": row.get("label"), "action": "unchanged"}
+        panes.append(entry)
+        if row.get("live", "").startswith("query failed"):
+            entry.update(action="failed", error=row["live"])
+        elif row.get("live") != "identity matches":
+            entry["action"] = "failed"
+            entry["error"] = row.get("live", "identity could not be verified")
+        elif row["label_source"] == "custom" and not force:
+            entry["action"] = "kept"
+        elif row.get("label") != row["expected_label"]:
+            try:
+                transport.label(specs[row["role"]], row["expected_label"])
+                entry["action"] = "set"
+                done.append({"pane": row["pane"], "label": row["expected_label"]})
+            except Exception as exc:
+                entry.update(action="failed", error=str(exc)[:300])
+    session_specs = {(spec["executable"], spec["session"]): spec for spec in specs.values()
+                     if spec["adapter"] == "herdr"}
+    for agent in view["unbound"]:
+        entry = {"pane": agent["pane"], "original_label": agent.get("label"), "action": "kept" if agent.get("label") else "unchanged"}
+        panes.append(entry)
+        if agent["label_source"] == "awo":
+            target = dict(session_specs[(agent["executable"], agent["session"])], pane=agent["pane"])
+            try:
+                transport.label(target, None)
+                entry["action"] = "cleared"
+                done.append({"pane": agent["pane"], "label": None})
+            except Exception as exc:
+                entry.update(action="failed", error=str(exc)[:300])
+    return {"status": "LABELS_SYNCED", "changes": done, "panes": panes}
 
 
 def guard(con, actor, version, context, action):
@@ -290,7 +473,11 @@ def publish_event(state, request, report, receipt=None):
                            (request["task_id"], request["nonce"])).fetchone()
         if not task or task[0] != digest(request):
             raise ValueError("monitor request is not the registered frozen request")
-        event_id = digest({"request": digest(request), "status": report["status"]})
+        # A later stall episode of the same attempt is a new event; the first keeps the original ID.
+        identity = {"request": digest(request), "status": report["status"]}
+        if report.get("stall_episode", 1) > 1:
+            identity["stall_episode"] = report["stall_episode"]
+        event_id = digest(identity)
         data = {"event_id": event_id, "request_sha256": digest(request), "report": report,
                 "receipt": receipt, "created_at": stamp()}
         inserted = con.execute("INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?)", (event_id, request["task_id"],
@@ -332,14 +519,16 @@ def deliver_event(state, event_id, transport):
                    "authorization_sha256": digest(request["authorization"]), "attempted_at": stamp(),
                    "status": "reserved_no_blind_retry"}
         con.execute("INSERT INTO notifications VALUES (?,?)", (event_id, json.dumps(attempt)))
+    from monitor_task import event_guidance
+    delivery = json.loads(event["data"])["report"]["status"]
     message = ("Automatic workflow event under existing authorization, not a new Owner instruction. "
                "Event " + event_id + ", task " + event["task"] + ", nonce " + event["nonce"] +
-               ". State directory: " + str(Path(state).resolve()) + ". Target reviewer instance " +
-               target["instance_id"] + ", binding version " + str(target["version"]) +
+               ", delivery status " + delivery + ". State directory: " + str(Path(state).resolve()) +
+               ". Target reviewer instance " + target["instance_id"] + ", binding version " + str(target["version"]) +
                ". Only the registered main context may acknowledge/review this event. "
                "Side conversations are advisory-only: do not acknowledge, review, or dispatch. "
-               "Read inbox, independently review raw evidence, record REVIEW.md, then check the next gate. "
-               "Delivery is not acceptance; no blind resubmission.")
+               "Read the inbox and raw evidence. " + event_guidance(delivery, event["task"]) +
+               " Delivery is not acceptance; no blind resubmission.")
     try:
         response = transport.send(spec, message)
         attempt.update(status="submitted", response=response[:2000])
@@ -373,6 +562,13 @@ def record_review(state, event_id, actor, version, context, file, verdict):
             raise ValueError("acknowledge this role's event before recording a review")
         if event["task"] not in text or event["nonce"] not in text:
             raise ValueError("REVIEW.md must bind the task ID and nonce")
+        task_status = con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0]
+        delivery = json.loads(event["data"])["report"]["status"]
+        from monitor_task import STALLED
+        if delivery in STALLED and task_status == "running":
+            # A verdict on a pause would outlive the attempt's real delivery; wait or close the attempt first.
+            raise ValueError("delivery is still open (" + delivery + "); wait for review_ready, continue the "
+                             "worker, or close the attempt before recording a review")
         task_data = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (event["task"],)).fetchone()[0])
         declared = task_data["request"].get("review_path")
         if declared and Path(declared).resolve() != path:
@@ -384,10 +580,9 @@ def record_review(state, event_id, actor, version, context, file, verdict):
         cfg = config_of(con)
         if verdict not in cfg.get("workflow", {}).get("transitions", {}):
             raise ValueError("verdict is not configured in workflow.transitions")
-        delivery = json.loads(event["data"])["report"]["status"]
         if verdict == "accept" and delivery != "review_ready":
             raise ValueError("only review_ready delivery can be accepted")
-        if verdict == "accept" and con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0] == "resolved":
+        if verdict == "accept" and task_status == "resolved":
             raise ValueError("a closed task attempt cannot be accepted")
         result = {"event_id": event_id, "task_id": event["task"], "nonce": event["nonce"],
                   "path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "verdict": verdict,
@@ -439,8 +634,9 @@ def main():
         elif name == "register-task": cmd.add_argument("--request", required=True)
         else: cmd.add_argument("--event", required=True)
         if name == "review": cmd.add_argument("--file", required=True); cmd.add_argument("--verdict", required=True)
-    for name in ("bindings", "inbox"):
+    for name in ("bindings", "inbox", "roles", "label-panes"):
         sub.add_parser(name)
+    sub.choices["label-panes"].add_argument("--force", action="store_true")
     status_cmd = sub.add_parser("status")
     inspect_cmd = sub.add_parser("inspect"); inspect_cmd.add_argument("--task", required=True)
     for cmd in (status_cmd, inspect_cmd):
@@ -470,6 +666,8 @@ def main():
     elif args.command == "review": result = record_review(args.state, args.event, args.actor, args.version, args.context, args.file, args.verdict)
     elif args.command == "next-check": result = next_gate(args.state, args.event, args.actor, args.version, args.context)
     elif args.command == "deliver": result = deliver_event(args.state, args.event, Transport({}))
+    elif args.command == "roles": result = roles(args.state)
+    elif args.command == "label-panes": result = label_panes(args.state, force=args.force)
     elif args.command in ("status", "inspect"):
         from workflow_scheduler import snapshot
         if args.summary or args.format == "text":

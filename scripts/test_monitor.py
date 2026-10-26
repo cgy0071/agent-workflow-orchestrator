@@ -134,6 +134,18 @@ class Tests(unittest.TestCase):
         self.assertEqual(module.notify_once(self.request, report, self.root, client)["status"], "already_attempted")
         self.assertEqual(client.sends, 1)
 
+    def test_stall_notice_does_not_consume_the_delivery_notice(self):
+        client = FakeTransport(self.request)
+        stall = {"status": "incomplete", "stall_episode": 1}
+        self.assertEqual(module.notify_once(self.request, stall, self.root, client)["status"], "submitted")
+        self.assertEqual(module.notify_once(self.request, stall, self.root, client)["status"], "already_attempted")
+        self.assertEqual(module.notify_once(self.request, dict(stall, stall_episode=2), self.root, client)["status"], "submitted")
+        self.assertEqual(module.notify_once(self.request, {"status": "review_ready"}, self.root, client)["status"], "submitted")
+        self.assertEqual(client.sends, 3)
+        self.assertIn("continue --task " + self.request["task_id"], module.event_guidance("incomplete", self.request["task_id"]))
+        self.assertIn("Do not record a review", module.event_guidance("incomplete"))
+        self.assertIn("Never answer approval dialogs", module.event_guidance("blocked"))
+
     def test_uncertain_notice_not_retried(self):
         client = FakeTransport(self.request)
         client.raise_on_send = True

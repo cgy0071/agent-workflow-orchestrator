@@ -146,6 +146,14 @@ def reserve(con, request, who, value):
     journal(con, request["task_id"], value["generation"], who["instance_id"], "dispatch_reserved", value)
 
 
+def _not_ready_reason(observed, prefix):
+    # A visible permission/approval prompt needs the Owner; typing into it could answer the prompt.
+    if observed.get("status") == "blocked":
+        return prefix + ": the worker is blocked, usually on a harness permission/approval prompt. Ask the Owner " \
+               "to answer it in the worker's harness, then dispatch again; nothing was sent"
+    return prefix
+
+
 def dispatch(state, request, message, actor, version, context, *, resources=None, run=None, node=None,
              transport=None):
     """Persist a reservation before the sole side effect. Never retry a reserved ID."""
@@ -194,7 +202,7 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
         request["dag_binding"] = {"run": run, "node": node, "template_sha256": control.digest(request)}
         spec["baseline_completion_seq"] = sequence(observed.get("completion_seq"))
     if not _worker_quiescent(request, observed) or sequence(observed.get("completion_seq")) != spec["baseline_completion_seq"]:
-        raise ValueError("worker is not idle at the frozen completion baseline")
+        raise ValueError(_not_ready_reason(observed, "worker is not idle at the frozen completion baseline"))
     if spec["adapter"] == "herdr":
         Transport.check_prompt_available(observed)
     value = {"generation": generation, "message": message, "message_sha256": control.digest(message),
@@ -218,7 +226,7 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
             if (not identity_matches(live.get("identity", {}), spec["expected_identity"])
                     or not _worker_quiescent(request, live)
                     or sequence(live.get("completion_seq")) != spec["baseline_completion_seq"]):
-                raise ValueError("worker identity or availability changed before send")
+                raise ValueError(_not_ready_reason(live, "worker identity or availability changed before send"))
             response = transport.send(spec, message)
             data = json.loads(con.execute("SELECT data FROM dispatches WHERE task=?", (request["task_id"],)).fetchone()[0])
             data.update(response=str(response)[:2000], submitted_at=control.stamp())
@@ -484,6 +492,98 @@ def tick(state, run, actor, version, context, *, transport=None):
     return {"run": run, "results": results}
 
 
+def continue_task(state, task, actor, version, context, *, transport=None):
+    """Ask a stalled worker to resume the same attempt once per stall episode, within a bounded budget.
+
+    Never a new dispatch: same task ID, nonce, frozen request, monitor and baseline. The attempt is
+    journaled before the send, and an uncertain send is counted and never retried.
+    """
+    with control.database(state) as con:
+        control.guard(con, actor, version, context, "dispatch")
+        row = con.execute("SELECT status,data FROM tasks WHERE id=?", (task,)).fetchone()
+        dispatch_row = con.execute("SELECT status,data FROM dispatches WHERE task=?", (task,)).fetchone() \
+            if has_schema(con) else None
+        if not row or row["status"] != "running" or not dispatch_row or dispatch_row["status"] != "running":
+            raise ValueError("continue needs a running attempt with confirmed scheduler execution")
+        request = json.loads(row["data"])["request"]
+        observation = con.execute("SELECT data FROM task_observations WHERE task=?", (task,)).fetchone()
+        observation = json.loads(observation[0]) if observation else {}
+        if observation.get("status") != "incomplete":
+            raise ValueError("continue applies only while the monitor reports incomplete (worker idle without delivery)")
+        episode = observation.get("stall_episode", 1)
+        done = [json.loads(item[0]) for item in con.execute(
+            "SELECT data FROM task_journal WHERE task=? AND kind='continue_reserved'", (task,))]
+        budget = control.config_of(con).get("scheduler", {}).get("max_continue_prompts", 2)
+        if any(item.get("stall_episode") == episode for item in done):
+            raise ValueError("this stall episode already received a continuation; wait for the monitor")
+        if len(done) >= budget:
+            raise ValueError("continuation budget exhausted (" + str(budget) + "); inspect and close the attempt")
+        spec = request["worker"]
+        current = control.active(con, spec["role"])
+        if current["spec"] != {k: v for k, v in spec.items() if k != "baseline_completion_seq"}:
+            raise ValueError("worker binding changed since dispatch")
+    if spec["adapter"] == "command":
+        validate_argv(spec.get("prompt_argv"))
+    elif spec["adapter"] != "herdr":
+        raise ValueError("this worker adapter cannot receive a continuation")
+    transport = transport or Transport(request)
+    observed = transport.status(spec)
+    if not identity_matches(observed.get("identity", {}), spec["expected_identity"]):
+        raise ValueError("worker identity changed; do not continue")
+    if not _resumable(request, observed):
+        raise ValueError("worker is not idle; wait for the monitor before continuing")
+    if spec["adapter"] == "herdr":
+        Transport.check_prompt_available(observed)
+    message = _continue_message(request)
+    attempt = {"attempt": len(done) + 1, "budget": budget, "stall_episode": episode,
+               "message_sha256": control.digest(message), "observed_completion_seq": observed.get("completion_seq"),
+               "actor_version": version}
+    with control.database(state) as con:
+        control.guard(con, actor, version, context, "dispatch")
+        again = con.execute("SELECT count(*) FROM task_journal WHERE task=? AND kind='continue_reserved'",
+                            (task,)).fetchone()[0]
+        if again != len(done) or con.execute("SELECT status FROM tasks WHERE id=?", (task,)).fetchone()[0] != "running":
+            raise ValueError("attempt changed while preparing the continuation; inspect again")
+        journal(con, task, request.get("generation", 1), actor, "continue_reserved", attempt)
+    sent = False
+    try:
+        with control.database(state) as con:
+            control.guard(con, actor, version, context, "dispatch")
+            live = transport.status(spec)
+            if not identity_matches(live.get("identity", {}), spec["expected_identity"]) or not _resumable(request, live):
+                raise ValueError("worker identity or availability changed before send")
+            sent = True
+            response = transport.send(spec, message)
+            journal(con, task, request.get("generation", 1), actor, "continue_submitted",
+                    {"attempt": attempt["attempt"], "response": str(response)[:2000]})
+        return {"status": "CONTINUE_SUBMITTED", "task_id": task, "attempt": attempt["attempt"], "budget": budget}
+    except Exception as exc:
+        kind = "continue_uncertain" if sent else "continue_not_sent"
+        with control.database(state) as con:
+            journal(con, task, request.get("generation", 1), actor, kind,
+                    {"attempt": attempt["attempt"], "error": str(exc)[:500]})
+        return {"status": kind.upper(), "task_id": task, "attempt": attempt["attempt"], "error": str(exc)[:500]}
+
+
+def _resumable(request, state):
+    # Idle (or done without delivery) only; working, blocked, exited and failed are never prompted.
+    return (state.get("status") not in ("working", "blocked", "exited", "failed")
+            and mapped_status(request, state) in ("idle", "done"))
+
+
+def _continue_message(request):
+    completion = request["completion"]
+    files = [completion["binding_artifact"]] + list(completion.get("artifacts", []))
+    names = [item if isinstance(item, str) else item["path"] for item in files]
+    text = ("Continue task " + request["task_id"] + " (nonce " + request["nonce"] + ") from where it stopped. "
+            "This is the same authorized task after an interruption such as a quota, rate-limit or network "
+            "error, not a new task: keep the scope unchanged and do not redo finished steps. Working directory: " +
+            request["cwd"] + ". Deliverables still required: " + ", ".join(names) + ".")
+    if completion.get("marker"):
+        text += " The final line of " + names[0] + " must be exactly: " + completion["marker"]
+    return text + " If you cannot continue, write the blocker into " + names[0] + " and stop."
+
+
 def release(state, task, actor, version, context):
     """Release a completed claim after review; never infer termination from silence."""
     with control.database(state) as con:
@@ -557,7 +657,7 @@ def main():
     prepare.add_argument("--file", required=True); prepare.add_argument("--root", required=True)
     prepare.add_argument("--output", required=True)
     caps = sub.add_parser("capabilities"); caps.add_argument("--file", required=True)
-    for name in ("migrate", "dispatch", "reconcile", "dag-load", "tick", "release"):
+    for name in ("migrate", "dispatch", "reconcile", "dag-load", "tick", "release", "continue"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--actor", required=True); cmd.add_argument("--version", type=int, required=True)
         cmd.add_argument("--context", choices=("main", "side", "unknown"), default="unknown")
@@ -571,7 +671,7 @@ def main():
             cmd.add_argument("--run", required=True)
         if name == "dag-load":
             cmd.add_argument("--file", required=True)
-        if name == "release":
+        if name in ("release", "continue"):
             cmd.add_argument("--task", required=True)
     args = parser.parse_args()
     if args.command == "prepare-dag":
@@ -602,6 +702,7 @@ def main():
                     stream.write(json.dumps(result["request"], ensure_ascii=True, indent=2) + "\n")
             elif args.command == "dag-load": result = load_dag(args.state, args.run, read_json(args.file), *who)
             elif args.command == "tick": result = tick(args.state, args.run, *who)
+            elif args.command == "continue": result = continue_task(args.state, args.task, *who)
             else: result = release(args.state, args.task, *who)
     if args.command == "status" and args.format == "text":
         from workflow_status import format_text

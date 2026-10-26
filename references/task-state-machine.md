@@ -46,3 +46,9 @@ side or unknown controller cannot dispatch, reconcile, release or review.
 Rework is a new scoped task with a new ID and nonce; record the next generation
 and the sealed parent review as appropriate. The scheduler does not replay
 failed work or infer cancellation from missing updates.
+
+`incomplete`, `blocked` and `adapter_error` are recoverable pauses: one event per
+stall episode, monitoring continues, and they cannot be reviewed while the
+attempt is open. A bounded `continue` (journaled as `continue_reserved`, then
+`continue_submitted`, `continue_uncertain` or `continue_not_sent`) asks the same
+attempt to resume after `incomplete`; it is not a new dispatch.

@@ -259,7 +259,8 @@ for index in range(150):
         control.bind(self.state, "executor", spec, spec["expected_identity"], reason="monitor process fixture")
         self.specs["executor"] = spec
         req = self.request()
-        req["monitor"] = {"interval_seconds": 1, "settle_grace_seconds": .3}
+        # The stall keeps the monitor alive; a short overall limit ends this fixture.
+        req["monitor"] = {"interval_seconds": 1, "settle_grace_seconds": .3, "overall_timeout_seconds": 1.5}
         self.send(req); req = self.confirm(req)
         path = Path(req["cwd"]) / "request.json"
         path.write_text(json.dumps(req), encoding="utf-8")
@@ -277,12 +278,14 @@ for index in range(150):
         deadline = time.monotonic() + .35
         while time.monotonic() < deadline: time.sleep(.01)
         for _ in range(2):
-            resumed = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+            resumed = subprocess.run(argv, capture_output=True, text=True, timeout=10)
             self.assertEqual(resumed.returncode, 0, resumed.stderr)
         self.assertEqual(json.loads(checkpoint.read_text(encoding="utf-8"))["idle_since"]["delivery_since"], before["delivery_since"])
         task = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
-        self.assertEqual(len(task["events"]), 1)
-        self.assertEqual(task["events"][0]["data"]["report"]["status"], "incomplete")
+        statuses = [event["data"]["report"]["status"] for event in task["events"]]
+        self.assertEqual(len(statuses), len(set(statuses)))  # Replays never duplicate an event.
+        self.assertIn("monitor_timeout", statuses)
+        self.assertLessEqual(set(statuses), {"incomplete", "monitor_timeout"})
         self.assertTrue(task["claim_held"])
 
 

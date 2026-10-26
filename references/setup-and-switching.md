@@ -51,6 +51,16 @@ Ledger bind/switch stores the selected policy in the adapter spec and fills a mi
 
 A custom label such as `custom:dsh-tui` can report status, but Herdr's native prompt rejects it with agent_not_ready. For such targets, use `inbox_only` or a separately verified command bridge. Do not infer compatibility from a harness name or nullable name field, and do not rename a label to pass the check.
 
+When a binding becomes active (bind or activate), AWO reads the live Herdr pane name. An empty name or a stale `awo:` name is set to `awo:<role>`; a custom name is kept. When a role moves, the old pane is cleared only if its name is exactly the old role's AWO name. `label-panes` applies the same rules to active panes and clears AWO names on unbound panes; `--force` also replaces custom names on active panes. Results report each pane's original name and action. A query or rename failure is reported as `label_error` without blocking the binding. Display names are never stored in the ledger or used for identity checks; identity still uses pane, terminal ID, agent kind, and launch directory. The dashboard reads actual names only when you click **Check agents now**.
+
+```sh
+python scripts/workflow_control.py --state STATE roles        # role -> pane, identity check, unbound agents
+python scripts/workflow_control.py --state STATE label-panes  # restore missing names, clear stale awo: names
+python scripts/workflow_control.py --state STATE label-panes --force  # explicitly replace custom names on bound panes
+```
+
+`roles` is read-only; "terminal not found" means the agent was closed or restarted and must be rebound.
+
 **Trust boundary:** `--context main|side|unknown` is supplied by a trusted runtime bridge or an informed operator. It is not automatic branch detection or authentication. The gate rejects declared side/unknown contexts and stale bindings. It cannot stop an arbitrary process with ledger write access from falsely declaring `main`. A bridge should pass `main` only after checking actual caller metadata against the binding. Without that capability, use inbox-only operation. Do not invent branch IDs or infer main status from pane focus.
 
 Side conversations may inspect and advise; they do not acknowledge events, record acceptance, or dispatch follow-ups. A copied completion message does not transfer controller authority. A newly opened/restarted client requires a new verified binding if identity changed.

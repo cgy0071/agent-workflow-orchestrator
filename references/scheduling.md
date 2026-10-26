@@ -199,6 +199,38 @@ Overall monitor timeout stops observation; it never terminates the worker.
 Wall-clock deadlines can be affected by clock changes; they cannot grant review
 or dispatch permission.
 
+## Stalls, permission prompts and bounded continuation
+
+`incomplete` (worker idle without a valid delivery, e.g. after a quota,
+rate-limit or network error), `blocked` (usually a harness permission/approval
+prompt or usage limit) and `adapter_error` (queries keep failing) are pauses,
+not ends. The monitor publishes one event and one notification per stall
+episode, then keeps watching the same attempt; a later delivery still becomes
+`review_ready`. The overall monitor timeout also applies while stalled. When
+the controller closes the attempt (`reconcile --outcome terminated` or
+`release`), the monitor stops without another event.
+
+A stall event cannot be reviewed while the attempt is open, so a verdict on a
+pause cannot outlive the real delivery. For `incomplete`, the controller may
+send one bounded continuation once the worker can run again:
+
+```sh
+python scripts/workflow_scheduler.py --state STATE continue --task TASK-ID --actor INSTANCE --version 1 --context main
+```
+
+It requires a confirmed running dispatch, a latest observation of
+`incomplete`, the unchanged worker binding, the live identity, and an idle
+worker that can receive input. It sends the same task ID and nonce, never a new
+task, at most once per stall episode and at most
+`scheduler.max_continue_prompts` times per attempt (default 2, 0 disables). The
+attempt is journaled (`continue_reserved`) before the send; an uncertain send
+counts and is never retried. `blocked` and `adapter_error` are never continued:
+the Owner answers permission prompts in the worker's own harness, and the
+monitor resumes when the worker does. If the harness denied a permission, a
+continuation cannot help; change the harness permissions or close the attempt.
+Dispatch to a worker that shows a permission prompt is refused before anything
+is sent, with that reason.
+
 ## Local demo
 
 ```sh

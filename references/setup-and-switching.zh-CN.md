@@ -53,6 +53,16 @@ SQLite 台账保存配置快照、绑定版本、冻结任务、待审核事件�
 
 `custom:dsh-tui` 等自定义标签可以上报状态，但 Herdr 原生 prompt 会返回 agent_not_ready。此类目标使用 inbox_only，或另行验证的 command 桥接。不能根据 harness 名称或可为空的 name 字段推断兼容性，也不能为通过检查而改名；每个客户端版本都须单独核验。
 
+绑定生效（`bind` 或 `activate`）时，AWO 实时读取 Herdr pane 名称。空名称和过时的 `awo:` 名称会设为 `awo:<角色>`；用户自定义名称会保留。切换角色时，仅当旧 pane 的名称仍恰好是旧角色的 AWO 名称，才清除它。`label-panes` 遵守同样规则，并仅清除未绑定 pane 上的 AWO 名称；`label-panes --force` 才会覆盖已绑定 pane 的自定义名称。结果列出每个 pane 的原名称和处理动作。读取或改名失败只报告 `label_error`，不阻止绑定。显示名称不写入台账，也不参与身份核验。看板只在点击“立即检查 Agent”时读取实际名称。
+
+```sh
+python scripts/workflow_control.py --state STATE roles        # 每个角色对应的 pane、身份是否一致、未绑定的 agent
+python scripts/workflow_control.py --state STATE label-panes  # 补上缺失的名称，清除不再对应角色的 awo: 名称
+python scripts/workflow_control.py --state STATE label-panes --force  # 明确覆盖已绑定 pane 的自定义名称
+```
+
+`roles` 只读；“terminal not found” 表示该 agent 已关闭或重启，需要重新绑定。
+
 **信任边界：** `--context main|side|unknown` 来自可信桥接程序或知情操作者的声明，不是自动分支识别或身份认证。脚本会拒绝声明为 side/unknown 的操作和失效绑定；它无法阻止拥有台账写权限的程序谎报 main。桥接程序必须先核对实际调用方元数据，再传入 main。做不到时使用收件箱模式，不编造分支 ID，也不根据窗口焦点判断主对话。
 
 侧对话可以阅读和建议，不能确认事件、登记准入或续派任务。转发一条完成消息不会转移控制权。重开客户端且身份变化后，应重新核验绑定。

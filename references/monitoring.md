@@ -63,7 +63,7 @@ Ledger mode persists inbox events before optional notification, even without --n
 
 An exclusive notification-attempt file is written before sending. Delivery timeouts do not trigger automatic retries. Inspect the actual session after delivery_uncertain. monitor.lock prevents duplicate monitors. If a crash leaves the lock, inspect the process before deliberate recovery. Never reuse a monitor directory for a different task.
 
-Ledger mode records attempts transactionally in SQLite instead of a task-local attempt file. Each attempt binds the target, request/authorization hashes, and UTC time. Read-only query failures have bounded retries; identity changes, blocked states, unknown states, and failures stop for inspection. After inspection, --resume preserves the old summary as history and resumes unchanged frozen inputs. It never retries a previously attempted prompt or resumes review-ready delivery into new execution.
+Ledger mode records attempts transactionally in SQLite instead of a task-local attempt file. Each attempt binds the target, request/authorization hashes, and UTC time. Read-only query failures have bounded retries. Incomplete delivery, blocked states (usually permission prompts) and persistent query failures are reported once per stall episode while monitoring continues; see [stalls and bounded continuation](scheduling.md#stalls-permission-prompts-and-bounded-continuation). Identity changes, unknown states, failures and exits stop for inspection. After inspection, --resume preserves the old summary as history and resumes unchanged frozen inputs. It never retries a previously attempted prompt or resumes review-ready delivery into new execution.
 
 ## Other adapters
 
