@@ -12,7 +12,7 @@
 
 1. **Planner** Agent 写好任务（目标、范围、验收标准），向 **Executor** Agent 只派发一次。
 2. 脚本每 5 分钟查询一次 Executor 的*状态*。它不会让模型反复重读对话，所以监控几乎不消耗成本。
-3. Executor 完成且约定的交付文件（如 `RESULT.md`、`HANDOFF.md`）通过校验后，脚本为审核者记录一次完成事件；直接发送提示是可选的。
+3. Executor 完成且约定的交付文件（如 `RESULT.md`、`HANDOFF.md`）通过校验后，脚本为审核者记录一次完成事件；直接发送提示是可选的。Executor 提前停止或停在提示上时，也会报告一次并继续观察。
 4. 审核者检查原始证据，记录 `accept`、`repair` 或 `reject`；如果你已授权，再派发下一个任务。
 
 仓库由两部分组成：
@@ -133,7 +133,7 @@ python scripts/workflow_control.py --state /abs/state bind --role planner --spec
 python scripts/workflow_control.py --state /abs/state bind --role executor --spec worker.json --mode worker
 ```
 
-`bind` 会查询实时会话，身份不符时拒绝绑定。请保存它输出的控制者 `instance_id` 和 `version`，后续命令通过 `--actor` 和 `--version` 传入。
+`bind` 会查询实时会话，身份不符时拒绝绑定。请保存它输出的控制者 `instance_id` 和 `version`，后续命令通过 `--actor` 和 `--version` 传入。使用 Herdr 时，绑定的 pane 还会被命名为 `awo:<角色>`，方便分辨哪个窗格是哪个角色；你自己起的名字会保留。`workflow_control.py --state /abs/state roles` 显示每个角色对应的窗格，以及身份是否仍一致。
 
 ### 4. 编写任务及其请求
 
@@ -178,6 +178,8 @@ python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 
 监控默认每 300 秒轮询一次，直到完成或出现异常为止。默认没有总时长上限，但每次状态查询都有超时。设置了 `workflow_state` 后，即使 `authorization.notify_reviewer` 为 false，`--notify` 仍会记录收件箱事件；在 `inbox_only` 策略下绝不直接提示审核者。后台启动方式和完整的状态约定见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
+如果 Executor 提前停止（额度、限流、网络）或停在权限提示上，监控只报告一次，然后继续观察同一个任务，之后完成的交付仍会进入审核。未交付就停止时，控制者可以对同一任务发送一次受限的 `workflow_scheduler.py continue --task TASK-ID`，而不是重新派发。权限提示留给你在 Executor 自己的窗口中处理。详见 [scheduling.zh-CN.md](references/scheduling.zh-CN.md#中途停顿权限提示与受限继续)。
+
 ### 7. 审核并继续
 
 ```sh
@@ -189,15 +191,15 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 审核者阅读原始证据，编写包含任务 ID、nonce 和结论的 `REVIEW.md`。`next-check` 返回一条 `parent_review` 记录，把它写入下一个任务的请求以关联后续任务。未授权 `continuous_execution_authorized` 时，控制者到此停止并向你汇报。
 
-如需在本机查看台账，可打开可选状态面板。它显示绑定、任务、DAG、收件箱、资源和告警，不会自动联系 Agent；实时探测须手动点击按钮。以下任一方式都会在浏览器中打开面板：
+如需在本机查看台账，可打开可选状态面板。它只读台账、不联系 Agent，并把需要你处理的内容放在前面：进行中和最近的任务（较早已结束的任务按时间范围折叠）、以卡片显示的后续任务链、等待审核的更新，以及需要检查的提醒。任务标题取自各任务的 `TASK.md`，不显示 ID、哈希或路径。**立即检查 Agent** 只在点击时查询 Agent。界面可在中文和英文之间切换。以下任一方式都会在浏览器中打开面板：
 
 - 在仓库文件夹中双击 `dashboard.cmd`（Windows）或 `dashboard.command`（macOS），再选择最近用过的状态目录或粘贴路径。
 - 对控制者 Agent 说“打开状态面板”，Skill 已写明做法。
 - 运行 `python -B scripts/dashboard.py`，可加 `--state /abs/state`。
 
-![离线演示后的状态面板：目标、三个已绑定角色、三个已通过的任务，以及 A/B 到 JOIN 的任务计划](docs/images/dashboard.png)
+![离线演示后的状态面板：目标、三个已绑定角色、进行中和最近的任务，以及 A/B 到 JOIN 的任务计划](docs/images/dashboard.png)
 
-表单派发需要显式启用，仍须独立观察执行并运行 `reconcile`；详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+操作功能默认关闭，需要在启动时开启：`--allow-dispatch` 开启表单派发和审核操作（派发后仍须独立观察执行并运行 `reconcile`），`--allow-chat` 让已绑定的控制者给任意有效角色发消息。要从手机或其他电脑打开，可使用 `--lan`（私有网络 HTTPS）、SSH 隧道，或配合 `--public-origin` 的私有 HTTPS 代理。带令牌的地址就代表这些操作权限，只交给可以使用它们的人。详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
 任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。主要阶段如下：
 
@@ -216,7 +218,8 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 - **配置不等于授权。** 派发、通知和连续执行都需要你明确授权。通知本身也不构成新的授权。
 - **完成以审核为准。** 终端空闲、退出码为 0 或 `review_ready` 都不算通过，只有登记的审核结论才算。
-- **不盲目重试。** 每个任务只发送一次。发送或通知结果不确定时，会被记录下来留待检查。
+- **不盲目重试。** 每个任务只发送一次。发送或通知结果不确定时，会被记录下来留待检查。对中途停止任务的 `continue` 有次数限制、先记账，且不会重试。
+- **暂停不等于结束。** Worker 提前停止或停在提示上时，监控继续进行；任务未关闭时不能审核暂停事件，审批提示从不自动回答。
 - **只有一个控制者。** 切换后旧绑定失去权限。旁支对话可以提供建议，但不能确认事件、审核或派发。
 - **停止监控不会停止 Worker。** 取消工作需要单独处理。
 - **上下文标志是受信输入。** `--context main` 由操作者或桥接程序声明，不是身份认证。
@@ -252,11 +255,11 @@ agents/openai.yaml                 Skill 界面元数据
 references/                        详细指南与约定
 examples/                          workflow.json、request.herdr.json、dag.json、job.json
 docs/images/                       README 配图
-scripts/workflow_control.py        状态、绑定、收件箱、审核关卡、状态查询
-scripts/workflow_scheduler.py      派发、DAG、资源占用
-scripts/monitor_task.py            状态轮询与一次性通知
+scripts/workflow_control.py        状态、绑定、窗格名称、收件箱、审核关卡、状态查询
+scripts/workflow_scheduler.py      派发、受限继续、DAG、资源占用
+scripts/monitor_task.py            状态轮询、停顿报告与一次性通知
 scripts/run_job.py                 带回执的一次性 CLI 作业
 scripts/demo_scheduler.py          离线演示
-scripts/dashboard.py               本地台账面板与可选派发表单
+scripts/dashboard.py               本地台账面板，可选派发、审核和对话
 dashboard.cmd / dashboard.command  双击启动面板
 ```
