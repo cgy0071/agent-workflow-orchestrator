@@ -1,5 +1,6 @@
 """Generate README SVG images into docs/images/. Run from the repository root.
 
+The dashboard screenshot (dashboard-overview.png) comes from docs/images/dashboard_shot.py.
 The terminal image uses real captured output:
   python -B scripts/demo_scheduler.py --directory runtime/first-run > demo.txt
   python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text > status.txt

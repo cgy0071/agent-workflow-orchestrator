@@ -1007,7 +1007,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     const item = add(root, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
     add(head, 'strong', 'raw', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
     add(item, 'p', 'role-summary', named(e.report_status, reportNames));
-    if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
+    const paused = ['incomplete', 'blocked', 'adapter_error'].includes(e.report_status);
+    if (paused && ['pending', 'acknowledged'].includes(e.status))
+      add(item, 'p', 'role-summary', 'Planner: the worker stopped before delivery. Continue it once when it can run, or close the attempt; this update is not reviewed.');
+    else if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
     else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
     if (data.allow_dispatch && e.role === data.actor_role && ['pending','acknowledged'].includes(e.status)) {
       const open = add(item, 'button', '', e.status === 'pending' ? 'Acknowledge...' : 'Record review...');

@@ -52,6 +52,7 @@
     "Updates for reviewers": "给审核者的更新",
     "Updates waiting for a reviewer": "等待审核者处理的更新",
     "Nothing is waiting for review.": "目前没有等待审核的更新。",
+    "Planner: the worker stopped before delivery. Continue it once when it can run, or close the attempt; this update is not reviewed.": "Planner：Worker 未交付即停止。可在它恢复后让它继续一次，或关闭本次尝试；这条更新不需要审核。",
     "Hide handled updates": "隐藏已处理的更新",
     "Resource limits": "资源限制",
     "Reserved capacity for active tasks": "进行中任务占用的容量",
