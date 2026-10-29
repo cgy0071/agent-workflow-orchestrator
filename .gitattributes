@@ -9,3 +9,4 @@ scripts/test_*.py export-ignore
 scripts/check_encoding.py export-ignore
 scripts/validate_native.py export-ignore
 docs/images/generate.py export-ignore
+docs/images/dashboard_shot.py export-ignore
