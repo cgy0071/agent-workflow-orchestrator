@@ -59,19 +59,21 @@ L = {
     "en": {"you": ("You", ["goal and authorization"]),
            "planner": ("Planner", ["writes task.md", "dispatches the task"]),
            "executor": ("Executor", ["implements and tests", "writes RESULT.md + HANDOFF.md"]),
-           "monitor": ("monitor_task.py", ["polls status every 300 s", "checks files, task ID, nonce"]),
+           "monitor": ("monitor_task.py", ["polls status every 300 s", "checks files, task ID, nonce",
+                                           "reports a stop once, keeps watching"]),
            "ledger": ("SQLite ledger", ["records exactly one", "inbox event"]),
            "reviewer": ("Reviewer", ["reads the raw evidence", "accept / repair / reject"]),
-           "once": "sent once", "next": "next or repair task",
+           "once": "sent once", "next": "next or repair task", "continue": "dashed: continue once after a stop",
            "legend_agent": "AI agent (any harness)", "legend_tool": "script in this repository",
            "overview": "Workflow overview"},
     "zh": {"you": ("你", ["目标与授权"]),
            "planner": ("Planner 规划者", ["编写 task.md", "派发任务"]),
            "executor": ("Executor 执行者", ["实现并测试", "写入 RESULT.md 和 HANDOFF.md"]),
-           "monitor": ("monitor_task.py", ["每 300 秒查询一次状态", "核对文件、任务 ID、nonce"]),
+           "monitor": ("monitor_task.py", ["每 300 秒查询一次状态", "核对文件、任务 ID、nonce",
+                                           "中途停止只报告一次，继续观察"]),
            "ledger": ("SQLite 台账", ["只记录一条", "收件箱事件"]),
            "reviewer": ("Reviewer 审核者", ["阅读原始证据", "accept / repair / reject"]),
-           "once": "只发送一次", "next": "下一任务或返工任务",
+           "once": "只发送一次", "next": "下一任务或返工任务", "continue": "虚线：中途停止后继续一次",
            "legend_agent": "AI Agent（任意客户端）", "legend_tool": "本仓库中的脚本",
            "overview": "工作流概览"},
 }
@@ -90,16 +92,19 @@ def overview(lang):
     body = [box(30, 40, 170, 90, *t["you"], cls="chip"),
             box(260, 40, 260, 90, *t["planner"], cls="agent"),
             box(600, 40, 290, 90, *t["executor"], cls="agent"),
-            box(600, 190, 290, 90, *t["monitor"], cls="tool", mono_title=True),
-            box(320, 190, 220, 90, *t["ledger"], cls="tool"),
-            box(30, 190, 230, 90, *t["reviewer"], cls="agent"),
-            arrow([(200, 85), (258, 85)]), arrow([(520, 85), (598, 85)]),
-            text(560, 75, t["once"], 11.5, "m"),
-            arrow([(745, 130), (745, 188)]), arrow([(600, 235), (542, 235)]), arrow([(320, 235), (262, 235)]),
-            arrow([(200, 190), (200, 160), (390, 160), (390, 132)], dashed=True),
-            text(295, 153, t["next"], 11.5, "m"),
-            legend(314, lang)]
-    return svg(920, 332, t["overview"], body)
+            box(600, 190, 290, 104, *t["monitor"], cls="tool", mono_title=True),
+            box(320, 190, 220, 104, *t["ledger"], cls="tool"),
+            box(30, 190, 230, 104, *t["reviewer"], cls="agent"),
+            arrow([(200, 70), (258, 70)]), arrow([(520, 70), (598, 70)]),
+            text(560, 60, t["once"], 11.5, "m"),
+            # A stopped Executor gets at most a bounded continuation of the same task, never a resend.
+            arrow([(520, 108), (598, 108)], dashed=True),
+            text(560, 150, t["continue"], 11.5, "m"),
+            arrow([(745, 130), (745, 188)]), arrow([(600, 242), (542, 242)]), arrow([(320, 242), (262, 242)]),
+            arrow([(200, 190), (200, 166), (390, 166), (390, 132)], dashed=True),
+            text(295, 160, t["next"], 11.5, "m"),
+            legend(328, lang)]
+    return svg(920, 346, t["overview"], body)
 def terminal(demo_line, status_lines):
     # Real captured output; a terminal stays dark in both page themes.
     lines = [("$ ", "python -B scripts/demo_scheduler.py --directory runtime/first-run")]
@@ -153,7 +158,7 @@ S = {"en": {"title": "Task lifecycle",
             "steps": [("ready", ["dependencies met"]), ("execution_unconfirmed", ["sent once, never resent"]),
                       ("executing", ["start confirmed", "by reconcile"]), ("awaiting_review", ["review_ready:", "files + nonce valid"]),
                       ("accepted", ["review recorded", "dependents unlocked"])],
-            "e1": ("needs_inspection / failed", ["timeout, identity change, exit"]),
+            "e1": ("needs_inspection", ["stop, prompt or outage:", "watched; continue or close"]),
             "e2": ("review_blocked", ["reject or repair:", "plan a new scoped task"]),
             "e3": ("evidence_changed", ["accepted files changed:", "dependents stay blocked"]),
             "dispatch": "dispatch", "reconcile": "reconcile", "monitor": "monitor", "review": "review"},
@@ -161,7 +166,7 @@ S = {"en": {"title": "Task lifecycle",
             "steps": [("ready", ["依赖已满足"]), ("execution_unconfirmed", ["只发送一次，不重发"]),
                       ("executing", ["reconcile 确认", "已开始执行"]), ("awaiting_review", ["review_ready：", "文件与 nonce 有效"]),
                       ("accepted", ["审核已记录", "解锁下游任务"])],
-            "e1": ("needs_inspection / failed", ["超时、身份变化、退出"]),
+            "e1": ("needs_inspection", ["停止、提示或中断：", "继续观察；继续一次或关闭"]),
             "e2": ("review_blocked", ["reject 或 repair：", "新建限定范围任务"]),
             "e3": ("evidence_changed", ["已通过的文件被改动：", "下游保持阻塞"]),
             "dispatch": "dispatch", "reconcile": "reconcile", "monitor": "monitor", "review": "review"}}
@@ -183,7 +188,7 @@ def lifecycle(lang):
         x = x0 + i * (w + gap)
         return (arrow([(x + w / 2, y0 + 84), (x + w / 2, 196)], dashed=True) +
                 box(x - 6, 198, w + 12, 74, *entry, cls=cls, mono_title=True, size=13))
-    body += [down(2, t["e1"], "bad"), down(3, t["e2"], "bad"), down(4, t["e3"], "bad")]
+    body += [down(2, t["e1"], "warn"), down(3, t["e2"], "bad"), down(4, t["e3"], "bad")]
     return svg(x0 * 2 + 5 * w + 4 * gap, 292, t["title"], body)
 
 

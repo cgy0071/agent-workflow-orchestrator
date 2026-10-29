@@ -197,7 +197,7 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 - 对控制者 Agent 说“打开状态面板”，Skill 已写明做法。
 - 运行 `python -B scripts/dashboard.py`，可加 `--state /abs/state`。
 
-![离线演示后的状态面板：目标、三个已绑定角色、进行中和最近的任务，以及 A/B 到 JOIN 的任务计划](docs/images/dashboard.png)
+![离线演示后的状态面板：目标、三个已绑定角色、进行中和最近的任务，以及 A/B 到 JOIN 的任务计划](docs/images/dashboard-overview.png)
 
 操作功能默认关闭，需要在启动时开启：`--allow-dispatch` 开启表单派发和审核操作（派发后仍须独立观察执行并运行 `reconcile`），`--allow-chat` 让已绑定的控制者给任意有效角色发消息。要从手机或其他电脑打开，可使用 `--lan`（私有网络 HTTPS）、SSH 隧道，或配合 `--public-origin` 的私有 HTTPS 代理。带令牌的地址就代表这些操作权限，只交给可以使用它们的人。详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 

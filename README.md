@@ -197,7 +197,7 @@ For a local ledger view, open the optional dashboard. It reads the ledger withou
 - Ask the controller agent to "open the dashboard"; the Skill tells it how.
 - Run `python -B scripts/dashboard.py`, optionally with `--state /abs/state`.
 
-![Dashboard after the offline demo: goal, three assigned roles, open and recent tasks, and the A/B to JOIN task plan](docs/images/dashboard.png)
+![Dashboard after the offline demo: goal, three assigned roles, open and recent tasks, and the A/B to JOIN task plan](docs/images/dashboard-overview.png)
 
 Actions are off unless you start the dashboard with them: `--allow-dispatch` adds form dispatch and review actions (dispatch still requires an independently observed `reconcile`), and `--allow-chat` lets the bound controller message any active role. To open it from a phone or another computer, use `--lan` (private-network HTTPS), an SSH tunnel, or a private HTTPS proxy with `--public-origin`. The token URL grants these actions, so give it only to people who may use them. See [monitoring.md](references/monitoring.md).
 
