@@ -12,7 +12,7 @@ With this tool:
 
 1. The **Planner** agent writes a task (objective, scope, acceptance criteria) and dispatches it once to the **Executor** agent.
 2. A script polls the Executor's *status* every 5 minutes. It does not ask a model to reread the conversation, so monitoring costs almost nothing.
-3. When the Executor finishes and the expected files (for example `RESULT.md`, `HANDOFF.md`) pass validation, the script records one completion event for the reviewer. Direct prompting is optional.
+3. When the Executor finishes and the expected files (for example `RESULT.md`, `HANDOFF.md`) pass validation, the script records one completion event for the reviewer. Direct prompting is optional. If the Executor stops early or waits on a prompt, that is reported once and watching continues.
 4. The reviewer checks the raw evidence, records `accept`, `repair`, or `reject`, and, if you authorized it, dispatches the next task.
 
 The repository contains two parts:
@@ -133,7 +133,7 @@ python scripts/workflow_control.py --state /abs/state bind --role planner --spec
 python scripts/workflow_control.py --state /abs/state bind --role executor --spec worker.json --mode worker
 ```
 
-`bind` queries the live session and refuses a mismatched identity. Save the controller `instance_id` and `version` it prints; later commands pass them as `--actor` and `--version`.
+`bind` queries the live session and refuses a mismatched identity. Save the controller `instance_id` and `version` it prints; later commands pass them as `--actor` and `--version`. With Herdr, the bound pane is also named `awo:<role>` so you can see which pane is which; a name you set yourself is kept. `workflow_control.py --state /abs/state roles` shows every role's pane and whether its identity still matches.
 
 ### 4. Write the task and its request
 
@@ -178,6 +178,8 @@ python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 
 The monitor polls every 300 seconds by default and runs until completion or an exception. There is no default overall time limit, but each status query has a timeout. With `workflow_state`, `--notify` records an inbox event even when `authorization.notify_reviewer` is false. With `inbox_only`, it never prompts the reviewer directly. Background startup and the full status contract: [monitoring.md](references/monitoring.md).
 
+If the Executor stops early (quota, rate limit, network) or waits on a permission prompt, the monitor reports it once and keeps watching the same task, so a later delivery still reaches review. After a stop without delivery, the controller can send one bounded `workflow_scheduler.py continue --task TASK-ID` for the same task instead of resending it. Permission prompts are left for you to answer in the Executor's own window. Details: [scheduling.md](references/scheduling.md#stalls-permission-prompts-and-bounded-continuation).
+
 ### 7. Review and continue
 
 ```sh
@@ -189,15 +191,15 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 The reviewer reads the raw evidence and writes `REVIEW.md` with the task ID, nonce, and verdict. `next-check` returns a `parent_review` record; put it in the next task's request to link the follow-up. Without `continuous_execution_authorized`, the controller stops here and reports back to you.
 
-For a local ledger view, open the optional dashboard. It shows bindings, tasks, DAGs, inbox events, resources, and alerts without contacting agents; live probing needs a button click. Any of these opens it in your browser:
+For a local ledger view, open the optional dashboard. It reads the ledger without contacting agents and leads with what needs you: open and recent tasks (older finished ones fold behind a range selector), follow-up chains as compact cards, updates waiting for review, and alerts that need a check. Titles come from each task's `TASK.md`, without IDs, hashes, or paths. **Check agents now** queries agents only when clicked. The interface switches between English and Chinese. Any of these opens it in your browser:
 
 - Double-click `dashboard.cmd` (Windows) or `dashboard.command` (macOS) in the repository folder, then pick a recent state directory or paste one.
 - Ask the controller agent to "open the dashboard"; the Skill tells it how.
 - Run `python -B scripts/dashboard.py`, optionally with `--state /abs/state`.
 
-![Dashboard after the offline demo: goal, three assigned roles, three accepted tasks, and the A/B to JOIN task plan](docs/images/dashboard.png)
+![Dashboard after the offline demo: goal, three assigned roles, open and recent tasks, and the A/B to JOIN task plan](docs/images/dashboard.png)
 
-Authorized form dispatch is opt-in and still requires an independently observed `reconcile` step; see [monitoring.md](references/monitoring.md).
+Actions are off unless you start the dashboard with them: `--allow-dispatch` adds form dispatch and review actions (dispatch still requires an independently observed `reconcile`), and `--allow-chat` lets the bound controller message any active role. To open it from a phone or another computer, use `--lan` (private-network HTTPS), an SSH tunnel, or a private HTTPS proxy with `--public-origin`. The token URL grants these actions, so give it only to people who may use them. See [monitoring.md](references/monitoring.md).
 
 At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action. The main phases:
 
@@ -216,7 +218,8 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 
 - **Configuration is not permission.** Dispatch, notification, and continuous execution each need explicit authorization from you. A notification is not new authorization.
 - **Done means reviewed.** An idle terminal, a zero exit code, or `review_ready` never counts as acceptance. Only a recorded review does.
-- **No blind retries.** Each task is sent once. If a send or notification is uncertain, it is recorded and left for inspection.
+- **No blind retries.** Each task is sent once. If a send or notification is uncertain, it is recorded and left for inspection. A `continue` for a stopped task is bounded, journaled, and never retried.
+- **Pauses are not endings.** A worker that stops early or waits on a prompt keeps its monitor; a pause cannot be reviewed while the task is open, and approval prompts are never answered automatically.
 - **One controller.** Old bindings lose authority after a switch. Side conversations can advise but cannot acknowledge, review, or dispatch.
 - **Stopping the monitor does not stop the worker.** Cancel work separately.
 - **Context flags are trusted input.** `--context main` is declared by the operator or a bridge; it is not authentication.
@@ -252,11 +255,11 @@ agents/openai.yaml                 Skill UI metadata
 references/                        Detailed guides and contracts
 examples/                          workflow.json, request.herdr.json, dag.json, job.json
 docs/images/                       README images
-scripts/workflow_control.py        State, bindings, inbox, review gates, status
-scripts/workflow_scheduler.py      Dispatch, DAGs, resource claims
-scripts/monitor_task.py            Status polling and one-time notification
+scripts/workflow_control.py        State, bindings, pane names, inbox, review gates, status
+scripts/workflow_scheduler.py      Dispatch, bounded continuation, DAGs, resource claims
+scripts/monitor_task.py            Status polling, stall reports, and one-time notification
 scripts/run_job.py                 One-shot CLI jobs with receipts
 scripts/demo_scheduler.py          Offline demo
-scripts/dashboard.py               Local ledger dashboard and optional dispatch form
+scripts/dashboard.py               Local ledger dashboard with optional dispatch, review, and chat
 dashboard.cmd / dashboard.command  Double-click launchers for the dashboard
 ```
