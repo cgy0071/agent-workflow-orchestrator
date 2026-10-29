@@ -367,6 +367,8 @@ class DashboardTests(unittest.TestCase):
             self.assertTrue(target)
         self.assertIn('id="chat-panel"', html)
         self.assertIn('id="lang"', html)
+        for element in ('id="inbox-toggle"', 'id="inbox-history"', 'id="task-range"', 'id="dispatch-panel"'):
+            self.assertIn(element, html)  # Handled updates and old tasks are folded, not dropped.
 
     def test_task_summary_prefers_human_text_and_never_raises(self):
         import workflow_status
