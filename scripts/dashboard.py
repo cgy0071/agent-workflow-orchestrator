@@ -341,6 +341,10 @@ svg { display:block; max-width:none; height:auto; margin:auto } svg text { font:
 svg line { stroke:var(--muted); stroke-width:1.5 } svg rect { fill:var(--surface); stroke:var(--line); stroke-width:1.5 }
 svg rect.accepted { stroke:#3baf70; stroke-width:2 } svg rect.executing { stroke:#478cd7; stroke-width:2 }
 svg rect.scheduling_blocked,svg rect.review_blocked { stroke:var(--warn); stroke-width:2 }
+svg rect.awaiting_review,svg rect.under_review,svg rect.execution_unconfirmed { stroke:var(--warn); stroke-width:2 }
+svg rect.needs_inspection,svg rect.failed { stroke:var(--danger); stroke-width:2 }
+svg rect.followed_up,svg rect.closed,svg rect.folded { stroke-dasharray:5 4 }
+.chain-actions { margin-top:8px }
 .list { display:grid; gap:8px } .list-item { padding:9px 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere }
 .event-item,.alert-item { min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:10px;
   background:var(--bg) } .event-head { display:flex; justify-content:space-between; align-items:center; gap:8px }
@@ -620,7 +624,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     blocked_dependency:'Earlier task needs attention', blocked:'Needs attention', under_review:'Under review',
     running:'In progress', submitted:'Sent; start unconfirmed', reserved:'Send reserved', uncertain:'Send uncertain',
     not_sent:'Not sent', terminated:'Stopped', pending:'Waiting for review', acknowledged:'Review acknowledged',
-    reviewed:'Reviewed', followed_up:'Followed up'
+    reviewed:'Reviewed', followed_up:'Followed up', folded:'Folded'
   };
   const reviewNames = {accept:'Accepted', reject:'Rejected', repair:'Needs repair'};
   const nextNames = {
@@ -946,27 +950,49 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       const lastAt = Math.max(...steps.map(t => lastActivity(data, t.task_id)));
       if (lastAt) facts.push('Last activity ' + when(new Date(lastAt).toISOString()));
       add(card, 'p', 'chain-facts', facts.join(' - '));
-      const list = add(card, 'ol', 'chain-steps'), all = openKeys.has(key);
-      const shown = all ? steps : steps.slice(-5);
-      list.start = steps.length - shown.length + 1;
-      for (const t of shown) {
-        const item = add(list, 'li'); const phase = superseded(data, t) ? 'followed_up' : t.phase;
-        add(item, 'span', 'badge ' + phase, named(phase, stageNames));
-        add(item, 'span', 'raw', ' ' + taskName(data, t.task_id));
-        add(item, 'span', 'task-id', t.task_id);
+      const all = openKeys.has(key), asGraph = openKeys.has('graph:' + steps[0].task_id);
+      const shown = all ? steps : steps.slice(-5), hidden = steps.length - shown.length;
+      if (asGraph) {
+        // The same steps as the list, as boxes and arrows; earlier steps fold into one box.
+        const ids = new Set(shown.map(t => t.task_id)), nodes = {}, deps = {};
+        if (hidden) nodes.__earlier__ = 'folded';
+        for (const t of shown) {
+          nodes[t.task_id] = superseded(data, t) ? 'followed_up' : t.phase;
+          const parent = (data.task_details[t.task_id] || {}).parent_task;
+          deps[t.task_id] = ids.has(parent) ? [parent] : (hidden && parent ? ['__earlier__'] : []);
+        }
+        graphSvg(card, taskName(data, steps[0].task_id), nodes, deps,
+          name => name === '__earlier__' ? tr(hidden + ' earlier steps') : taskName(data, name), true);
+      } else {
+        const list = add(card, 'ol', 'chain-steps');
+        list.start = hidden + 1;
+        for (const t of shown) {
+          const item = add(list, 'li'); const phase = superseded(data, t) ? 'followed_up' : t.phase;
+          add(item, 'span', 'badge ' + phase, named(phase, stageNames));
+          add(item, 'span', 'raw', ' ' + taskName(data, t.task_id));
+          add(item, 'span', 'task-id', t.task_id);
+        }
       }
+      const actions = add(card, 'div', 'small-actions chain-actions');
+      const view = add(actions, 'button', '', asGraph ? 'Show as list' : 'Show as graph'); view.type = 'button';
+      view.addEventListener('click', () => { const g = 'graph:' + steps[0].task_id;
+        asGraph ? openKeys.delete(g) : openKeys.add(g); if (lastData) dagGraph(lastData); });
       if (steps.length > 5) {
-        const more = add(card, 'button', '', all ? 'Show only the latest 5 steps' : 'Show all ' + steps.length + ' steps');
+        const more = add(actions, 'button', '', all ? 'Show only the latest 5 steps' : 'Show all ' + steps.length + ' steps');
         more.type = 'button';
         more.addEventListener('click', () => { all ? openKeys.delete(key) : openKeys.add(key); if (lastData) dagGraph(lastData); });
       }
     }
   }
   function drawGraph(root, run, nodes, dependencies, label) {
+    const box = add(root, 'div', 'dag-run'); const title = add(box, 'div', 'dag-title');
+    add(title, 'h3', '', run); add(title, 'span', 'dag-count', Object.keys(nodes).length + ' tasks');
+    graphSvg(box, run, nodes, dependencies, label);
+  }
+  // Boxes and arrows for a frozen DAG plan or a follow-up chain; columns follow dependency depth.
+  function graphSvg(root, run, nodes, dependencies, label, compact = false) {
     {
       const dag = {nodes, dependencies};
-      const box = add(root, 'div', 'dag-run'); const title = add(box, 'div', 'dag-title');
-      add(title, 'h3', '', run); add(title, 'span', 'dag-count', Object.keys(dag.nodes).length + ' tasks');
       const levels = {}, visiting = new Set();
       const level = name => { if (levels[name] !== undefined) return levels[name];
         if (visiting.has(name)) return 0; visiting.add(name);
@@ -976,8 +1002,9 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       Object.keys(dag.nodes).forEach(level);
       const groups = []; for (const name of Object.keys(dag.nodes)) (groups[levels[name]] ||= []).push(name);
       const width = Math.max(300, groups.length * 230 + 30);
-      const height = Math.max(130, Math.max(...groups.map(g => g.length)) * 105 + 24);
-      const wrap = add(box, 'div', 'dag-scroll'); const svg = svgEl('svg');
+      const rows = Math.max(...groups.map(g => g.length));
+      const height = compact ? rows * 105 - 5 : Math.max(130, rows * 105 + 24);
+      const wrap = add(root, 'div', 'dag-scroll'); const svg = svgEl('svg');
       svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height); svg.setAttribute('role', 'img');
       svg.style.width = width + 'px'; svg.style.height = height + 'px';
       svg.setAttribute('aria-label', 'Dependency graph for ' + run); wrap.append(svg);
@@ -997,8 +1024,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         const sub = svgEl('text'); sub.setAttribute('x', x + 12); sub.setAttribute('y', y + 49);
         sub.setAttribute('translate', 'no'); svg.append(sub);
         fitSvgText(sub, tr(named(state, {...stageNames, ...dagNames})));
-        const tip = svgEl('title'); tip.textContent = text + ' (' + name + '): ' + tr(named(state, stageNames)); rect.append(tip);
+        const tip = svgEl('title'); tip.textContent = name.startsWith('__') ? text :
+          text + ' (' + name + '): ' + tr(named(state, stageNames)); rect.append(tip);
       }
+      // A chain's newest step is rightmost; keep it in view when the graph is wider than the card.
+      if (compact) requestAnimationFrame(() => { wrap.scrollLeft = wrap.scrollWidth; });
     }
   }
   // Only updates that still need someone are listed; handled ones stay one click away.

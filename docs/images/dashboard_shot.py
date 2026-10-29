@@ -210,6 +210,11 @@ def main():
         time.sleep(3)
         # The state lives in a temporary folder; show the path a reader of the README would use.
         tools.call("Runtime.evaluate", expression="document.getElementById('state').textContent = 'runtime/first-run/state'")
+        # Show the follow-up chain as a graph, the view the README describes.
+        tools.call("Runtime.evaluate", expression=(
+            "[...document.querySelectorAll('.chain-actions button')].filter(b => b.textContent === 'Show as graph')"
+            ".forEach(b => b.click())"))
+        time.sleep(0.5)
         bottom = tools.call("Runtime.evaluate", returnByValue=True, expression=(
             "Math.round(Math.max(...[...document.querySelectorAll('#inbox, #alerts')]"
             ".map(e => e.closest('section').getBoundingClientRect().bottom)) + scrollY + 16)"))["result"]["value"]
