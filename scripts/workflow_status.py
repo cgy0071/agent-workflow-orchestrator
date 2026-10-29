@@ -7,15 +7,51 @@ import re
 
 SUMMARY_READ = 65536  # bytes of a taskbook read for its title and opening lines
 # Routing lines repeat what the ledger already shows; skip them when summarizing.
-ROUTING = re.compile(r"(task id|nonce|cwd|assigned directory|completion marker|status|owner authorization|roles?)"
-                     r"[^:\uff1a]{0,60}[:\uff1a]", re.I)
+ROUTING = re.compile(r"(task id|nonce|cwd|assigned directory|completion marker|status|owner authorization|roles?|"
+                     r"date|\u65e5\u671f)[^:\uff1a]{0,60}[:\uff1a]", re.I)
+# Identifiers that mean nothing to a reader: digests/nonces (also shortened "b61826b0..."), and absolute paths.
+NOISE = [re.compile(p) for p in (r"`?(?:\b[a-z]+_)?(?<![0-9A-Za-z])(?=[0-9a-fA-F]*\d)(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{7,}"
+                                 r"(?![0-9A-Za-z])(?:\u2026|\.\.\.)?`?",
+                                 r"`?[A-Za-z]:[\\/][^\s,;`'\")\uff0c\uff1b]*`?",
+                                 r"`?(?<![\w.])/(?:[\w.-]+/){2,}[\w.-]*`?")]
+FILLER = re.compile(r"(?:,?\s*(?:nonce|worktree|assigned worktree|working directory|cwd)\s*(?=[,.;]|$))+", re.I)
 
 
-def task_summary(task_id, cwd, messages):
+def _plain(text, task_id):
+    """Drop the task ID, digests, paths and markup from a sentence; keep what the task is about."""
+    text = re.sub(r"\b" + re.escape(task_id) + r"\b", "", text).replace("**", "").replace("`", "")
+    for pattern in NOISE:
+        text = pattern.sub("", text)
+    text = FILLER.sub("", text)
+    text = re.sub(r"\(\s*\)|\[\s*\]|\uff08\s*\uff09", "", text)
+    text = re.sub(r"\s*/\s*(?=[/,;\uff0c\uff1b\u3001]|$)|(?<=[/\u3001])\s*/", "", text)  # separators left by removals
+    text = re.sub(r"\s+([,.;:\uff0c\uff1b])", r"\1", re.sub(r"\s{2,}", " ", text))
+    text = re.sub(r"([,;\uff0c\uff1b\u3001])\s*[,;\uff0c\uff1b\u3001]+", r"\1", text)
+    return re.sub(r"^[\s,.;:/\uff0c\uff1b\uff1a\u3001\u2014\u2013-]+|[\s,;:/\uff0c\uff1b\uff1a\u3001\u2014\u2013-]+$", "", text)
+
+
+def _delivery_folder(request):
+    # A task spec often sits beside its deliverables, e.g. history/TASK-ID/TASK.md next to HANDOFF.md.
+    binding = request.get("completion", {}).get("binding_artifact")
+    binding = binding if isinstance(binding, str) else (binding or {}).get("path")
+    if not binding:
+        return None
+    path = Path(binding)
+    return str((path if path.is_absolute() else Path(request["cwd"]) / path).parent)
+
+
+def _journal_entry(item):
+    """Time, event and outcome only; producer hashes and raw payloads stay in the ledger."""
+    data = item.get("data") or {}
+    return {"at": item.get("at"), "kind": item.get("kind"), "outcome": data.get("outcome") if isinstance(data, dict) else None}
+
+
+def task_summary(task_id, cwd, messages, delivery_folder=None):
     """Title and a short excerpt of what a task asks for; never raises."""
     candidates = [Path(m) for m in messages[:1] if m]
-    if cwd:
-        candidates += [Path(cwd) / "TASK.md", Path(cwd) / "task.md"]
+    for folder in (delivery_folder, cwd):
+        if folder:
+            candidates += [Path(folder) / "TASK.md", Path(folder) / "task.md"]
     texts = []
     for path in candidates:
         try:
@@ -29,13 +65,18 @@ def task_summary(task_id, cwd, messages):
     for text in texts:
         if text.lstrip().startswith(("{", "[")):
             continue  # machine-readable message; not a human description
+        lines = [line.strip().lstrip("#").strip() for line in text.splitlines()]
+        lines = [line for line in lines if line and not ROUTING.match(line) and not set(line) <= set("-=|*`")]
+        if len(lines) == 1:
+            # A one-paragraph dispatch message: its first sentence is the title.
+            lines = [part for part in re.split(r"(?<=[.!?\u3002\uff01\uff1f])\s+", lines[0]) if part]
         title, body = "", []
-        for line in text.splitlines():
-            line = line.strip().lstrip("#").strip()
-            if not line or ROUTING.match(line) or set(line) <= set("-=|*`"):
+        for line in lines:
+            line = _plain(line, task_id)
+            if not line:
                 continue
             if not title:
-                title = re.sub(r"^" + re.escape(task_id) + r"\s*[:\uff1a\u2014\u2013-]*\s*", "", line) or line
+                title = line
             else:
                 body.append(line)
             if sum(map(len, body)) > 240:
@@ -159,12 +200,13 @@ def dashboard_details(state, summary=None):
             for role in {row["worker"], data["controller"]["role"], data["request"]["reviewer"]["role"]}:
                 if role in roles:
                     roles[role]["tasks"].append({"task_id": row["id"], "phase": phases.get(row["id"], row["status"])})
-        cwd_by_task, sources, parents = {}, {}, {}
+        cwd_by_task, sources, parents, beside = {}, {}, {}, {}
         for row in con.execute("SELECT id,data FROM tasks"):
             request = json.loads(row["data"])["request"]
             cwd_by_task[row["id"]] = request["cwd"]
             sources[row["id"]] = [request.get("taskbook_path")]
             parents[row["id"]] = request.get("parent_task")
+            beside[row["id"]] = _delivery_folder(request)
         if has_schema(con):
             for row in con.execute("SELECT task,data FROM dispatches"):
                 sources.setdefault(row["task"], []).append(json.loads(row["data"]).get("message"))
@@ -174,13 +216,13 @@ def dashboard_details(state, summary=None):
                     sources.setdefault(node["request"]["task_id"], []).append(node.get("message"))
     task_details = {}
     for item in raw["tasks"]:
-        task_details[item["task_id"]] = {"cwd": item["cwd"], "journal": item.get("journal", [])[-10:],
+        task_details[item["task_id"]] = {"cwd": item["cwd"], "journal": [_journal_entry(j) for j in item.get("journal", [])[-10:]],
                                          "parent_task": parents.get(item["task_id"])}
     for dag in raw["dags"].values():
         for name, plan in dag["tasks"].items():
             task_details.setdefault(plan["task_id"], {"cwd": cwd_by_task.get(plan["task_id"]), "journal": []})
     for task_id, detail in task_details.items():
-        detail.update(task_summary(task_id, detail.get("cwd"), sources.get(task_id, [])))
+        detail.update(task_summary(task_id, detail.get("cwd"), sources.get(task_id, []), beside.get(task_id)))
     return {"goal": config.get("goal", ""), "roles": list(roles.values()), "inbox": inbox,
             "verdicts": sorted(config.get("workflow", {}).get("transitions", {})),
             "dags": raw["dags"], "scheduling_blocks": raw["scheduling_blocks"], "task_details": task_details}

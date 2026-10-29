@@ -380,6 +380,35 @@ class DashboardTests(unittest.TestCase):
                          {"title": "", "excerpt": ""})
         self.assertEqual(workflow_status.task_summary("X", None, [None, "Plain message\nDo it."])["title"], "Plain message")
 
+    def test_summary_reads_spec_beside_delivery_and_hides_hashes_and_paths(self):
+        import workflow_status
+        history = self.root / "repo" / ".ai" / "history" / "SUM-2"
+        history.mkdir(parents=True)
+        (history / "TASK.md").write_text("# SUM-2 — Keep partial responses after disconnect\n\n"
+                                         "Date: 2026-10-27. Wrapper b61826b0… and codec `C072374f0` are frozen.\n",
+                                         encoding="utf-8")
+        summary = workflow_status.task_summary("SUM-2", str(self.root / "repo"), [None], str(history))
+        self.assertEqual(summary["title"], "Keep partial responses after disconnect")
+        self.assertNotIn("b61826b0", summary["excerpt"])
+        self.assertNotIn("C072374f0", summary["excerpt"])
+        message = ("Authorized bounded continuation SUM-3, nonce f4529807dbb940309a63bec33988382e, assigned worktree "
+                   + str(self.root) + ". Read the parent review and finish case A.")
+        summary = workflow_status.task_summary("SUM-3", None, [None, message])
+        self.assertEqual(summary, {"title": "Authorized bounded continuation", "excerpt": "Read the parent review and finish case A."})
+        for text in ("SUM-3", "f4529807", str(self.root)):
+            self.assertNotIn(text, json.dumps(summary))
+
+    def test_status_history_has_no_producer_hashes_or_payloads(self):
+        request = self.request("HIST-1", "executor")
+        self.assertEqual(scheduler.dispatch(self.state, request, self.message(request), *self.actor(),
+                                            transport=self.fake)["status"], "SUBMITTED")
+        self.confirm(request)
+        journal = self.http("GET", "/api/status")[1]["task_details"]["HIST-1"]["journal"]
+        self.assertEqual([j["kind"] for j in journal], ["dispatch_reserved", "dispatch_submitted", "dispatch_reconciled"])
+        self.assertEqual(journal[-1]["outcome"], "running")
+        self.assertEqual({key for j in journal for key in j}, {"at", "kind", "outcome"})
+        self.assertNotIn(self.controller["instance_id"], json.dumps(journal))
+
     def test_startup_rejects_public_host_or_incomplete_controller(self):
         with self.assertRaises(ValueError):
             dashboard.DashboardServer(("0.0.0.0", 0), self.state)

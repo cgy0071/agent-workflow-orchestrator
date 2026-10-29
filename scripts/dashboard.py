@@ -324,6 +324,15 @@ pre { margin:7px 0; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.45
   background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:9px; max-height:320px; overflow:auto }
 .dag-run { min-width:0 } .dag-title { display:flex; align-items:center; gap:9px; margin:0 0 11px }
 .dag-count { color:var(--muted); font-size:11px }
+.panel-tools { display:flex; align-items:center; gap:12px; flex-wrap:wrap }
+.range-label { display:flex; align-items:center; gap:7px; font-size:12px } .range-label span { margin:0 }
+.range-label select { width:auto; padding:6px 9px }
+.chain { border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin:0 0 10px }
+.chain-head { display:flex; justify-content:space-between; align-items:center; gap:10px }
+.chain-facts { margin:5px 0 8px; font-size:12px; color:var(--muted) }
+.chain-steps { margin:0 0 8px; padding-left:22px; font-size:12px }
+.chain-steps li { margin:4px 0 } .chain-steps .task-id { display:inline; margin-left:6px }
+.history p { margin:3px 0; font-size:12px } .history-time { display:inline-block; min-width:92px; color:var(--muted) }
 .dag-scroll { width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:12px;
   padding:12px; background:var(--bg) }
 svg { display:block; max-width:none; height:auto; margin:auto } svg text { font:13px system-ui,sans-serif; fill:var(--ink) }
@@ -418,7 +427,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     <section class="panel wide"><div class="panel-head"><h2>People and agents</h2>
       <span class="panel-caption">Who can work on these tasks</span></div><div id="roles" class="cards"></div></section>
     <section class="panel wide"><div class="panel-head"><h2>Tasks</h2>
-      <span class="panel-caption">Select a row for details</span></div><div class="table-scroll"><table><thead><tr><th>Task</th><th>Stage</th>
+      <div class="panel-tools"><label class="range-label"><span>Show</span><select id="task-range">
+        <option value="1">Open tasks and the last 24 hours</option><option value="7">Open tasks and the last 7 days</option>
+        <option value="all">All tasks</option></select></label>
+        <span class="panel-caption">Select a row for details</span></div></div>
+      <p id="task-hidden" class="muted hidden"></p><div class="table-scroll"><table><thead><tr><th>Task</th><th>Stage</th>
       <th>Assigned to</th><th>Delivery</th><th>Review</th><th>Next step</th><th>Last check</th><th>Note</th>
       </tr></thead><tbody id="tasks"></tbody></table></div></section>
     <section class="panel wide"><div class="panel-head"><h2>Task plans</h2>
@@ -591,9 +604,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     id('metric-tasks-note').textContent = accepted + ' accepted';
     id('metric-roles').textContent = active.length;
     id('metric-roles-note').textContent = 'of ' + data.roles.length + ' configured';
-    id('metric-dags').textContent = Object.keys(data.dags).length +
-      Object.values(data.task_details).filter(t => t.parent_task).length;
-    id('metric-dags-note').textContent = 'Task plans and follow-up links';
+    id('metric-dags').textContent = Object.keys(data.dags).length + chainsOf(data).length;
+    id('metric-dags-note').textContent = 'Task plans and follow-up chains';
     id('metric-inbox').textContent = data.inbox.length;
     id('metric-inbox-note').textContent = pending + ' waiting for review';
   }
@@ -605,7 +617,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     blocked_dependency:'Earlier task needs attention', blocked:'Needs attention', under_review:'Under review',
     running:'In progress', submitted:'Sent; start unconfirmed', reserved:'Send reserved', uncertain:'Send uncertain',
     not_sent:'Not sent', terminated:'Stopped', pending:'Waiting for review', acknowledged:'Review acknowledged',
-    reviewed:'Reviewed'
+    reviewed:'Reviewed', followed_up:'Followed up'
   };
   const reviewNames = {accept:'Accepted', reject:'Rejected', repair:'Needs repair'};
   const nextNames = {
@@ -764,22 +776,26 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   }
   function taskTable(data) {
     const root = id('tasks'); root.replaceChildren();
-    if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 8; return; }
+    if (!data.tasks.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No tasks yet'); td.colSpan = 8;
+      show('task-hidden', false); return; }
     // Newest last check first; tasks never checked use their latest ledger entry instead.
     const now = Date.now();
-    const seen = t => { if (t.observation_age_seconds !== null) return now - t.observation_age_seconds * 1000;
-      const journal = (data.task_details[t.task_id] || {}).journal || [];
-      const at = journal.length ? Date.parse(journal[journal.length - 1].at) : NaN;
-      return Number.isNaN(at) ? 0 : at; };
+    const seen = t => t.observation_age_seconds !== null ? now - t.observation_age_seconds * 1000 : lastActivity(data, t.task_id);
     const ordered = [...data.tasks].sort((a, b) => seen(b) - seen(a) || a.task_id.localeCompare(b.task_id));
-    for (const t of ordered) {
+    const visible = ordered.filter(t => inRange(data, t));
+    const hidden = ordered.length - visible.length;
+    id('task-hidden').textContent = hidden ? hidden + ' finished tasks are older than the selected range and hidden.' : '';
+    show('task-hidden', hidden > 0);
+    if (!visible.length) { const tr = add(root, 'tr'); const td = add(tr, 'td', 'muted', 'No open or recent tasks'); td.colSpan = 8; }
+    for (const t of visible) {
       const tr = add(root, 'tr', 'task-row');
       const info = data.task_details[t.task_id] || {};
       const name = add(tr, 'td', 'task-name'); add(name, 'span', 'task-title', info.title || t.task_id);
       if (info.excerpt) add(name, 'span', 'task-excerpt', info.excerpt);
       if (info.title) add(name, 'span', 'task-id', t.task_id);
       const phase = add(tr, 'td');
-      add(phase, 'span', 'badge ' + t.phase, named(t.phase, stageNames));
+      const shown = superseded(data, t) ? 'followed_up' : t.phase;
+      add(phase, 'span', 'badge ' + shown, named(shown, stageNames));
       add(tr, 'td', '', t.worker_role);
       add(tr, 'td', '', deliveryText(t));
       add(tr, 'td', '', t.review_verdicts.map(v => named(v, reviewNames)).join(', ') || 'Not reviewed');
@@ -821,11 +837,56 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       detailLine(extra, 'Dispatch', t.dispatch); detailLine(extra, 'Resource reservation', t.claim_held ? 'held' : 'none');
       detailLine(extra, 'Review verdicts', t.review_verdicts.join(', ') || 'none');
       detailLine(extra, 'Next action', t.next_action); detailLine(extra, 'Working folder', info.cwd || 'unknown');
-      const journal = (info.journal || []).map(j => [j.at, j.kind, j.actor].join(' | ')).join('\n');
-      add(extra, 'pre', '', journal || 'No journal entries');
+      const history = add(extra, 'div', 'history');
+      add(history, 'strong', '', 'History');
+      if (!(info.journal || []).length) add(history, 'p', 'muted', 'No history entries');
+      for (const j of info.journal || []) {
+        const line = add(history, 'p'); add(line, 'span', 'history-time raw', when(j.at)); add(line, 'span', '', historyLabel(j));
+      }
       tr.addEventListener('click', () => { const key = 'row:' + t.task_id;
         detailRow.classList.toggle('hidden') ? openKeys.delete(key) : openKeys.add(key); });
     }
+  }
+  // Older finished work is hidden by range; open, blocked and recent tasks always stay visible.
+  let taskRange = '1';
+  try { taskRange = localStorage.getItem('dashboard-task-range') || '1'; } catch {}
+  const CLOSED_PHASES = ['accepted', 'closed'];
+  function lastActivity(data, taskId) {
+    const journal = (data.task_details[taskId] || {}).journal || [];
+    const at = journal.length ? Date.parse(journal[journal.length - 1].at) : NaN;
+    return Number.isNaN(at) ? 0 : at;
+  }
+  function children(data) {
+    const map = {};
+    for (const [task, info] of Object.entries(data.task_details)) if (info.parent_task) (map[info.parent_task] ||= []).push(task);
+    return map;
+  }
+  // A repaired task stays review_blocked in the ledger, but its follow-up is the work that matters now.
+  function superseded(data, t) {
+    return t.phase === 'review_blocked' && !!(children(data)[t.task_id] || []).length;
+  }
+  function finished(data, t) { return CLOSED_PHASES.includes(t.phase) || superseded(data, t); }
+  function inRange(data, t) {
+    if (taskRange === 'all' || !finished(data, t)) return true;
+    return Date.now() - lastActivity(data, t.task_id) <= Number(taskRange) * 86400000;
+  }
+  function when(at) {
+    const date = new Date(at);
+    if (Number.isNaN(date.getTime())) return at || '';
+    return date.toLocaleString(lang === 'zh' ? 'zh-CN' : undefined, {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
+  }
+  const historyNames = {dispatch_reserved:'Send reserved', dispatch_submitted:'Task sent', dispatch_uncertain:'Send uncertain',
+    delivery_review_ready:'Delivered for review', delivery_incomplete:'Stopped before delivery',
+    delivery_blocked:'Waiting on a permission prompt or limit', delivery_adapter_error:'Worker could not be reached',
+    delivery_failed:'Worker failed', delivery_exited:'Worker exited', delivery_monitor_timeout:'Monitor time limit reached',
+    delivery_identity_changed:'Worker identity changed', delivery_monitoring_stopped:'Monitoring stopped',
+    review_accept:'Review: accepted', review_repair:'Review: needs repair', review_reject:'Review: rejected',
+    claim_released:'Work slot released', continue_reserved:'Continuation reserved', continue_submitted:'Continuation sent',
+    continue_uncertain:'Continuation uncertain', continue_not_sent:'Continuation not sent'};
+  const outcomeNames = {running:'Start confirmed', terminated:'Attempt closed', not_sent:'Not sent'};
+  function historyLabel(j) {
+    if (j.kind === 'dispatch_reconciled') return outcomeNames[j.outcome] || 'Start checked';
+    return historyNames[j.kind] || named(j.kind, {});
   }
   const svgEl = tag => document.createElementNS('http://www.w3.org/2000/svg', tag);
   function fitSvgText(node, value) {
@@ -840,18 +901,57 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     const runs = Object.entries(data.dags);
     for (const [run, dag] of runs) drawGraph(root, run, dag.nodes, dag.dependencies,
       name => taskName(data, dag.tasks[name]?.task_id || name));
-    // Standalone follow-ups (parent_task) form chains even without a loaded DAG plan.
-    const phase = Object.fromEntries(data.tasks.map(t => [t.task_id, t.phase]));
-    const linked = new Set();
-    for (const [task, info] of Object.entries(data.task_details))
-      if (info.parent_task && phase[task] && phase[info.parent_task]) { linked.add(task); linked.add(info.parent_task); }
-    if (linked.size) {
-      const nodes = {}, deps = {};
-      for (const task of linked) { nodes[task] = phase[task];
-        const parent = data.task_details[task].parent_task; deps[task] = linked.has(parent) ? [parent] : []; }
-      drawGraph(root, 'Follow-up chains', nodes, deps, name => taskName(data, name));
-    }
+    followUpChains(root, data);
     if (!root.children.length) empty(root, 'No task plans or follow-up chains yet');
+  }
+  // Standalone follow-ups (parent_task) form chains: one piece of work and its repairs or continuations.
+  function chainsOf(data) {
+    const byId = Object.fromEntries(data.tasks.map(t => [t.task_id, t])), kids = children(data), result = [];
+    for (const t of data.tasks) {
+      const parent = (data.task_details[t.task_id] || {}).parent_task;
+      if ((parent && byId[parent]) || !(kids[t.task_id] || []).length) continue;
+      const steps = [], queue = [t.task_id];
+      while (queue.length) { const next = queue.shift(); if (!byId[next] || steps.includes(byId[next])) continue;
+        steps.push(byId[next]); queue.push(...(kids[next] || []).sort()); }
+      result.push(steps);
+    }
+    return result;
+  }
+  function followUpChains(root, data) {
+    const chains = chainsOf(data);
+    if (!chains.length) return;
+    const visible = chains.filter(steps => steps.some(t => inRange(data, t)));
+    const box = add(root, 'div', 'dag-run'); const title = add(box, 'div', 'dag-title');
+    add(title, 'h3', '', 'Follow-up chains');
+    add(title, 'span', 'dag-count', 'Each chain is one piece of work and its repairs, newest step last');
+    if (chains.length > visible.length)
+      add(box, 'p', 'muted', (chains.length - visible.length) + ' finished chains are older than the selected range and hidden.');
+    for (const steps of visible) {
+      const key = 'chain:' + steps[0].task_id, latest = steps[steps.length - 1];
+      const card = add(box, 'article', 'chain'); const head = add(card, 'div', 'chain-head');
+      add(head, 'strong', 'raw', taskName(data, steps[0].task_id));
+      add(head, 'span', 'badge ' + latest.phase, named(latest.phase, stageNames));
+      const open = steps.filter(t => !finished(data, t)).length;
+      const facts = [steps.length + ' steps', (steps.length - open) + ' finished'];
+      if (open) facts.push(open + ' open');
+      const lastAt = Math.max(...steps.map(t => lastActivity(data, t.task_id)));
+      if (lastAt) facts.push('Last activity ' + when(new Date(lastAt).toISOString()));
+      add(card, 'p', 'chain-facts', facts.join(' - '));
+      const list = add(card, 'ol', 'chain-steps'), all = openKeys.has(key);
+      const shown = all ? steps : steps.slice(-5);
+      list.start = steps.length - shown.length + 1;
+      for (const t of shown) {
+        const item = add(list, 'li'); const phase = superseded(data, t) ? 'followed_up' : t.phase;
+        add(item, 'span', 'badge ' + phase, named(phase, stageNames));
+        add(item, 'span', 'raw', ' ' + taskName(data, t.task_id));
+        add(item, 'span', 'task-id', t.task_id);
+      }
+      if (steps.length > 5) {
+        const more = add(card, 'button', '', all ? 'Show only the latest 5 steps' : 'Show all ' + steps.length + ' steps');
+        more.type = 'button';
+        more.addEventListener('click', () => { all ? openKeys.delete(key) : openKeys.add(key); if (lastData) dagGraph(lastData); });
+      }
+    }
   }
   function drawGraph(root, run, nodes, dependencies, label) {
     {
@@ -1193,6 +1293,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   id('refresh').addEventListener('click', refresh);
   setInterval(() => { if (id('auto').checked) refresh(); }, 5000);
   id('lang').addEventListener('click', () => { setLang(lang === 'zh' ? 'en' : 'zh'); if (lastData) refresh(); });
+  id('task-range').value = ['1', '7', 'all'].includes(taskRange) ? taskRange : '1';
+  id('task-range').addEventListener('change', () => {
+    taskRange = id('task-range').value;
+    try { localStorage.setItem('dashboard-task-range', taskRange); } catch {}
+    if (lastData) { taskTable(lastData); dagGraph(lastData); }
+  });
   setLang(lang);
   refresh();
 })();
