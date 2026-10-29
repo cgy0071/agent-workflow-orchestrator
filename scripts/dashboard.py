@@ -266,10 +266,12 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
 .metric-label { color:var(--muted); font-size:11px; font-weight:750; letter-spacing:.09em; text-transform:uppercase }
 .metric-value { display:block; margin:3px 0 0; font-size:29px; font-weight:780; line-height:1.1; letter-spacing:-.05em }
 .metric-note { display:block; margin-top:5px; color:var(--muted); font-size:11px; overflow-wrap:anywhere }
-.grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(280px,1fr); gap:16px }
+.grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(280px,1fr); gap:16px; align-items:start }
+#inbox-done { margin-top:10px } #inbox-history { margin-top:10px }
 .stack { display:grid; gap:18px } .panel { min-width:0; background:var(--surface); border:1px solid var(--line);
   border-radius:17px; padding:21px; box-shadow:var(--shadow) }
-.panel-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; margin-bottom:17px }
+.panel-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px 12px; margin-bottom:17px; flex-wrap:wrap }
+.panel-head h2 { flex:none; white-space:nowrap }
 .panel-caption { font-size:11px; font-weight:700; letter-spacing:.04em; color:var(--muted) }
 .wide { grid-column:1 / -1 } .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:12px }
 .role { border:1px solid var(--line); border-radius:13px; padding:15px; min-width:0;
@@ -437,11 +439,12 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     <section class="panel wide"><div class="panel-head"><h2>Task plans</h2>
       <span class="panel-caption">A task can start after its prerequisites are accepted</span></div><div id="dags" class="stack"></div></section>
     <section class="panel"><div class="panel-head"><h2>Completion inbox</h2>
-      <span class="panel-caption">Updates for reviewers</span></div><div id="inbox" class="list"></div></section>
-    <section class="panel"><div class="panel-head"><h2>Resource limits</h2>
-      <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
+      <span class="panel-caption">Updates waiting for a reviewer</span></div><div id="inbox" class="list"></div>
+      <div id="inbox-done" class="hidden"><button id="inbox-toggle" type="button"></button><div id="inbox-history" class="list"></div></div></section>
     <section class="panel"><div class="panel-head"><h2>Alerts & guidance</h2>
       <span class="panel-caption">Meaning and next step</span></div><div id="alerts" class="list"></div></section>
+    <section class="panel"><div class="panel-head"><h2>Resource limits</h2>
+      <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
     <section class="panel" id="probe-panel"><div class="panel-head"><h2>Current agent check</h2>
       <span class="panel-caption">On demand only</span></div><p class="muted">The page refresh reads saved records. Use Check agents now to contact active agents.</p>
       <p id="probe-time" class="muted"></p><div id="probe-result" class="list"></div>
@@ -606,8 +609,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     id('metric-roles-note').textContent = 'of ' + data.roles.length + ' configured';
     id('metric-dags').textContent = Object.keys(data.dags).length + chainsOf(data).length;
     id('metric-dags-note').textContent = 'Task plans and follow-up chains';
-    id('metric-inbox').textContent = data.inbox.length;
-    id('metric-inbox-note').textContent = pending + ' waiting for review';
+    id('metric-inbox').textContent = pending;
+    id('metric-inbox-note').textContent = 'waiting, of ' + data.inbox.length + ' updates';
   }
   const stageNames = {
     accepted:'Accepted', evidence_changed:'Accepted review; evidence changed', review_blocked:'Review needs follow-up',
@@ -636,7 +639,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     tick:'Run the scheduler to start this ready task',
     inspect_dependencies:'Check the earlier tasks'
   };
-  const reportNames = {review_ready:'Work submitted for review', failed:'Worker failed', exited:'Worker exited'};
+  const reportNames = {review_ready:'Work submitted for review', failed:'Worker failed', exited:'Worker exited',
+    incomplete:'Stopped before delivery', blocked:'Waiting on a permission prompt or limit',
+    adapter_error:'Worker could not be reached', monitor_timeout:'Monitor time limit reached',
+    identity_changed:'Worker identity changed', unknown_status:'Status needs inspection', monitoring_stopped:'Monitoring stopped'};
   const dagNames = {evidence_changed:'Evidence changed', execution_unconfirmed:'Start unconfirmed',
     blocked_dependency:'Prerequisite blocked', review_blocked:'Review follow-up',
     scheduling_blocked:'Could not start', waiting:'Waiting', ready:'Ready to start',
@@ -706,7 +712,10 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     add(head, 'strong', taskIds.length === 1 ? 'raw' : '', taskIds.length === 1 ? taskName(lastData, taskIds[0]) : taskIds.length + ' tasks');
     add(head, 'span', 'badge', info.tone === 'info' ? 'For reference' : 'Check needed');
     add(card, 'h3', '', info.title);
-    if (taskIds.length > 1) add(card, 'p', 'alert-technical', 'Tasks: ' + taskIds.map(x => taskName(lastData, x)).join('; '));
+    if (taskIds.length > 1) {
+      const names = taskIds.slice(0, 5).map(x => taskName(lastData, x)).join('; ');
+      add(card, 'p', 'alert-technical', taskIds.length > 5 ? 'Tasks: ' + names + ' and ' + (taskIds.length - 5) + ' more' : 'Tasks: ' + names);
+    }
     add(card, 'p', '', info.explanation);
     add(card, 'p', 'alert-next', 'Next: ' + info.next);
     if (info.technical) add(card, 'p', 'alert-technical', 'Ledger detail: ' + info.technical);
@@ -992,45 +1001,54 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       }
     }
   }
+  // Only updates that still need someone are listed; handled ones stay one click away.
+  let inboxDone = false;
+  function eventCard(root, data, e) {
+    const item = add(root, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
+    add(head, 'strong', 'raw', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
+    add(item, 'p', 'role-summary', named(e.report_status, reportNames));
+    if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
+    else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
+    if (data.allow_dispatch && e.role === data.actor_role && ['pending','acknowledged'].includes(e.status)) {
+      const open = add(item, 'button', '', e.status === 'pending' ? 'Acknowledge...' : 'Record review...');
+      open.type = 'button'; open.addEventListener('click', () => openReview(e, data));
+    }
+    if (e.created_at) add(item, 'small', '', 'Received ' + when(e.created_at));
+    const extra = technical(item, 'Event details', 'event:' + e.event); detailLine(extra, 'Event ID', e.event_id);
+    detailLine(extra, 'Inbox status', e.status); detailLine(extra, 'Report status', e.report_status);
+  }
   function lists(data) {
     const inbox = id('inbox'); inbox.replaceChildren();
+    const open = data.inbox.filter(e => ['pending', 'acknowledged'].includes(e.status));
+    const done = data.inbox.filter(e => !open.includes(e));
     if (!data.inbox.length) empty(inbox, 'No completion updates yet');
-    else for (const e of data.inbox) {
-      const item = add(inbox, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
-      add(head, 'strong', 'raw', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
-      add(item, 'p', 'role-summary', named(e.report_status, reportNames));
-      if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
-      else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
-      if (data.allow_dispatch && e.role === data.actor_role && ['pending','acknowledged'].includes(e.status)) {
-        const open = add(item, 'button', '', e.status === 'pending' ? 'Acknowledge...' : 'Record review...');
-        open.type = 'button'; open.addEventListener('click', () => openReview(e, data));
-      }
-      if (e.created_at) {
-        const received = new Date(e.created_at);
-        add(item, 'small', '', 'Received ' + (Number.isNaN(received.getTime()) ? e.created_at : received.toLocaleString()));
-      }
-      const extra = technical(item, 'Event details', 'event:' + e.event); detailLine(extra, 'Event ID', e.event_id);
-      detailLine(extra, 'Inbox status', e.status); detailLine(extra, 'Report status', e.report_status);
+    else if (!open.length) empty(inbox, 'Nothing is waiting for review.');
+    for (const e of open) eventCard(inbox, data, e);
+    show('inbox-done', done.length > 0);
+    id('inbox-toggle').textContent = inboxDone ? 'Hide handled updates' : 'Show ' + done.length + ' handled updates';
+    const history = id('inbox-history'); history.replaceChildren(); show('inbox-history', inboxDone);
+    if (inboxDone) {
+      for (const e of done.slice(0, 20)) eventCard(history, data, e);
+      if (done.length > 20) add(history, 'p', 'muted', 'Showing the latest 20 of ' + done.length + ' handled updates.');
     }
     const alerts = id('alerts'); alerts.replaceChildren();
-    if (!data.alerts.length && !Object.keys(data.scheduling_blocks).length)
-      empty(alerts, 'Nothing needs attention right now.');
-    else {
-      const tasks = new Map(data.tasks.map(task => [task.task_id, task]));
-      const groups = new Map();
-      for (const a of data.alerts) for (const code of a.warnings) {
-        const info = warningInfo(code, tasks.get(a.task_id));
-        const key = code + '|' + info.next;
-        if (!groups.has(key)) groups.set(key, {ids:[], info});
-        groups.get(key).ids.push(a.task_id);
-      }
-      for (const group of groups.values()) alertCard(alerts, group.ids, group.info);
-      for (const [task, block] of Object.entries(data.scheduling_blocks))
-        alertCard(alerts, [task], {tone:'check', title:'Task could not start',
-          explanation:'The scheduler has paused this task before dispatch.',
-          next:'Read the scheduler detail and resolve the condition before the next scheduling pass.',
-          technical:block.reason || 'No reason recorded'});
+    const tasks = new Map(data.tasks.map(task => [task.task_id, task]));
+    const groups = new Map();
+    for (const a of data.alerts) for (const code of a.warnings) {
+      const task = tasks.get(a.task_id), info = warningInfo(code, task);
+      // A reference note about finished work needs no action, so it does not belong in alerts.
+      if (info.tone === 'info' && task && finished(data, task)) continue;
+      const key = code + '|' + info.next;
+      if (!groups.has(key)) groups.set(key, {ids:[], info});
+      groups.get(key).ids.push(a.task_id);
     }
+    for (const group of groups.values()) alertCard(alerts, group.ids, group.info);
+    for (const [task, block] of Object.entries(data.scheduling_blocks))
+      alertCard(alerts, [task], {tone:'check', title:'Task could not start',
+        explanation:'The scheduler has paused this task before dispatch.',
+        next:'Read the scheduler detail and resolve the condition before the next scheduling pass.',
+        technical:block.reason || 'No reason recorded'});
+    if (!alerts.children.length) empty(alerts, 'Nothing needs attention right now.');
     const resources = id('resources'); resources.replaceChildren();
     const caps = data.resource_capacities;
     if (!Object.keys(caps).length) add(resources, 'p', 'muted', 'No named resource limits are set for this workflow.');
@@ -1127,6 +1145,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       id('updated').textContent = 'Page updated: ' + new Date().toLocaleTimeString();
       metrics(data); roles(data); taskTable(data); dagGraph(data); lists(data); workers(data);
       show('dispatch-form', data.allow_dispatch);
+      show('dispatch-panel', data.allow_dispatch);  // An off switch needs no panel; the docs say how to enable it.
       show('chat-panel', data.allow_chat); show('chat-open', data.allow_chat);
       if (data.allow_chat) { chatTargets(data); id('chat-caption').textContent = 'Talking to ' + chatRole(); }
       id('dispatch-note').textContent = data.allow_dispatch ?
@@ -1294,6 +1313,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
   setInterval(() => { if (id('auto').checked) refresh(); }, 5000);
   id('lang').addEventListener('click', () => { setLang(lang === 'zh' ? 'en' : 'zh'); if (lastData) refresh(); });
   id('task-range').value = ['1', '7', 'all'].includes(taskRange) ? taskRange : '1';
+  id('inbox-toggle').addEventListener('click', () => { inboxDone = !inboxDone; if (lastData) lists(lastData); });
   id('task-range').addEventListener('change', () => {
     taskRange = id('task-range').value;
     try { localStorage.setItem('dashboard-task-range', taskRange); } catch {}
