@@ -369,6 +369,52 @@ class Tests(unittest.TestCase):
         self.assertFalse((self.root / "notification_attempt.json").exists())
 
 
+class StallCauseTests(unittest.TestCase):
+    setUp, tearDown = Tests.setUp, Tests.tearDown
+
+    def test_stall_cause_reads_handoff_and_output_and_never_raises(self):
+        req = copy.deepcopy(self.request)
+        client = FakeTransport(req)
+        client.output = lambda spec: "thinking...\nAll good"
+        handoff = self.root / "HANDOFF.md"
+        handoff.unlink()
+        self.assertEqual(module.stall_cause(req, client)["cause"], "no_delivery")
+        handoff.write_text("TASK-TEST unique-nonce\nInputs verified.\nRemaining: implement the parser.\n", encoding="utf-8")
+        cause = module.stall_cause(req, client)
+        self.assertEqual(cause["cause"], "handoff_without_marker")
+        self.assertIn("Remaining: implement the parser.", cause["evidence"])
+        client.output = lambda spec: "step 3\nError: 429 Too Many Requests - rate limit reached\nidle"
+        cause = module.stall_cause(req, client)
+        self.assertEqual(cause["cause"], "provider_error")
+        self.assertIn("rate limit", cause["evidence"])
+        def broken(spec):
+            raise OSError("pane gone")
+        client.output = broken
+        self.assertEqual(module.stall_cause(req, client)["cause"], "handoff_without_marker")
+        self.assertIn("provider recovers", module.event_guidance("incomplete", "T", "provider_error"))
+        self.assertEqual(module.event_guidance("blocked", "T", "provider_error"), module.event_guidance("blocked", "T"))
+
+    def test_stall_cause_is_recorded_once_per_episode(self):
+        req = copy.deepcopy(self.request)
+        (self.root / "RESULT.md").unlink()
+        reqfile = self.root / "request.json"
+        reqfile.write_text(json.dumps(req), encoding="utf-8")
+        client = FakeTransport(req, status="idle", seq=10)
+        client.output = lambda spec: client.__dict__.__setitem__("reads", client.reads + 1) or "quota exceeded"
+        polls = []
+        def sleep(seconds):
+            polls.append(seconds)
+            if len(polls) == 3:
+                (self.root / "STOP_MONITOR").write_text("stop", encoding="utf-8")
+        with patch.object(module, "Transport", return_value=client), patch.object(module.time, "sleep", sleep), \
+                patch.object(sys, "argv", ["monitor_task.py", "--request", str(reqfile)]), \
+                patch("builtins.print"):
+            module.main()
+        status = json.loads((self.root / "monitor_summary.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["status"], "monitoring_stopped")
+        self.assertEqual(client.reads, 1)  # Output is read once for the episode, not every poll.
+
+
 class EncodingTests(unittest.TestCase):
     def test_utf8_chinese_is_preserved(self):
         text = "\u89d2\u8272\u5206\u5de5\u4e0e\u81ea\u52a8\u5316"

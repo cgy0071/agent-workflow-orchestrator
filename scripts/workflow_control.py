@@ -559,14 +559,15 @@ def deliver_event(state, event_id, transport):
                    "status": "reserved_no_blind_retry"}
         con.execute("INSERT INTO notifications VALUES (?,?)", (event_id, json.dumps(attempt)))
     from monitor_task import event_guidance
-    delivery = json.loads(event["data"])["report"]["status"]
+    report = json.loads(event["data"])["report"]
+    delivery = report["status"]
     message = ("Automatic workflow event under existing authorization, not a new Owner instruction. "
                "Event " + event_id + ", task " + event["task"] + ", nonce " + event["nonce"] +
                ", delivery status " + delivery + ". State directory: " + str(Path(state).resolve()) +
                ". Target reviewer instance " + target["instance_id"] + ", binding version " + str(target["version"]) +
                ". Only the registered main context may acknowledge/review this event. "
                "Side conversations are advisory-only: do not acknowledge, review, or dispatch. "
-               "Read the inbox and raw evidence. " + event_guidance(delivery, event["task"]) +
+               "Read the inbox and raw evidence. " + event_guidance(delivery, event["task"], report.get("cause")) +
                " Delivery is not acceptance; no blind resubmission.")
     try:
         response = transport.send(spec, message)

@@ -222,5 +222,29 @@ class ManageTests(unittest.TestCase):
         self.assertEqual((spread["median"], spread["p90"], spread["max"]), (3, 100, 100))
 
 
+    def test_status_flags_unstarted_send_and_waiting_review(self):
+        from datetime import datetime, timedelta, timezone
+        self.sent("LATE-1")
+        later = datetime.now(timezone.utc) + timedelta(minutes=11)
+        rows = {r["task_id"]: r for r in workflow_status.summarize(self.state, now=later)["tasks"]}
+        self.assertIn("start_unconfirmed", rows["LATE-1"]["warnings"])
+        early = {r["task_id"]: r for r in workflow_status.summarize(self.state)["tasks"]}
+        self.assertNotIn("start_unconfirmed", early["LATE-1"]["warnings"])
+        request = self.request("LATE-2", "second")
+        scheduler.dispatch(self.state, request, self.message(request), *self.actor(), transport=self.fake)
+        control.publish_event(self.state, self.confirm(request), {"status": "review_ready"})
+        later = datetime.now(timezone.utc) + timedelta(hours=2)
+        rows = {r["task_id"]: r for r in workflow_status.summarize(self.state, now=later)["tasks"]}
+        self.assertIn("review_waiting", rows["LATE-2"]["warnings"])
+
+    def test_inbox_shows_stall_cause_without_paths(self):
+        request, _ = self.review_event("CAUSE-1")
+        control.publish_event(self.state, request, {"status": "incomplete", "stall_episode": 1, "cause": "provider_error",
+                                                    "evidence": r"Error: quota exceeded at C:\Users\x\log.txt"})
+        entry = next(e for e in self.http("GET", "/api/status")[1]["inbox"] if e["report_status"] == "incomplete")
+        self.assertEqual(entry["cause"], "provider_error")
+        self.assertIn("quota exceeded", entry["cause_evidence"])
+        self.assertNotIn("Users", entry["cause_evidence"])
+
 if __name__ == "__main__":
     unittest.main()

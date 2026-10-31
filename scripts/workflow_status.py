@@ -14,6 +14,8 @@ NOISE = [re.compile(p) for p in (r"`?(?:\b[a-z]+_)?(?<![0-9A-Za-z])(?=[0-9a-fA-F
                                  r"(?![0-9A-Za-z])(?:\u2026|\.\.\.)?`?",
                                  r"`?[A-Za-z]:[\\/][^\s,;`'\")\uff0c\uff1b]*`?",
                                  r"`?(?<![\w.])/(?:[\w.-]+/){2,}[\w.-]*`?")]
+START_GRACE = 600  # seconds a sent task may stay unconfirmed before the page flags it
+REVIEW_GRACE = 3600  # seconds a delivery may wait for review before the page flags it
 FILLER = re.compile(r"(?:,?\s*(?:nonce|worktree|assigned worktree|working directory|cwd)\s*(?=[,.;]|$))+", re.I)
 
 
@@ -28,6 +30,15 @@ def _plain(text, task_id):
     text = re.sub(r"\s+([,.;:\uff0c\uff1b])", r"\1", re.sub(r"\s{2,}", " ", text))
     text = re.sub(r"([,;\uff0c\uff1b\u3001])\s*[,;\uff0c\uff1b\u3001]+", r"\1", text)
     return re.sub(r"^[\s,.;:/\uff0c\uff1b\uff1a\u3001\u2014\u2013-]+|[\s,;:/\uff0c\uff1b\uff1a\u3001\u2014\u2013-]+$", "", text)
+
+
+def workflow_text(value):
+    """Short worker text for the page, with digests and absolute paths removed."""
+    if not isinstance(value, str) or not value:
+        return None
+    for pattern in NOISE:
+        value = pattern.sub("", value)
+    return re.sub(r"\s{2,}", " ", value).strip()[:300] or None
 
 
 def _delivery_folder(request):
@@ -133,6 +144,17 @@ def summarize(state, task=None, stale_after=900, now=None):
             phase, role, action = "needs_inspection", controller, "inspect_monitor_and_worker"
         else:
             phase, role, action = "executing", worker, "await_delivery"
+        # A send that never starts, or a delivery nobody reviews, used to stay silent for hours.
+        if phase == "execution_unconfirmed":
+            sent = _at(((item.get("dispatch") or {}).get("data") or {}).get("submitted_at"))
+            if sent and (now - sent).total_seconds() > START_GRACE:
+                warnings.append("start_unconfirmed")
+        if phase == "awaiting_review":
+            ready = [_at(event["data"].get("created_at")) for event in item["events"]
+                     if event["data"]["report"]["status"] == "review_ready" and event["status"] != "reviewed"]
+            ready = [at for at in ready if at]
+            if ready and (now - min(ready)).total_seconds() > REVIEW_GRACE:
+                warnings.append("review_waiting")
         uncertain = [note for note in item["notifications"] if note.get("status") in ("reserved_no_blind_retry", "delivery_uncertain")]
         if uncertain:
             warnings.append("notification_uncertain_no_resend")
@@ -194,7 +216,9 @@ def dashboard_details(state, summary=None):
             inbox.append({"event_id": row["id"][:12], "event": row["id"], "role": row["role"],
                           "task_id": row["task"], "status": row["status"],
                           "created_at": data.get("created_at"),
-                          "report_status": (data.get("report") or {}).get("status")})
+                          "report_status": (data.get("report") or {}).get("status"),
+                          "cause": (data.get("report") or {}).get("cause"),
+                          "cause_evidence": workflow_text((data.get("report") or {}).get("evidence"))})
         for row in con.execute("SELECT id,worker,status,data FROM tasks WHERE status!='resolved' ORDER BY id"):
             data = json.loads(row["data"])
             for role in {row["worker"], data["controller"]["role"], data["request"]["reviewer"]["role"]}:

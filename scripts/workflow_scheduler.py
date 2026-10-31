@@ -577,7 +577,8 @@ def _continue_message(request):
     names = [item if isinstance(item, str) else item["path"] for item in files]
     text = ("Continue task " + request["task_id"] + " (nonce " + request["nonce"] + ") from where it stopped. "
             "This is the same authorized task after an interruption such as a quota, rate-limit or network "
-            "error, not a new task: keep the scope unchanged and do not redo finished steps. Working directory: " +
+            "error, not a new task: keep the scope unchanged and do not redo finished steps. There is no time limit on this turn: do the "
+            "remaining work now instead of stopping after checks, and save partial results as you go. Working directory: " +
             request["cwd"] + ". Deliverables still required: " + ", ".join(names) + ".")
     if completion.get("marker"):
         text += " The final line of " + names[0] + " must be exactly: " + completion["marker"]
