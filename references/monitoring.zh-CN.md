@@ -98,6 +98,15 @@ python -B scripts/dashboard.py --state /absolute/workflow-state
 
 要使用 **与角色对话**，启动时与 `--state` 一起加 `--allow-chat --actor INSTANCE --version 1 --context main`（可与 `--allow-dispatch` 同时使用）；默认关闭，并且状态目录固定。发送者必须是当前有效的控制者。可以选择任意已激活角色作为目标；每次发送前重新检查双方绑定和目标的实时身份。向忙碌的 Worker 发送需要单独确认；不支持提示输入的适配器不能发送。每条消息只尝试一次，不自动重试；结果为 `SENT` 或 `SEND_UNCERTAIN`。`dashboard_chat` 审计记录发送者、目标角色和绑定版本、忙碌确认、字符数与 SHA-256，不保存正文。**读取最近输出**只按需读取当前选中角色的输出。
 
+要在页面上管理工作流，启动时与 `--state` 一起加 `--allow-manage --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks`（可与 `--allow-dispatch`、`--allow-chat` 同时使用）。actor 必须是当前有效的控制者。每项操作先显示只读预览；**确认一次**会重新执行全部检查，并通过与命令行相同的函数只执行一步。任务详情中会按情况提供：
+
+- **确认开始**：根据你填写的观察写入 `EXECUTION.md`（或 `NOT_SENT.md`），运行 `reconcile`，并写入 `confirmed.json`。
+- **启动监控**：为任务目录中的 `confirmed.json` 启动一个后台 `monitor_task.py`（只有任务授权审核通知时才带 `--notify`）；**停止监控**创建 `STOP_MONITOR`，从不停止 Worker。
+- **继续一次**：调用 `workflow_scheduler.continue_task`，仅在监控报告 `incomplete` 时可用，每次停顿只发一次，并受 `scheduler.max_continue_prompts` 限制。Worker 受阻时仍需 Owner 在 harness 中处理提示。
+- **关闭此次执行**：根据你填写的原因写入 `TERMINATION.md` 并在台账中关闭此次执行；已交付的工作应当审核而不是关闭。**释放工作占用**需要有效的接收审核。
+
+有就绪节点的任务计划会提供 **启动就绪任务**（一次 `tick`）。**工作流设置**只能修改目标、`scheduler.max_concurrency`、`scheduler.max_continue_prompts` 和 `scheduler.resources`；角色、权限和审核结论的转移保持初始化时的设置，每次修改都以 `config_updated` 记入审计（命令行可用 `workflow_control.py set-config`）。**分配 Agent** 列出实时 Herdr 窗格，可将未绑定窗格分配为 Worker、审核者或顾问角色（替换已有绑定需填写原因，旧绑定仍有进行中的任务时新绑定保持待生效），也可激活待生效绑定、按角色重命名窗格。运行页面的控制者绑定只能在命令行中更换。**工作流统计**按需读取日志：派发到开始、开始到交付、交付到审核的中位数和 p90 分钟数，返修比例、停顿与继续次数，以及每日派发和审核数量。
+
 要让**同一可信局域网**中的手机只读查看，可运行 `python -B scripts/dashboard.py --state /absolute/workflow-state --lan auto --no-browser`。`auto` 仅在本机恰有一个私有 IPv4 时自动选中；若有多个，错误信息会列出候选，请改用 `--lan 192.168.x.x`。服务只监听所选地址。手机或本机打开输出中的 `Dashboard (LAN): https://IP:端口/#token`；此模式两者均使用 HTTPS。默认端口 8765 被占用时自动选择空闲端口。首次运行使用 OpenSSL（也可使用 Git for Windows 附带的版本）生成有效期 365 天、SAN 包含所选 IP 的自签证书；有效证书和私钥保存在 `~/.agent-workflow-orchestrator/tls/` 并在下次复用。也可同时指定 `--tls-cert /path/cert.pem --tls-key /path/key.pem`。
 
 要从局域网执行操作，必须明确承认风险，例如 `python -B scripts/dashboard.py --state /absolute/workflow-state --lan 192.168.1.23 --allow-chat --actor INSTANCE --version 1 --context main --lan-allow-control --no-browser`。需要派发时再加 `--allow-dispatch` 及其常规控制者、任务目录参数。同一局域网内任何取得令牌地址的人都能指挥 agent。只在可信家庭或办公网络使用，不要在公共 Wi-Fi 开启控制。重启会生成新令牌，使旧地址失效。TLS 保护传输中的令牌，但不能阻止持有地址的人操作。

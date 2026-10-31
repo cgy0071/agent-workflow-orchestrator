@@ -1,5 +1,5 @@
 """Read-only task phases, next actors, and observation age; never native heartbeats."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import math
 from pathlib import Path
@@ -226,6 +226,73 @@ def dashboard_details(state, summary=None):
     return {"goal": config.get("goal", ""), "roles": list(roles.values()), "inbox": inbox,
             "verdicts": sorted(config.get("workflow", {}).get("transitions", {})),
             "dags": raw["dags"], "scheduling_blocks": raw["scheduling_blocks"], "task_details": task_details}
+
+
+def _at(value):
+    try:
+        at = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _spread(values):
+    values = sorted(values)
+    if not values:
+        return {"count": 0, "median": None, "p90": None, "max": None}
+    middle = len(values) // 2
+    median = values[middle] if len(values) % 2 else (values[middle - 1] + values[middle]) / 2
+    return {"count": len(values), "median": round(median, 1),
+            "p90": round(values[min(len(values) - 1, math.ceil(0.9 * len(values)) - 1)], 1), "max": round(values[-1], 1)}
+
+
+STAGES = (("send_to_start", "dispatch_submitted", "dispatch_reconciled"),
+          ("start_to_delivery", "dispatch_reconciled", "delivery_review_ready"),
+          ("delivery_to_review", "delivery_review_ready", "review_"))
+
+
+def workflow_metrics(state, days=14, now=None):
+    """Stage durations (minutes), review outcomes, stalls and daily counts from the journal; read-only."""
+    from workflow_scheduler import _read_database, has_schema
+    now = datetime.now(timezone.utc) if now is None else now
+    if type(days) is not int or not 1 <= days <= 365:
+        raise ValueError("days must be an integer from 1 to 365")
+    with _read_database(state) as con:
+        if not has_schema(con):
+            return {"days": days, "stages": {}, "reviews": {}, "stalls": {}, "daily": [], "tasks": 0}
+        rows = con.execute("SELECT task,at,kind,data FROM task_journal ORDER BY seq").fetchall()
+    journals = {}
+    for row in rows:
+        journals.setdefault(row["task"], []).append((_at(row["at"]), row["kind"], row["data"]))
+    durations = {name: [] for name, _, _ in STAGES}
+    reviews, stalls, continued, daily = {}, {}, 0, {}
+    start = (now - timedelta(days=days - 1)).date()
+    for entries in journals.values():
+        first = {}
+        for at, kind, data in entries:
+            if kind == "dispatch_reconciled" and '"outcome": "running"' not in data:
+                continue
+            key = "review_" if kind.startswith("review_") else kind
+            first.setdefault(key, at)
+            if kind.startswith("review_"):
+                reviews[kind[7:]] = reviews.get(kind[7:], 0) + 1
+                if at and at.date() >= start:
+                    daily.setdefault(at.date().isoformat(), {"sent": 0, "reviewed": 0})["reviewed"] += 1
+            elif kind in ("delivery_incomplete", "delivery_blocked", "delivery_adapter_error"):
+                stalls[kind[9:]] = stalls.get(kind[9:], 0) + 1
+            elif kind == "continue_submitted":
+                continued += 1
+            elif kind == "dispatch_submitted" and at and at.date() >= start:
+                daily.setdefault(at.date().isoformat(), {"sent": 0, "reviewed": 0})["sent"] += 1
+        for name, begin, end in STAGES:
+            if first.get(begin) and first.get(end) and first[end] >= first[begin]:
+                durations[name].append((first[end] - first[begin]).total_seconds() / 60)
+    days_list = [(start + timedelta(days=offset)).isoformat() for offset in range(days)]
+    total = sum(reviews.values())
+    return {"days": days, "tasks": len(journals), "stages": {name: _spread(values) for name, values in durations.items()},
+            "reviews": reviews, "repair_share": round(reviews.get("repair", 0) / total, 3) if total else None,
+            "stalls": stalls, "continuations": continued,
+            "daily": [dict(date=day, **daily.get(day, {"sent": 0, "reviewed": 0})) for day in days_list]}
 
 
 def format_text(summary):

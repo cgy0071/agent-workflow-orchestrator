@@ -108,6 +108,45 @@ def initialize(state, config):
     return {"status": "INITIALIZED", "state": str(directory), "config_sha256": digest(config)}
 
 
+# Operating limits only. Roles, permissions and review transitions stay as initialized, so an edit can
+# never grant an actor new authority or change what a verdict means for recorded reviews.
+EDITABLE_CONFIG = ("goal", "scheduler.max_concurrency", "scheduler.max_continue_prompts", "scheduler.resources")
+
+
+def config_value(config, key):
+    section, _, name = key.partition(".")
+    return config.get(section) if not name else config.get(section, {}).get(name)
+
+
+def apply_config_changes(config, changes):
+    """Return a validated copy of config with the allowed changes applied; never writes."""
+    if not isinstance(changes, dict) or not changes or any(key not in EDITABLE_CONFIG for key in changes):
+        raise ValueError("only these settings can change: " + ", ".join(EDITABLE_CONFIG))
+    updated = json.loads(json.dumps(config))
+    for key, value in changes.items():
+        if key == "goal":
+            if not isinstance(value, str) or len(value) > 2000:
+                raise ValueError("goal must be text of at most 2000 characters")
+            updated["goal"] = value.strip()
+        else:
+            updated.setdefault("scheduler", {})[key.split(".", 1)[1]] = value
+    validate_workflow(updated)
+    return updated
+
+
+def update_config(state, changes, actor, version, context):
+    with database(state) as con:
+        who = guard(con, actor, version, context, "dispatch")
+        old = config_of(con)
+        new = apply_config_changes(old, changes)
+        if new == old:
+            return {"status": "UNCHANGED", "config_sha256": digest(old)}
+        con.execute("UPDATE meta SET value=? WHERE key='config'", (json.dumps(new),))
+        audit(con, "config_updated", {"actor": actor, "version": version, "role": who["role"], "changes": changes,
+                                      "old_sha256": digest(old), "new_sha256": digest(new)})
+    return {"status": "CONFIG_UPDATED", "config_sha256": digest(new)}
+
+
 def audit(con, action, data):
     con.execute("INSERT INTO audit(at,action,data) VALUES (?,?,?)", (stamp(), action, json.dumps(data)))
 
@@ -625,11 +664,13 @@ def main():
         cmd.add_argument("--policy", choices=["inbox_only", "exact_thread", "dedicated_window"], default="inbox_only")
         cmd.add_argument("--reason", default=""); cmd.add_argument("--defer", action="store_true")
     activate_cmd = sub.add_parser("activate"); activate_cmd.add_argument("--role", required=True)
-    for name in ("register-task", "ack", "review", "next-check", "resolve-task"):
+    for name in ("register-task", "ack", "review", "next-check", "resolve-task", "set-config"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--actor", required=True); cmd.add_argument("--version", type=int, required=True)
         cmd.add_argument("--context", choices=["main", "side", "unknown"], default="unknown")
-        if name == "resolve-task":
+        if name == "set-config":
+            cmd.add_argument("--changes", required=True, help="JSON object, e.g. {\"scheduler.max_concurrency\": 2}")
+        elif name == "resolve-task":
             cmd.add_argument("--task", required=True); cmd.add_argument("--evidence", required=True)
         elif name == "register-task": cmd.add_argument("--request", required=True)
         else: cmd.add_argument("--event", required=True)
@@ -661,6 +702,8 @@ def main():
         observed = transport.status(spec)["identity"] if binding["mode"] == "worker" else transport.reviewer_identity(spec)
         result = activate(args.state, args.role, observed)
     elif args.command == "register-task": result = register_task(args.state, read_json(args.request), args.actor, args.version, args.context)
+    elif args.command == "set-config":
+        result = update_config(args.state, json.loads(args.changes), args.actor, args.version, args.context)
     elif args.command == "resolve-task": result = resolve_task(args.state, args.task, args.actor, args.version, args.context, args.evidence)
     elif args.command == "ack": result = acknowledge(args.state, args.event, args.actor, args.version, args.context)
     elif args.command == "review": result = record_review(args.state, args.event, args.actor, args.version, args.context, args.file, args.verdict)

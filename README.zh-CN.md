@@ -199,7 +199,7 @@ python scripts/workflow_control.py --state /abs/state next-check --event EVENT_I
 
 ![离线演示后的状态面板：目标、三个已绑定角色、进行中和最近的任务，以及 A/B 到 JOIN 的任务计划](docs/images/dashboard-overview.png)
 
-操作功能默认关闭，需要在启动时开启：`--allow-dispatch` 开启表单派发和审核操作（派发后仍须独立观察执行并运行 `reconcile`），`--allow-chat` 让已绑定的控制者给任意有效角色发消息。要从手机或其他电脑打开，可使用 `--lan`（私有网络 HTTPS）、SSH 隧道，或配合 `--public-origin` 的私有 HTTPS 代理。带令牌的地址就代表这些操作权限，只交给可以使用它们的人。详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+操作功能默认关闭，需要在启动时开启：`--allow-dispatch` 开启表单派发和审核操作（派发后仍须独立观察执行并运行 `reconcile`），`--allow-chat` 让已绑定的控制者给任意有效角色发消息，`--allow-manage` 把页面变成管理台：根据观察确认开始执行、启动或停止任务监控、让停顿的 Worker 继续一次、关闭或释放一次执行、运行任务计划、修改运行限制，以及把 Herdr 窗格分配给角色。每项管理操作都先只读预览，再一次性确认，确认时重新执行全部检查。**工作流统计**面板根据台账显示各阶段耗时、返修比例和每日吞吐。要从手机或其他电脑打开，可使用 `--lan`（私有网络 HTTPS）、SSH 隧道，或配合 `--public-origin` 的私有 HTTPS 代理。带令牌的地址就代表这些操作权限，只交给可以使用它们的人。详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
 任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。主要阶段如下：
 
