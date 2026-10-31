@@ -131,10 +131,9 @@
     "Task plans and follow-up chains": "任务计划与后续任务链",
     "History": "经过",
     "No history entries": "没有记录",
-    "Send reserved": "已预留发送",
     "Task sent": "任务已发送",
     "Delivered for review": "已交付，待审核",
-    "Stopped before delivery": "未交付即停止",
+    "Stopped before delivery": "交付前停止",
     "Waiting on a permission prompt or limit": "等待权限提示或用量限制",
     "Worker could not be reached": "无法联系 Worker",
     "Monitor time limit reached": "达到监控时限",
@@ -173,7 +172,7 @@
     "Prerequisite blocked": "前置任务受阻",
     "Review follow-up": "审核后续",
     "Waiting": "等待中",
-    "Sent": "已发送",
+    "Sent": "已派发",
     "Not recorded": "未记录",
     "not recorded": "未记录",
     "Received and reviewed": "已接收并审核",
@@ -308,50 +307,309 @@
     "blocked": "受阻",
     "done": "已完成",
     "true": "是",
-    "false": "否"
+    "false": "否",
+    "Workflow statistics": "工作流统计",
+    "Period": "时间段",
+    "Last 7 days": "最近 7 天",
+    "Last 14 days": "最近 14 天",
+    "Last 30 days": "最近 30 天",
+    "Show statistics": "显示统计",
+    "Read from the ledger journal on request. Durations cover every recorded task; daily counts cover the chosen period.": "按需读取台账日志。耗时统计覆盖全部已记录任务；每日数量只统计所选时间段。",
+    "Sent and reviewed per day": "每日派发与审核",
+    "Show as table": "以表格显示",
+    "Day": "日期",
+    "Review outcomes and stops": "审核结果与停顿",
+    "Workflow settings": "工作流设置",
+    "Operating limits; roles, permissions and verdicts stay as initialized": "运行限制；角色、权限和审核结论保持初始化时的设置",
+    "Goal": "目标",
+    "Tasks that may run at once": "可同时运行的任务数",
+    "Continuations allowed per attempt (0 to 10)": "每次执行允许的继续次数（0 到 10）",
+    "Resource capacities (JSON, e.g. {\"gpu\": 1})": "资源容量（JSON，例如 {\"gpu\": 1}）",
+    "Check changes...": "检查改动...",
+    "Reset form": "重置表单",
+    "Assign agents": "分配 Agent",
+    "Live Herdr panes; assigning writes a new binding version": "实时 Herdr 窗格；分配会写入新的绑定版本",
+    "Loading panes asks Herdr for its pane list. The controller that runs this page is changed only on the command line.": "加载窗格会向 Herdr 查询窗格列表。运行本页面的控制者只能在命令行中更换。",
+    "Load panes": "加载窗格",
+    "Rename panes after their roles...": "按角色重命名窗格...",
+    "Action": "操作",
+    "Preview first; confirm performs one step": "先预览；确认只执行一步",
+    "Close": "关闭",
+    "Confirm the start": "确认已开始执行",
+    "What did you observe?": "你观察到了什么？",
+    "The worker started this task": "Worker 已开始执行此任务",
+    "The task never reached the worker": "任务没有送达 Worker",
+    "What you saw in the worker (saved as evidence)": "你在 Worker 中看到的情况（保存为证据）",
+    "Start monitoring": "启动监控",
+    "Stop monitoring": "停止监控",
+    "Continue the worker once": "让 Worker 继续一次",
+    "Close this attempt": "关闭此次执行",
+    "Why you are closing it (saved as evidence)": "关闭原因（保存为证据）",
+    "Release the work slot": "释放工作占用",
+    "Run the task plan": "运行任务计划",
+    "Change workflow settings": "修改工作流设置",
+    "Rename panes after their roles": "按角色重命名窗格",
+    "Also replace names you set yourself": "同时替换你自定义的名称",
+    "Activate the pending binding": "激活待生效的绑定",
+    "Assign a pane to a role": "将窗格分配给角色",
+    "Role": "角色",
+    "Worker: runs tasks": "Worker：执行任务",
+    "Reviewer: checks delivered work": "审核者：检查交付",
+    "Advisor: no workflow actions": "顾问：不执行工作流操作",
+    "Reason (required when it replaces a binding)": "原因（替换已有绑定时必填）",
+    "Confirm start...": "确认开始...",
+    "Start monitoring...": "启动监控...",
+    "Stop monitoring...": "停止监控...",
+    "Continue once...": "继续一次...",
+    "Close attempt...": "关闭此次执行...",
+    "Release work slot...": "释放工作占用...",
+    "Start ready tasks...": "启动就绪任务...",
+    "Release finished tasks...": "释放已完成任务...",
+    "Activate...": "激活...",
+    "Assign to a role...": "分配给角色...",
+    "Asking Herdr for its panes...": "正在向 Herdr 查询窗格...",
+    "Every pane in the bound Herdr sessions already has a role.": "已绑定 Herdr 会话中的每个窗格都已有角色。",
+    "Only the values you changed are sent.": "只发送你修改过的值。",
+    "Herdr pane names follow the awo:<role> pattern.": "Herdr 窗格名称采用 awo:<角色> 格式。",
+    "Confirm records that the worker started. The evidence file below is written first.": "确认后将记录 Worker 已开始执行，并先写入下方的证据文件。",
+    "Confirm records that the task never reached the worker and closes the attempt.": "确认后将记录任务未送达 Worker，并关闭此次执行。",
+    "Confirm asks the monitor to stop at its next check. The worker keeps running.": "确认后监控会在下一次检查时停止，Worker 继续运行。",
+    "Confirm records the attempt as closed. It does not stop the worker process.": "确认后将记录此次执行已关闭，不会停止 Worker 进程。",
+    "Confirm releases the reserved work slot of this accepted task.": "确认后释放这个已接收任务占用的工作位。",
+    "No task is ready to start.": "没有可以启动的任务。",
+    "Confirm renames every bound pane, including custom names.": "确认后将重命名所有已绑定的窗格，包括自定义名称。",
+    "Confirm renames bound panes that have no custom name, and clears stale names this tool set.": "确认后将重命名没有自定义名称的已绑定窗格，并清除本工具设置的过期名称。",
+    "Updates go to the inbox only.": "更新只写入收件箱。",
+    "The task allows one reviewer notification.": "此任务允许发送一次审核通知。",
+    "Resource capacities must be JSON": "资源容量必须是 JSON",
+    "Send to start": "派发到开始",
+    "Start to delivery": "开始到交付",
+    "Delivery to review": "交付到审核",
+    "Repair share": "返修比例",
+    "No reviews recorded yet": "尚无审核记录",
+    "Continuations sent": "已发送的继续提示",
+    "No data": "无数据"
   },
   "patterns": [
-    ["^(\\d+) accepted$", "已接收 $1 个"],
-    ["^of (\\d+) configured$", "共配置 $1 个"],
-    ["^(\\d+) waiting for review$", "$1 个待审核"],
-    ["^(\\d+) tasks$", "$1 个任务"],
-    ["^(\\d+) open tasks?: (.+)$", "$1 个进行中的任务：$2"],
-    ["^(\\d+) bytes$", "$1 字节"],
-    ["^(\\d+) min ago$", "$1 分钟前"],
-    ["^(\\d+) h (\\d+) min ago$", "$1 小时 $2 分钟前"],
-    ["^(\\d+) d (\\d+) h ago$", "$1 天 $2 小时前"],
-    ["^Received (.+)$", "接收于 $1"],
-    ["^Checked (\\d.+)$", "检查于 $1"],
-    ["^Page updated: (.+)$", "页面更新：$1"],
-    ["^Goal: (.+)$", "目标：$1"],
-    ["^Next: (.+)$", "下一步：#1"],
-    ["^Tasks: (.+) and (\\d+) more$", "任务：$1 等，另有 $2 个"],
-    ["^Tasks: (.+)$", "任务：$1"],
-    ["^waiting, of (\\d+) updates$", "条待审核，共 $1 条"],
-    ["^Show (\\d+) handled updates$", "显示 $1 条已处理的更新"],
-    ["^Showing the latest 20 of (\\d+) handled updates\\.$", "显示最近 20 条，共 $1 条已处理的更新。"],
-    ["^Ledger detail: (.+)$", "台账详情：$1"],
-    ["^Talking to (.+)$", "对话对象：$1"],
-    ["^This role is working on (.+)\\. A message may interrupt its work\\.$", "该角色正在执行 $1。消息可能干扰执行。"],
-    ["^Dependency graph for (.+)$", "$1 的依赖图"],
-    ["^(Handoff file|Result file|Review file|File): (.+)$", "#1：$2"],
-    ["^Checked at (.+?)\\. Shows live agent status; tasks appear above only when dispatched through this workflow ledger\\.$", "检查于 $1。这里只显示 Agent 的实时状态；只有通过本工作流台账派发的任务才会出现在上方。"],
-    ["^Acknowledge the update for (.+)\\.$", "确认收到 $1 的更新。"],
-    ["^Record a review for (.+)\\.$", "为 $1 登记审核。"],
-    ["^Confirm marks this update as received by (.+)\\. It does not accept the work\\.$", "确认后，此更新将标记为已由 $1 收到。这不代表接收该工作。"],
-    ["^Confirm records (.+?) \\(next: (.+?)\\) from (.+) \\(sha256 (\\w+)\\)\\.$", "确认后将登记“#1”（下一步：$2），来源 $3（sha256 $4）。"],
-    ["^Review recorded: (.+)\\.$", "已登记审核：#1。"],
-    ["^(\\S+) is (idle|working|blocked|done|[a-z ]+) \\(read (.+)\\)$", "$1 当前状态：#2（读取于 $3）"],
-    ["^(\\d{1,2}:\\d{2}(?::\\d{2})?(?: [AP]M)?) to (\\S+)$", "$1 发给 $2"],
-    ["^(\\d{1,2}:\\d{2}(?::\\d{2})?(?: [AP]M)?) to (\\S+) - delivery uncertain$", "$1 发给 $2（投递不确定）"],
-    ["^Delivery uncertain: (.+)\\. Read the output before sending again\\.$", "投递不确定：$1。再次发送前请先读取输出。"],
-    ["^(\\d+) finished tasks are older than the selected range and hidden\\.$", "另有 $1 个已结束的任务早于所选范围，已隐藏。"],
-    ["^(\\d+) finished chains are older than the selected range and hidden\\.$", "另有 $1 条已结束的任务链早于所选范围，已隐藏。"],
-    ["^Show all (\\d+) steps$", "显示全部 $1 步"],
-    ["^(\\d+) earlier steps$", "前 $1 步"],
-    ["^(\\d+) steps - (\\d+) finished - (\\d+) open - Last activity (.+)$", "共 $1 步 - 已结束 $2 - 进行中 $3 - 最近活动 $4"],
-    ["^(\\d+) steps - (\\d+) finished - Last activity (.+)$", "共 $1 步 - 已结束 $2 - 最近活动 $3"],
-    ["^(\\d+) steps - (\\d+) finished - (\\d+) open$", "共 $1 步 - 已结束 $2 - 进行中 $3"],
-    ["^(\\d+) steps - (\\d+) finished$", "共 $1 步 - 已结束 $2"]
+    [
+      "^(\\d+) reviews$",
+      "$1 次审核"
+    ],
+    [
+      "^Run one scheduling pass for (.+)\\.$",
+      "为 $1 运行一次调度。"
+    ],
+    [
+      "^Monitor: (.+)$",
+      "监控：#1"
+    ],
+    [
+      "^Result: (.+)$",
+      "结果：$1"
+    ],
+    [
+      "^Confirm sends each ready task once: (.+)\\.$",
+      "确认后将每个就绪任务各发送一次：$1。"
+    ],
+    [
+      "^Accepted tasks release their work slots: (.+)\\.$",
+      "已接收的任务释放工作占用：$1。"
+    ],
+    [
+      "^Confirm starts one background monitor that checks the worker every (\\d+) seconds and records completion\\. (.+)$",
+      "确认后将启动一个后台监控，每 $1 秒检查一次 Worker 并记录完成情况。#2"
+    ],
+    [
+      "^Confirm sends this message once \\(continuation (\\d+) of (\\d+)\\)\\. An uncertain send is counted and never repeated\\.$",
+      "确认后只发送一次此消息（第 $1 次继续，共 $2 次）。不确定的发送也计入次数，且不会重发。"
+    ],
+    [
+      "^Confirm activates version (\\d+) of (\\S+) \\((\\w+)\\) after checking the pane identity again\\.$",
+      "确认后将再次核对窗格身份，然后激活 $2 的第 $1 版绑定（$3）。"
+    ],
+    [
+      "^This replaces binding version (\\d+)\\.$",
+      "这将替换第 $1 版绑定。"
+    ],
+    [
+      "^median (.+) min - p90 (.+) min - (\\d+) tasks$",
+      "中位数 $1 分钟 - p90 $2 分钟 - $3 个任务"
+    ],
+    [
+      "^(.+) min$",
+      "$1 分钟"
+    ],
+    [
+      "^(\\d+) sent, (\\d+) reviewed$",
+      "派发 $1，审核 $2"
+    ],
+    [
+      "^(\\d+) accepted$",
+      "已接收 $1 个"
+    ],
+    [
+      "^of (\\d+) configured$",
+      "共配置 $1 个"
+    ],
+    [
+      "^(\\d+) waiting for review$",
+      "$1 个待审核"
+    ],
+    [
+      "^(\\d+) tasks$",
+      "$1 个任务"
+    ],
+    [
+      "^(\\d+) open tasks?: (.+)$",
+      "$1 个进行中的任务：$2"
+    ],
+    [
+      "^(\\d+) bytes$",
+      "$1 字节"
+    ],
+    [
+      "^(\\d+) min ago$",
+      "$1 分钟前"
+    ],
+    [
+      "^(\\d+) h (\\d+) min ago$",
+      "$1 小时 $2 分钟前"
+    ],
+    [
+      "^(\\d+) d (\\d+) h ago$",
+      "$1 天 $2 小时前"
+    ],
+    [
+      "^Received (.+)$",
+      "接收于 $1"
+    ],
+    [
+      "^Checked (\\d.+)$",
+      "检查于 $1"
+    ],
+    [
+      "^Page updated: (.+)$",
+      "页面更新：$1"
+    ],
+    [
+      "^Goal: (.+)$",
+      "目标：$1"
+    ],
+    [
+      "^Next: (.+)$",
+      "下一步：#1"
+    ],
+    [
+      "^Tasks: (.+) and (\\d+) more$",
+      "任务：$1 等，另有 $2 个"
+    ],
+    [
+      "^Tasks: (.+)$",
+      "任务：$1"
+    ],
+    [
+      "^waiting, of (\\d+) updates$",
+      "条待审核，共 $1 条"
+    ],
+    [
+      "^Show (\\d+) handled updates$",
+      "显示 $1 条已处理的更新"
+    ],
+    [
+      "^Showing the latest 20 of (\\d+) handled updates\\.$",
+      "显示最近 20 条，共 $1 条已处理的更新。"
+    ],
+    [
+      "^Ledger detail: (.+)$",
+      "台账详情：$1"
+    ],
+    [
+      "^Talking to (.+)$",
+      "对话对象：$1"
+    ],
+    [
+      "^This role is working on (.+)\\. A message may interrupt its work\\.$",
+      "该角色正在执行 $1。消息可能干扰执行。"
+    ],
+    [
+      "^Dependency graph for (.+)$",
+      "$1 的依赖图"
+    ],
+    [
+      "^(Handoff file|Result file|Review file|File): (.+)$",
+      "#1：$2"
+    ],
+    [
+      "^Checked at (.+?)\\. Shows live agent status; tasks appear above only when dispatched through this workflow ledger\\.$",
+      "检查于 $1。这里只显示 Agent 的实时状态；只有通过本工作流台账派发的任务才会出现在上方。"
+    ],
+    [
+      "^Acknowledge the update for (.+)\\.$",
+      "确认收到 $1 的更新。"
+    ],
+    [
+      "^Record a review for (.+)\\.$",
+      "为 $1 登记审核。"
+    ],
+    [
+      "^Confirm marks this update as received by (.+)\\. It does not accept the work\\.$",
+      "确认后，此更新将标记为已由 $1 收到。这不代表接收该工作。"
+    ],
+    [
+      "^Confirm records (.+?) \\(next: (.+?)\\) from (.+) \\(sha256 (\\w+)\\)\\.$",
+      "确认后将登记“#1”（下一步：$2），来源 $3（sha256 $4）。"
+    ],
+    [
+      "^Review recorded: (.+)\\.$",
+      "已登记审核：#1。"
+    ],
+    [
+      "^(\\S+) is (idle|working|blocked|done|[a-z ]+) \\(read (.+)\\)$",
+      "$1 当前状态：#2（读取于 $3）"
+    ],
+    [
+      "^(\\d{1,2}:\\d{2}(?::\\d{2})?(?: [AP]M)?) to (\\S+)$",
+      "$1 发给 $2"
+    ],
+    [
+      "^(\\d{1,2}:\\d{2}(?::\\d{2})?(?: [AP]M)?) to (\\S+) - delivery uncertain$",
+      "$1 发给 $2（投递不确定）"
+    ],
+    [
+      "^Delivery uncertain: (.+)\\. Read the output before sending again\\.$",
+      "投递不确定：$1。再次发送前请先读取输出。"
+    ],
+    [
+      "^(\\d+) finished tasks are older than the selected range and hidden\\.$",
+      "另有 $1 个已结束的任务早于所选范围，已隐藏。"
+    ],
+    [
+      "^(\\d+) finished chains are older than the selected range and hidden\\.$",
+      "另有 $1 条已结束的任务链早于所选范围，已隐藏。"
+    ],
+    [
+      "^Show all (\\d+) steps$",
+      "显示全部 $1 步"
+    ],
+    [
+      "^(\\d+) earlier steps$",
+      "前 $1 步"
+    ],
+    [
+      "^(\\d+) steps - (\\d+) finished - (\\d+) open - Last activity (.+)$",
+      "共 $1 步 - 已结束 $2 - 进行中 $3 - 最近活动 $4"
+    ],
+    [
+      "^(\\d+) steps - (\\d+) finished - Last activity (.+)$",
+      "共 $1 步 - 已结束 $2 - 最近活动 $3"
+    ],
+    [
+      "^(\\d+) steps - (\\d+) finished - (\\d+) open$",
+      "共 $1 步 - 已结束 $2 - 进行中 $3"
+    ],
+    [
+      "^(\\d+) steps - (\\d+) finished$",
+      "共 $1 步 - 已结束 $2"
+    ]
   ]
 }

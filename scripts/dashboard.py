@@ -23,6 +23,7 @@ import time
 from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
+import dashboard_actions
 import workflow_control as control
 import workflow_scheduler as scheduler
 import workflow_status
@@ -215,11 +216,12 @@ HTML = r"""<!doctype html>
 <style nonce="__CSP_NONCE__">
 :root { color-scheme:light; --bg:#f3f5f4; --surface:#fff; --ink:#172b32; --muted:#60757b;
   --line:#dce5e3; --accent:#126b66; --accent-soft:#e5f3ef; --danger:#a43e37; --warn:#9a681d;
-  --shadow:0 10px 30px rgba(22,47,50,.055); --hero:#173b40; --hero-deep:#10292f; --hero-muted:#b5d4d2; }
+  --shadow:0 10px 30px rgba(22,47,50,.055); --hero:#173b40; --hero-deep:#10292f; --hero-muted:#b5d4d2;
+  --series-1:#2a78d6; --series-2:#eb6834; }
 @media (prefers-color-scheme:dark) { :root { color-scheme:dark; --bg:#101d22; --surface:#1a2b30;
   --ink:#ecf5f1; --muted:#a7bdbd; --line:#385057; --accent:#8bdfc9; --accent-soft:#23463e;
   --danger:#f2a59d; --warn:#f0c580; --shadow:0 12px 36px rgba(0,0,0,.14);
-  --hero:#1d464b; --hero-deep:#163238; --hero-muted:#c0e0dc; } }
+  --hero:#1d464b; --hero-deep:#163238; --hero-muted:#c0e0dc; --series-1:#3987e5; --series-2:#d95926; } }
 * { box-sizing:border-box } html,body { margin:0; min-width:0 } body { background:var(--bg); color:var(--ink);
   font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; overflow-x:hidden }
 .shell { max-width:1460px; margin:auto; padding:22px clamp(14px,3vw,40px) 70px }
@@ -369,6 +371,20 @@ progress { width:100%; height:12px; accent-color:var(--accent) }
 #picker { margin-bottom:18px } .path-row { display:flex; gap:9px; align-items:flex-end; margin-top:12px }
 .path-row label { flex:1; min-width:0 } .recent-item { text-align:left; width:100%; overflow-wrap:anywhere; font-weight:500 }
 code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
+.stat-row { margin:0 0 16px } .stat-split { display:grid; grid-template-columns:minmax(0,2fr) minmax(240px,1fr); gap:20px }
+.stat-split h3 { margin:0 0 8px } .legend { display:flex; gap:14px; font-size:12px; color:var(--muted); margin:0 0 8px }
+.legend span:before { content:""; display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px;
+  vertical-align:-1px; background:var(--swatch) }
+.series-1 { --swatch:var(--series-1) } .series-2 { --swatch:var(--series-2) }
+svg rect.bar-1 { fill:var(--series-1); stroke:var(--surface); stroke-width:2 }
+svg rect.bar-2 { fill:var(--series-2); stroke:var(--surface); stroke-width:2 }
+svg rect.hit { fill:transparent; stroke:none } svg rect.hit:hover { fill:var(--accent-soft); fill-opacity:.5 }
+svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:11px; fill:var(--muted) }
+.outcome { display:flex; justify-content:space-between; gap:8px; padding:7px 0; border-bottom:1px solid var(--line); font-size:13px }
+.task-actions { display:flex; gap:7px; flex-wrap:wrap; margin:10px 0 } .pane-row { display:grid;
+  grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center }
+.manage-diff { margin:4px 0; font:12px ui-monospace,SFMono-Regular,Consolas,monospace }
+@media(max-width:900px) { .stat-split { grid-template-columns:1fr } }
 .hidden { display:none !important } .small-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap }
 @media(max-width:900px) { .grid { grid-template-columns:1fr } .wide { grid-column:auto }
   .overview { grid-template-columns:repeat(2,minmax(0,1fr)) } }
@@ -498,6 +514,41 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         <div id="review-output" class="hidden"><p id="review-summary" class="notice"></p><pre id="review-text"></pre></div>
         <p id="review-status"></p>
       </div></section>
+    <section class="panel wide" id="metrics-panel"><div class="panel-head"><h2>Workflow statistics</h2>
+      <div class="panel-tools"><label class="range-label"><span>Period</span><select id="metrics-days">
+        <option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30">Last 30 days</option>
+      </select></label><button id="metrics-load" type="button">Show statistics</button></div></div>
+      <p class="muted" id="metrics-note">Read from the ledger journal on request. Durations cover every recorded task; daily counts cover the chosen period.</p>
+      <div id="metrics" class="hidden"><div class="overview stat-row" id="metric-stages"></div>
+        <div class="stat-split"><div><h3>Sent and reviewed per day</h3><div class="legend" id="daily-legend"></div>
+          <div class="dag-scroll" id="daily-chart"></div>
+          <details class="technical"><summary>Show as table</summary><div class="table-scroll"><table>
+            <thead><tr><th>Day</th><th>Sent</th><th>Reviewed</th></tr></thead><tbody id="daily-table"></tbody></table></div></details></div>
+        <div><h3>Review outcomes and stops</h3><div id="metric-outcomes" class="list"></div></div></div></div></section>
+    <section class="panel wide hidden" id="manage-settings"><div class="panel-head"><h2>Workflow settings</h2>
+      <span class="panel-caption">Operating limits; roles, permissions and verdicts stay as initialized</span></div>
+      <div class="form-grid">
+        <label class="full"><span>Goal</span><input id="set-goal" maxlength="2000"></label>
+        <label><span>Tasks that may run at once</span><input id="set-concurrency" type="number" min="1" step="1"></label>
+        <label><span>Continuations allowed per attempt (0 to 10)</span><input id="set-continues" type="number" min="0" max="10" step="1"></label>
+        <label class="full"><span>Resource capacities (JSON, e.g. {"gpu": 1})</span><input id="set-resources"></label>
+      </div><div class="actions"><button id="set-preview" class="primary" type="button">Check changes...</button>
+        <button id="set-reset" type="button">Reset form</button></div></section>
+    <section class="panel wide hidden" id="manage-panes"><div class="panel-head"><h2>Assign agents</h2>
+      <span class="panel-caption">Live Herdr panes; assigning writes a new binding version</span></div>
+      <p class="muted">Loading panes asks Herdr for its pane list. The controller that runs this page is changed only on the command line.</p>
+      <div class="actions"><button id="panes-load" type="button">Load panes</button>
+        <button id="labels-sync" type="button">Rename panes after their roles...</button></div>
+      <div id="panes" class="list"></div></section>
+    <section class="panel wide hidden" id="manage-panel"><div class="panel-head"><h2 id="manage-title">Action</h2>
+      <span class="panel-caption">Preview first; confirm performs one step</span></div>
+      <p id="manage-target" class="muted"></p><div id="manage-fields" class="form-grid"></div>
+      <div class="actions"><button id="manage-preview" class="primary" type="button">Check and preview</button>
+        <button id="manage-confirm" type="button" disabled>Confirm once</button>
+        <button id="manage-cancel" type="button">Close</button></div>
+      <p id="manage-error" class="error" role="alert"></p>
+      <div id="manage-output" class="hidden"><div id="manage-summary" class="notice"></div><pre id="manage-text" class="hidden"></pre></div>
+      <p id="manage-status" role="status"></p></section>
   </div>
 </div>
 <script type="application/json" id="i18n-zh">__I18N_ZH__</script>
@@ -834,6 +885,7 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
         add(box, 'p', 'alert-next', 'Next: ' + note.next);
         if (note.technical) add(box, 'p', 'muted', 'Ledger detail: ' + note.technical);
       }
+      if (data.allow_manage) taskActions(detail, data, t);
       const results = add(detail, 'div', 'results');
       const view = add(results, 'button', '', 'View result files'); view.type = 'button';
       const output = add(results, 'div');
@@ -988,6 +1040,11 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     const box = add(root, 'div', 'dag-run'); const title = add(box, 'div', 'dag-title');
     add(title, 'h3', '', run); add(title, 'span', 'dag-count', Object.keys(nodes).length + ' tasks');
     graphSvg(box, run, nodes, dependencies, label);
+    const ready = Object.values(nodes).filter(state => state === 'ready').length;
+    if (lastData?.allow_manage && (ready || Object.values(nodes).includes('accepted'))) {
+      const go = add(box, 'button', '', ready ? 'Start ready tasks...' : 'Release finished tasks...'); go.type = 'button';
+      go.addEventListener('click', () => openManage('tick', {run}, 'Run one scheduling pass for ' + run + '.'));
+    }
   }
   // Boxes and arrows for a frozen DAG plan or a follow-up chain; columns follow dependency depth.
   function graphSvg(root, run, nodes, dependencies, label, compact = false) {
@@ -1180,6 +1237,8 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
       show('dispatch-form', data.allow_dispatch);
       show('dispatch-panel', data.allow_dispatch);  // An off switch needs no panel; the docs say how to enable it.
       show('chat-panel', data.allow_chat); show('chat-open', data.allow_chat);
+      show('manage-settings', data.allow_manage); show('manage-panes', data.allow_manage);
+      if (data.allow_manage) settingsForm(data);
       if (data.allow_chat) { chatTargets(data); id('chat-caption').textContent = 'Talking to ' + chatRole(); }
       id('dispatch-note').textContent = data.allow_dispatch ?
         'Preview checks that the worker is available. Confirm sends the task once; check the result before taking another action.' :
@@ -1262,6 +1321,242 @@ code { font:13px ui-monospace,SFMono-Regular,Consolas,monospace }
     } catch (error) { id('review-error').textContent = error.message; }
     reviewPreview = null;
   });
+  // Management: every action previews read-only, then a confirm repeats all checks and performs one step.
+  const MANAGE = {
+    reconcile: {title:'Confirm the start', fields:[
+      ['outcome', 'select', 'What did you observe?', [['running', 'The worker started this task'], ['not_sent', 'The task never reached the worker']]],
+      ['observation', 'textarea', 'What you saw in the worker (saved as evidence)']]},
+    monitor_start: {title:'Start monitoring', fields:[]},
+    monitor_stop: {title:'Stop monitoring', fields:[]},
+    continue: {title:'Continue the worker once', fields:[]},
+    close: {title:'Close this attempt', fields:[['reason', 'textarea', 'Why you are closing it (saved as evidence)']]},
+    release: {title:'Release the work slot', fields:[]},
+    tick: {title:'Run the task plan', fields:[]},
+    config: {title:'Change workflow settings', fields:[]},
+    labels: {title:'Rename panes after their roles', fields:[['force', 'checkbox', 'Also replace names you set yourself']]},
+    activate: {title:'Activate the pending binding', fields:[]},
+    assign: {title:'Assign a pane to a role', fields:[
+      ['role', 'roles', 'Role'],
+      ['mode', 'select', 'Mode', [['worker', 'Worker: runs tasks'], ['reviewer', 'Reviewer: checks delivered work'], ['advisor', 'Advisor: no workflow actions']]],
+      ['reason', 'input', 'Reason (required when it replaces a binding)']]},
+  };
+  let manageAction = null, manageBase = {}, managePreview = null;
+  function manageInvalidate() { managePreview = null; id('manage-confirm').disabled = true; show('manage-output', false); }
+  function openManage(action, base, target) {
+    manageAction = action; manageBase = base; manageInvalidate();
+    id('manage-title').textContent = MANAGE[action].title; id('manage-target').textContent = target || '';
+    id('manage-error').textContent = ''; id('manage-status').textContent = '';
+    const root = id('manage-fields'); root.replaceChildren();
+    for (const [name, kind, label, options] of MANAGE[action].fields) {
+      const wrap = add(root, 'label', kind === 'textarea' || kind === 'checkbox' ? 'full' : '');
+      let input;
+      if (kind === 'checkbox') { input = el('input'); input.type = 'checkbox'; wrap.append(input); add(wrap, 'span', '', label); }
+      else {
+        add(wrap, 'span', '', label);
+        input = el(kind === 'textarea' ? 'textarea' : (kind === 'input' ? 'input' : 'select'));
+        const choices = kind === 'roles' ? (lastData?.roles || []).filter(r => r.role !== lastData.actor_role)
+          .map(r => [r.role, r.role]) : (options || []);
+        for (const [value, text] of choices) { const o = add(input, 'option', kind === 'roles' ? 'raw' : '', text); o.value = value; }
+        if (kind === 'textarea') input.maxLength = 4000;
+        wrap.append(input);
+      }
+      input.dataset.field = name; input.addEventListener('input', manageInvalidate);
+    }
+    show('manage-panel', true); show('manage-preview', true);
+    id('manage-panel').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  function managePayload() {
+    const value = {...manageBase, action:manageAction};
+    for (const input of id('manage-fields').querySelectorAll('[data-field]'))
+      value[input.dataset.field] = input.type === 'checkbox' ? input.checked : input.value;
+    return value;
+  }
+  function manageSummary(step) {
+    const lines = [];
+    if (step.action === 'reconcile') lines.push(step.outcome === 'running' ?
+      'Confirm records that the worker started. The evidence file below is written first.' :
+      'Confirm records that the task never reached the worker and closes the attempt.');
+    if (step.action === 'monitor_start') lines.push('Confirm starts one background monitor that checks the worker every ' +
+      step.interval_seconds + ' seconds and records completion. ' + (step.notify ?
+      'The task allows one reviewer notification.' : 'Updates go to the inbox only.'));
+    if (step.action === 'monitor_stop') lines.push('Confirm asks the monitor to stop at its next check. The worker keeps running.');
+    if (step.action === 'continue') lines.push('Confirm sends this message once (continuation ' + (step.used + 1) + ' of ' +
+      step.budget + '). An uncertain send is counted and never repeated.');
+    if (step.action === 'close') lines.push('Confirm records the attempt as closed. It does not stop the worker process.');
+    if (step.action === 'release') lines.push('Confirm releases the reserved work slot of this accepted task.');
+    if (step.action === 'tick') {
+      lines.push(step.ready.length ? 'Confirm sends each ready task once: ' + step.ready.join(', ') + '.' : 'No task is ready to start.');
+      if (step.release.length) lines.push('Accepted tasks release their work slots: ' + step.release.join(', ') + '.');
+    }
+    if (step.action === 'config') for (const d of step.diff)
+      lines.push(d.key + ': ' + JSON.stringify(d.old) + ' -> ' + JSON.stringify(d.new));
+    if (step.action === 'labels') lines.push(step.force ? 'Confirm renames every bound pane, including custom names.' :
+      'Confirm renames bound panes that have no custom name, and clears stale names this tool set.');
+    if (step.action === 'activate') lines.push('Confirm activates version ' + step.version + ' of ' + step.role +
+      ' (' + step.mode + ') after checking the pane identity again.');
+    if (step.action === 'assign') {
+      lines.push('Confirm binds Herdr pane ' + step.spec.pane + ' (' + (step.pane_name || 'unnamed') + ', ' +
+        (step.pane_status || 'status unknown') + ') to ' + step.role + ' as ' + step.mode + '.');
+      if (step.replaces) lines.push('This replaces binding version ' + step.replaces + '.');
+      if (step.defer) lines.push(step.role + ' still has ' + step.running_tasks + ' open task(s): the new binding stays pending until you activate it.');
+    }
+    return lines;
+  }
+  id('manage-preview').addEventListener('click', async () => {
+    manageInvalidate(); id('manage-error').textContent = ''; id('manage-status').textContent = '';
+    id('manage-preview').disabled = true;
+    try { managePreview = await api('/api/manage/preview', managePayload());
+      const box = id('manage-summary'); box.replaceChildren();
+      for (const line of manageSummary(managePreview)) add(box, 'p', managePreview.action === 'config' ? 'manage-diff' : '', line);
+      const text = managePreview.evidence_text || managePreview.message || (managePreview.argv || []).join(' ');
+      id('manage-text').textContent = text || ''; show('manage-text', !!text);
+      show('manage-output', true); id('manage-confirm').disabled = false;
+    } catch (error) { id('manage-error').textContent = error.message; }
+    finally { id('manage-preview').disabled = false; }
+  });
+  id('manage-confirm').addEventListener('click', async () => {
+    if (!managePreview) return; id('manage-confirm').disabled = true; id('manage-error').textContent = '';
+    try { const result = await api('/api/manage/confirm', {...managePayload(), preview_sha256:managePreview.preview_sha256});
+      const bad = /UNCERTAIN|NOT_SENT|DEFERRED/.test(JSON.stringify(result));
+      id('manage-status').textContent = 'Result: ' + (result.status || 'done') + (result.error ? ' - ' + result.error : '') +
+        (result.results ? ' - ' + result.results.map(r => r.node + ' ' + r.status).join(', ') : '') +
+        (result.label_error ? ' - pane name not set: ' + result.label_error : '');
+      id('manage-status').className = bad ? 'error' : 'success'; show('manage-output', false);
+      if (manageAction === 'config') settingsShown = '';
+      await refresh();
+    } catch (error) { id('manage-error').textContent = error.message; }
+    managePreview = null;
+  });
+  id('manage-cancel').addEventListener('click', () => { show('manage-panel', false); manageAction = null; });
+  function taskActions(root, data, t) {
+    const box = add(root, 'div', 'task-actions'), monitor = (data.monitors || {})[t.task_id];
+    const button = (label, action, extra = {}) => { const b = add(box, 'button', '', label); b.type = 'button';
+      b.addEventListener('click', event => { event.stopPropagation();
+        openManage(action, {task_id:t.task_id, ...extra}, taskName(data, t.task_id) + ' (' + t.task_id + ')'); }); };
+    const open = ['executing', 'needs_inspection', 'failed', 'execution_unconfirmed'].includes(t.phase);
+    if (['reserved', 'uncertain', 'submitted'].includes(t.dispatch)) button('Confirm start...', 'reconcile');
+    if (['executing', 'needs_inspection'].includes(t.phase) && monitor === 'not_started') button('Start monitoring...', 'monitor_start');
+    if (monitor === 'running') button('Stop monitoring...', 'monitor_stop');
+    if (t.next_action === 'continue_or_close') button('Continue once...', 'continue');
+    if (open) button('Close attempt...', 'close');
+    if (t.phase === 'accepted' && t.claim_held) button('Release work slot...', 'release');
+    if (monitor && monitor !== 'not_started') add(box, 'small', 'muted', 'Monitor: ' + named(monitor,
+      {running:'running', stopping:'stopping', finished:'finished'}));
+    if (!box.children.length) box.remove();
+  }
+  let settingsShown = '';
+  function settingsForm(data) {
+    const s = data.settings || {}, key = JSON.stringify(s);
+    if (key === settingsShown) return; settingsShown = key;
+    id('set-goal').value = s.goal || ''; id('set-concurrency').value = s['scheduler.max_concurrency'] ?? 1;
+    id('set-continues').value = s['scheduler.max_continue_prompts'] ?? 2;
+    id('set-resources').value = JSON.stringify(s['scheduler.resources'] || {});
+  }
+  id('set-reset').addEventListener('click', () => { settingsShown = ''; if (lastData) settingsForm(lastData); });
+  id('set-preview').addEventListener('click', () => {
+    let resources; try { resources = JSON.parse(id('set-resources').value || '{}'); }
+    catch { id('manage-error').textContent = 'Resource capacities must be JSON'; return; }
+    const changes = {goal:id('set-goal').value, 'scheduler.max_concurrency':Number(id('set-concurrency').value),
+      'scheduler.max_continue_prompts':Number(id('set-continues').value), 'scheduler.resources':resources};
+    const current = lastData?.settings || {};
+    for (const k of Object.keys(changes)) if (JSON.stringify(changes[k]) === JSON.stringify(current[k] ?? (k === 'goal' ? '' : undefined))) delete changes[k];
+    openManage('config', {changes}, 'Only the values you changed are sent.');
+  });
+  id('labels-sync').addEventListener('click', () => openManage('labels', {}, 'Herdr pane names follow the awo:<role> pattern.'));
+  id('panes-load').addEventListener('click', async () => {
+    const root = id('panes'); empty(root, 'Asking Herdr for its panes...'); id('panes-load').disabled = true;
+    try { const data = await api('/api/manage/panes', {}); root.replaceChildren();
+      for (const role of (lastData?.roles || [])) for (const b of role.bindings.filter(x => x.status === 'pending')) {
+        const row = add(root, 'div', 'list-item pane-row');
+        add(row, 'span', '', role.role + ': pending binding version ' + b.version + ' (' + b.mode + ')');
+        const go = add(row, 'button', '', 'Activate...'); go.type = 'button';
+        go.addEventListener('click', () => openManage('activate', {role:role.role}, role.role));
+      }
+      for (const r of data.roles) {
+        const row = add(root, 'div', 'list-item pane-row'); const text = add(row, 'div');
+        add(text, 'strong', 'raw', r.role); add(text, 'span', '', ' - ' + r.mode + ', ' + (r.pane ? 'pane ' + r.pane : r.adapter));
+        add(text, 'p', 'muted', r.live || '');
+        add(row, 'span', 'raw', r.label || '');
+      }
+      if (!data.unbound.length) add(root, 'p', 'muted', 'Every pane in the bound Herdr sessions already has a role.');
+      for (const a of data.unbound) {
+        const row = add(root, 'div', 'list-item pane-row'); const text = add(row, 'div');
+        add(text, 'strong', 'raw', 'Pane ' + a.pane + (a.label ? ' - ' + a.label : ''));
+        add(text, 'p', 'muted', (a.agent || 'unknown agent') + ', ' + (a.status || 'status unknown') + (a.title ? ' - ' + a.title : ''));
+        const go = add(row, 'button', '', 'Assign to a role...'); go.type = 'button';
+        go.addEventListener('click', () => openManage('assign', {pane:a.pane, session:a.session}, 'Herdr pane ' + a.pane));
+      }
+    } catch (error) { empty(root, error.message); } finally { id('panes-load').disabled = false; }
+  });
+  // Statistics come from the journal on request, so the 5 s refresh stays cheap.
+  let metricsData = null;
+  const minutes = value => value === null ? 'No data' : (value < 10 ? value.toFixed(1) : Math.round(value)) + ' min';
+  function renderMetrics(m) {
+    show('metrics', true);
+    const tiles = id('metric-stages'); tiles.replaceChildren();
+    const stageLabels = {send_to_start:'Send to start', start_to_delivery:'Start to delivery', delivery_to_review:'Delivery to review'};
+    for (const [key, label] of Object.entries(stageLabels)) {
+      const s = m.stages[key] || {count:0, median:null, p90:null};
+      const tile = add(tiles, 'div', 'metric'); add(tile, 'span', 'metric-label', label);
+      add(tile, 'strong', 'metric-value', minutes(s.median));
+      add(tile, 'span', 'metric-note', s.count ? 'median ' + minutes(s.median).replace(' min', '') + ' min - p90 ' +
+        minutes(s.p90).replace(' min', '') + ' min - ' + s.count + ' tasks' : 'No data');
+    }
+    const repair = add(tiles, 'div', 'metric'); add(repair, 'span', 'metric-label', 'Repair share');
+    add(repair, 'strong', 'metric-value', m.repair_share === null ? '--' : Math.round(m.repair_share * 100) + '%');
+    add(repair, 'span', 'metric-note', m.repair_share === null ? 'No reviews recorded yet' :
+      Object.values(m.reviews).reduce((a, b) => a + b, 0) + ' reviews');
+    const outcomes = id('metric-outcomes'); outcomes.replaceChildren();
+    const row = (label, value) => { const r = add(outcomes, 'div', 'outcome'); add(r, 'span', '', label); add(r, 'strong', '', value); };
+    for (const [verdict, count] of Object.entries(m.reviews)) row(named(verdict, reviewNames), count);
+    for (const [kind, count] of Object.entries(m.stalls)) row(named(kind, reportNames), count);
+    row('Continuations sent', m.continuations);
+    const legend = id('daily-legend'); legend.replaceChildren();
+    add(legend, 'span', 'series-1', 'Sent'); add(legend, 'span', 'series-2', 'Reviewed');
+    const table = id('daily-table'); table.replaceChildren();
+    for (const d of m.daily) { const tr = add(table, 'tr'); add(tr, 'td', 'raw', d.date); add(tr, 'td', '', d.sent); add(tr, 'td', '', d.reviewed); }
+    // Grouped bars per day: two thin bars, 4px radius at the data end, one recessive grid line set.
+    const chart = id('daily-chart'); chart.replaceChildren();
+    const max = Math.max(1, ...m.daily.map(d => Math.max(d.sent, d.reviewed)));
+    const step = 34, plot = 150, left = 30, width = left + m.daily.length * step + 10, height = plot + 40;
+    const svg = svgEl('svg'); svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.style.width = width + 'px'; svg.style.height = height + 'px'; svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Tasks sent and reviewed per day');
+    const tick = Math.ceil(max / 4), top = tick * Math.ceil(max / tick);
+    for (let v = 0; v <= top; v += tick) {
+      const y = 10 + plot - plot * v / top;
+      const line = svgEl('line'); line.setAttribute('class', 'grid'); line.setAttribute('x1', left); line.setAttribute('x2', width - 6);
+      line.setAttribute('y1', y); line.setAttribute('y2', y); svg.append(line);
+      const t = svgEl('text'); t.setAttribute('class', 'axis'); t.setAttribute('x', left - 6); t.setAttribute('y', y + 4);
+      t.setAttribute('text-anchor', 'end'); t.textContent = v; svg.append(t);
+    }
+    m.daily.forEach((d, i) => {
+      const x = left + i * step + 6;
+      [[d.sent, 'bar-1'], [d.reviewed, 'bar-2']].forEach(([v, cls], j) => {
+        if (!v) return; const h = Math.max(2, plot * v / top);
+        const bar = svgEl('rect'); bar.setAttribute('class', cls); bar.setAttribute('x', x + j * 11);
+        bar.setAttribute('y', 10 + plot - h); bar.setAttribute('width', 10); bar.setAttribute('height', h);
+        bar.setAttribute('rx', 4); svg.append(bar);
+      });
+      const hit = svgEl('rect'); hit.setAttribute('class', 'hit'); hit.setAttribute('x', x - 4); hit.setAttribute('y', 6);
+      hit.setAttribute('width', step - 4); hit.setAttribute('height', plot + 8);
+      const tip = svgEl('title'); tip.textContent = d.date + ': ' + tr(d.sent + ' sent, ' + d.reviewed + ' reviewed'); hit.append(tip);
+      svg.append(hit);
+      if (i % Math.ceil(m.daily.length / 8) === 0) {
+        const t = svgEl('text'); t.setAttribute('class', 'axis'); t.setAttribute('x', x + 10); t.setAttribute('y', plot + 30);
+        t.setAttribute('text-anchor', 'middle'); t.setAttribute('translate', 'no'); t.textContent = d.date.slice(5); svg.append(t);
+      }
+    });
+    chart.append(svg);
+  }
+  async function loadMetrics() {
+    id('metrics-load').disabled = true;
+    try { metricsData = await api('/api/metrics?days=' + encodeURIComponent(id('metrics-days').value)); renderMetrics(metricsData); }
+    catch (error) { id('metrics-note').textContent = error.message; }
+    finally { id('metrics-load').disabled = false; }
+  }
+  id('metrics-load').addEventListener('click', loadMetrics);
+  id('metrics-days').addEventListener('change', () => { if (metricsData) loadMetrics(); });
   id('probe').addEventListener('click', async () => {
     id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active agents...');
     id('probe-time').textContent = ''; id('probe-panel').scrollIntoView({behavior:'smooth', block:'start'});
@@ -1465,9 +1760,9 @@ class DashboardServer(ThreadingHTTPServer):
     # Windows SO_REUSEADDR lets a second socket bind an in-use port; keep port conflicts visible there.
     allow_reuse_address = os.name != "nt"
 
-    def __init__(self, address, state=None, *, allow_dispatch=False, allow_chat=False, actor=None, version=None,
-                 context=None, tasks_root=None, transport_factory=Transport, recent_file=None, public_origins=(),
-                 lan_tls=None):
+    def __init__(self, address, state=None, *, allow_dispatch=False, allow_chat=False, allow_manage=False,
+                 actor=None, version=None, context=None, tasks_root=None, transport_factory=Transport,
+                 recent_file=None, public_origins=(), lan_tls=None, popen=subprocess.Popen):
         host, port = address
         if lan_tls is None and host not in ("127.0.0.1", "localhost"):
             raise ValueError("dashboard host must be loopback: 127.0.0.1 or localhost")
@@ -1479,10 +1774,14 @@ class DashboardServer(ThreadingHTTPServer):
             raise ValueError("dispatch needs --state")
         if state is None and allow_chat:
             raise ValueError("chat needs --state")
+        if state is None and allow_manage:
+            raise ValueError("management needs --state")
         self.state = None if state is None else _state_path(str(Path(state).resolve()))
         self.recent_file = recent_file
         self.allow_dispatch = bool(allow_dispatch)
         self.allow_chat = bool(allow_chat)
+        self.allow_manage = bool(allow_manage)
+        self.manager = None
         self.public_origins = tuple(dict.fromkeys(_public_origin(value) for value in public_origins))
         self.public_hosts = {urlsplit(value).netloc for value in self.public_origins}
         self.lan_tls = lan_tls is not None
@@ -1497,9 +1796,9 @@ class DashboardServer(ThreadingHTTPServer):
         self.chat_lock = threading.Lock()
         self.actor_role = None
         self.task_locks = {}
-        if self.allow_dispatch:
+        if self.allow_dispatch or self.allow_manage:
             if not actor or type(version) is not int or version < 1 or context != "main" or tasks_root is None:
-                raise ValueError("dispatch needs --actor, --version, --context main, and --tasks-root")
+                raise ValueError("dispatch and management need --actor, --version, --context main, and --tasks-root")
             root = Path(tasks_root)
             if not root.is_absolute() or not root.is_dir():
                 raise ValueError("tasks root must be an existing absolute directory")
@@ -1509,6 +1808,9 @@ class DashboardServer(ThreadingHTTPServer):
                 if binding["mode"] != "controller":
                     raise ValueError("actor is not the active controller")
             self.actor_role = binding["role"]
+            if self.allow_manage:
+                self.manager = dashboard_actions.Manager(self.state, actor, version, self.tasks_root,
+                                                         transport_factory, popen)
         if self.allow_chat:
             if not actor or type(version) is not int or version < 1 or context != "main":
                 raise ValueError("chat needs --actor, --version, and --context main")
@@ -1637,8 +1939,9 @@ class DashboardServer(ThreadingHTTPServer):
     def status_data(self):
         state = self.state
         recent = [value for value in _recent(self.recent_file) if (Path(value) / "workflow.sqlite3").is_file()]
-        fixed = self.allow_dispatch or self.allow_chat
-        base = {"allow_dispatch": self.allow_dispatch, "allow_chat": self.allow_chat, "can_switch": not fixed,
+        fixed = self.allow_dispatch or self.allow_chat or self.allow_manage
+        base = {"allow_dispatch": self.allow_dispatch, "allow_chat": self.allow_chat,
+                "allow_manage": self.allow_manage, "can_switch": not fixed,
                 "recent": recent, "actor_role": self.actor_role if fixed else None, "chat_targets": []}
         if state is None:
             return dict(base, read_only=True, state=None)
@@ -1647,12 +1950,28 @@ class DashboardServer(ThreadingHTTPServer):
         targets = [{"role": item["role"], "mode": binding["mode"]}
                    for item in details["roles"] for binding in item["bindings"] if binding["status"] == "active"]
         base["chat_targets"] = targets
+        if self.manager:
+            with scheduler._read_database(state) as con:
+                config = control.config_of(con)
+            base["settings"] = {key: control.config_value(config, key) for key in control.EDITABLE_CONFIG}
+            # File checks only: whether a monitor lock or summary exists in each open task's folder.
+            base["monitors"] = {row["task_id"]: self.manager.monitor_info(row["task_id"])["state"]
+                                for row in summary["tasks"] if row["phase"] not in ("accepted", "closed")}
         return dict(summary, **details, **base, state=str(state))
+
+    def metrics(self, days):
+        if self.state is None:
+            raise ValueError("open a workflow state first")
+        try:
+            days = int(days)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("days must be an integer") from exc
+        return workflow_status.workflow_metrics(self.state, days)
 
     def select_state(self, payload):
         # Viewing only: dispatch mode is bound to the controller checked at startup.
-        if self.allow_dispatch or self.allow_chat:
-            raise PermissionError("state is fixed while dispatch or chat is enabled")
+        if self.allow_dispatch or self.allow_chat or self.allow_manage:
+            raise PermissionError("state is fixed while dispatch, chat or management is enabled")
         state = _state_path(payload.get("state"))
         self.state = state
         _remember(self.recent_file, state)
@@ -2023,6 +2342,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
             except Exception:
                 self._error(500, "result file read failed")
             return
+        if path == "/api/metrics":
+            try:
+                days = parse_qs(urlsplit(self.path).query).get("days", ["14"])[0]
+                self._json(200, self.server.metrics(days))
+            except ValueError as exc:
+                self._error(400, str(exc)[:300])
+            except Exception:
+                self._error(500, "metrics read failed")
+            return
         if path != "/api/status":
             self._error(404, "not found")
             return
@@ -2049,8 +2377,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/chat/") and not self.server.allow_chat:
             self._error(403, "chat is disabled")
             return
+        if path.startswith("/api/manage/") and not self.server.allow_manage:
+            self._error(403, "management is disabled")
+            return
         if path not in ("/api/state", "/api/probe", "/api/dispatch/preview", "/api/dispatch/confirm",
-                        "/api/review/preview", "/api/review/confirm", "/api/chat/send", "/api/chat/output"):
+                        "/api/review/preview", "/api/review/confirm", "/api/chat/send", "/api/chat/output",
+                        "/api/manage/preview", "/api/manage/confirm", "/api/manage/panes"):
             self._error(404, "not found")
             return
         try:
@@ -2063,6 +2395,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 result = self.server.chat_send(payload)
             elif path == "/api/chat/output":
                 result = self.server.chat_output(payload)
+            elif path == "/api/manage/panes":
+                result = self.server.manager.candidates()
+            elif path.startswith("/api/manage/"):
+                action = payload.get("action")
+                method = self.server.manager.preview if path.endswith("/preview") else self.server.manager.confirm
+                result = method(action, payload)
             elif path == "/api/review/preview":
                 result = self.server.review_preview(payload)
             elif path == "/api/review/confirm":
@@ -2107,6 +2445,9 @@ def main(argv=None):
     parser.add_argument("--allow-dispatch", action="store_true")
     parser.add_argument("--allow-chat", action="store_true",
                         help="let the bound controller chat with any active role")
+    parser.add_argument("--allow-manage", action="store_true",
+                        help="let the bound controller confirm starts, run monitors, continue, close and release "
+                             "attempts, change limits and assign panes, each after a preview")
     parser.add_argument("--actor")
     parser.add_argument("--version", type=int)
     parser.add_argument("--context", choices=("main", "side", "unknown"))
@@ -2121,12 +2462,12 @@ def main(argv=None):
             raise ValueError("--lan cannot be combined with --host")
         if args.lan is not None and args.public_origin:
             raise ValueError("--lan and --public-origin are separate access modes; choose one")
-        if args.lan is not None and (args.allow_chat or args.allow_dispatch) and not args.lan_allow_control:
+        if args.lan is not None and (args.allow_chat or args.allow_dispatch or args.allow_manage)                 and not args.lan_allow_control:
             raise ValueError("LAN token holders can direct agents; add --lan-allow-control only after accepting this risk")
         host = _choose_lan(args.lan) if args.lan is not None else args.host
         lan_tls = ((Path(args.tls_cert), Path(args.tls_key)) if args.tls_cert else _lan_certificate(host)) if args.lan else None
         server = open_server(host, args.port, args.state, allow_dispatch=args.allow_dispatch,
-                             allow_chat=args.allow_chat,
+                             allow_chat=args.allow_chat, allow_manage=args.allow_manage,
                              actor=args.actor, version=args.version, context=args.context,
                              tasks_root=args.tasks_root, recent_file=RECENT_FILE,
                              public_origins=args.public_origin, lan_tls=lan_tls)
