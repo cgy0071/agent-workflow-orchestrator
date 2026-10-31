@@ -388,7 +388,17 @@
     "Repair share": "返修比例",
     "No reviews recorded yet": "尚无审核记录",
     "Continuations sent": "已发送的继续提示",
-    "No data": "无数据"
+    "No data": "无数据",
+    "Sent task has not started": "已发送的任务尚未开始",
+    "The task was sent more than 10 minutes ago and nobody has confirmed that the worker started it. The pane may have been replaced or the prompt lost.": "任务已发送超过 10 分钟，仍无人确认 Worker 已开始执行。窗格可能已被替换，或提示已丢失。",
+    "Look at the worker. Confirm the start if it is working, or record that the task never arrived. Do not resend.": "查看 Worker。如果正在执行，确认开始；如果任务从未送达，记录未送达。不要重发。",
+    "Review waiting": "等待审核",
+    "Delivered work has waited over an hour": "交付已等待审核超过 1 小时",
+    "The worker delivered and is idle until the reviewer records a decision.": "Worker 已交付，在审核者登记结论前处于空闲。",
+    "Acknowledge the update and review the evidence.": "确认收到更新并审核证据。",
+    "Likely cause: provider quota, rate limit or connection error": "可能原因：服务商额度、限流或连接错误",
+    "Likely cause: the worker stopped early and left an unfinished handoff": "可能原因：Worker 提前停止，留下未完成的交接",
+    "Likely cause: the worker wrote no handoff; read its recent output": "可能原因：Worker 未写交接文件，请读取其最近输出"
   },
   "patterns": [
     [

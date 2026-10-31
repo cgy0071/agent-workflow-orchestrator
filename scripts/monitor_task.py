@@ -24,8 +24,19 @@ STALLED = ("incomplete", "blocked", "adapter_error")
 POLLING = ("working", "settling", "transient_error")
 
 
-def event_guidance(status, task_id="TASK_ID"):
+CAUSE_GUIDANCE = {
+    "provider_error": " The worker output shows a quota, rate-limit or connection error: continue once after the "
+                      "provider recovers.",
+    "handoff_without_marker": " The worker wrote a handoff without the completion marker, usually an early stop: read "
+                              "what it says is left, then continue once if the remaining work fits this task.",
+    "no_delivery": " The worker wrote no handoff: read its recent output before choosing continue or close.",
+}
+
+
+def event_guidance(status, task_id="TASK_ID", cause=None):
     """Next step for the controller that receives a delivery event."""
+    if status == "incomplete" and cause in CAUSE_GUIDANCE:
+        return event_guidance(status, task_id) + CAUSE_GUIDANCE[cause]
     if status == "review_ready":
         return ("Independently review delivery, changes and acceptance evidence; record accept/repair/reject "
                 "or missing evidence, then follow the configured workflow within existing authorization.")
@@ -440,6 +451,40 @@ def inspect_once(request, transport, idle_since=None, now=None):
     return "settling", detail, timer, None
 
 
+# Provider and network trouble as agent CLIs print it; matched only in the worker's recent output.
+PROVIDER_ERROR = re.compile(r"rate.?limit|usage limit|quota|insufficient.?credit|too many requests|\b429\b|overloaded|"
+                            r"\b50[234]\b|connection (?:error|reset|refused|dropped)|econnreset|etimedout|"
+                            r"request timed out|network error|retry failed", re.I)
+
+
+def stall_cause(request, transport):
+    """Why a worker went idle without delivery, from its files and recent output; read-only, never raises.
+
+    no_delivery: no handoff written. handoff_without_marker: the worker wrote a task-bound handoff but did not
+    finish it, usually an early stop that says what is left. provider_error: the output shows a quota, rate-limit
+    or connection error, so a continuation can help once the provider recovers.
+    """
+    result = {"cause": "no_delivery", "evidence": ""}
+    try:
+        name = request["completion"]["binding_artifact"]
+        path = Path(request["cwd"]) / (name if isinstance(name, str) else name["path"])
+        if path.is_file():
+            text = path.read_text(encoding="utf-8-sig", errors="replace")[:65536]
+            if request["task_id"] in text and request["nonce"] in text:
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                result = {"cause": "handoff_without_marker", "evidence": " / ".join(lines[-3:])[:300]}
+    except (OSError, KeyError, TypeError):
+        pass
+    try:
+        output = transport.output(request["worker"])[-20000:]
+    except Exception:
+        return result
+    hits = [line.strip() for line in output.splitlines() if PROVIDER_ERROR.search(line)]
+    if hits:
+        result = {"cause": "provider_error", "evidence": hits[-1][:300]}
+    return result
+
+
 def notify_once(request, report, directory, transport):
     if request.get("workflow_state"):
         from workflow_control import deliver_event, publish_event
@@ -602,6 +647,9 @@ def main():
                       "consecutive_errors": errors, "elapsed_seconds": max(0, time.time() - started)}
             if status in STALLED:
                 report["stall_episode"] = episode
+                if status == "incomplete" and escalated != status + ":" + str(episode):
+                    # Read the worker's output once per episode, so the reviewer sees why it stopped.
+                    report.update(stall_cause(request, transport))
             save_checkpoint()
             if receipt:
                 save_json(directory / "completion_receipt.json", receipt)

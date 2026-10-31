@@ -678,6 +678,9 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     reviewed:'Reviewed', followed_up:'Followed up', folded:'Folded'
   };
   const reviewNames = {accept:'Accepted', reject:'Rejected', repair:'Needs repair'};
+  const causeNames = {provider_error:'Likely cause: provider quota, rate limit or connection error',
+    handoff_without_marker:'Likely cause: the worker stopped early and left an unfinished handoff',
+    no_delivery:'Likely cause: the worker wrote no handoff; read its recent output'};
   const nextNames = {
     release_claim_or_advance:'Release reserved resources or continue the plan',
     inspect_changed_evidence:'Check why accepted evidence changed',
@@ -751,6 +754,16 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       label:'Check time unavailable', title:'Monitoring time cannot be read', tone:'check',
       explanation:'The saved check has an invalid time, so the dashboard cannot tell how recent it is.',
       next:'Inspect the task\'s monitor record before relying on its age.'
+    };
+    if (code === 'start_unconfirmed') return {
+      label:'Start not confirmed', title:'Sent task has not started', tone:'check',
+      explanation:'The task was sent more than 10 minutes ago and nobody has confirmed that the worker started it. The pane may have been replaced or the prompt lost.',
+      next:'Look at the worker. Confirm the start if it is working, or record that the task never arrived. Do not resend.'
+    };
+    if (code === 'review_waiting') return {
+      label:'Review waiting', title:'Delivered work has waited over an hour', tone:'check',
+      explanation:'The worker delivered and is idle until the reviewer records a decision.',
+      next:'Acknowledge the update and review the evidence.'
     };
     if (code === 'notification_uncertain_no_resend') return {
       label:'Reviewer notice uncertain', title:'Reviewer notification may have arrived', tone:'check',
@@ -1098,6 +1111,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (paused && ['pending', 'acknowledged'].includes(e.status))
       add(item, 'p', 'role-summary', 'Planner: the worker stopped before delivery. Continue it once when it can run, or close the attempt; this update is not reviewed.');
     else if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
+    if (paused && e.cause) add(item, 'p', 'role-summary', named(e.cause, causeNames));
+    if (paused && e.cause_evidence) add(item, 'p', 'raw role-summary', e.cause_evidence);
     else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
     if (data.allow_dispatch && e.role === data.actor_role && ['pending','acknowledged'].includes(e.status)) {
       const open = add(item, 'button', '', e.status === 'pending' ? 'Acknowledge...' : 'Record review...');
