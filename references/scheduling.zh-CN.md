@@ -178,6 +178,20 @@ python scripts/workflow_scheduler.py --state STATE continue --task TASK-ID --act
 如果是 harness 拒绝了权限，继续消息无济于事，应修改 harness 权限或关闭本次尝试。
 Worker 显示权限提示时派发会在发送前被拒绝，并给出这一原因。
 
+## 后续任务与观察确认开始
+
+父任务审核文件封存后，可先生成下一任务的请求和标准消息；生成阶段不写台账，也不发送给 Worker：
+
+```sh
+python scripts/workflow_scheduler.py --state STATE follow-up --parent-event EVENT_ID --task-id NEXT-ID --taskbook /abs/TASK.md --cwd /abs/next --source "用户授权来源" --out /abs/next/request.json --message-out /abs/next/message.txt --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state STATE dispatch --request /abs/next/request.json --message-file /abs/next/message.txt --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state STATE confirm-start --task NEXT-ID --request-out /abs/next/confirmed.json --wait 60 --actor INSTANCE --version 1 --context main
+```
+
+`follow-up` 核对父审核哈希和当前有效的 Worker／Reviewer 绑定，读取新的完成序号基线，将 `TASK.md` 复制到新任务目录，并生成新 nonce 与精确完成标记。输出路径必须尚不存在。`confirm-start` 每五秒只读查询状态和可用的近期输出；只有观察到 `working`、完成序号前进，或输出同时包含任务 ID 与 nonce，才写 `EXECUTION.md` 并对账。`NOT_OBSERVED` 和 `IDENTITY_CHANGED` 不改文件或台账；两条命令都不会重发任务。人工核实后仍可使用 `reconcile`。
+
+监控仍按 `interval_seconds` 做完整检查。完整检查之间，每隔 `fast_poll_seconds`（默认 30 秒，上限为完整检查间隔）只读查询状态；状态或完成序号变化时立即做完整检查。设为 0 可恢复原来的单次等待。快速查询不发送消息，也不消耗错误预算。
+
 ## 本地演示
 
 ```sh

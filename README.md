@@ -162,10 +162,10 @@ Set `authorization.dispatch_worker` to `true` with a real authorization `source`
 python scripts/workflow_scheduler.py --state /abs/state dispatch --request /abs/task/request.json --message-file task.md --actor INSTANCE --version 1 --context main
 ```
 
-After you confirm the Executor actually started, write `EXECUTION.md` (task ID, nonce, `Outcome: running`, and what you observed), then produce a confirmed request:
+After dispatch, check the Executor's live status and produce a confirmed request only when a start is observed:
 
 ```sh
-python scripts/workflow_scheduler.py --state /abs/state reconcile --task TASK-ID --outcome running --evidence /abs/task/EXECUTION.md --request-out /abs/task/confirmed.json --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state /abs/state confirm-start --task TASK-ID --request-out /abs/task/confirmed.json --wait 60 --actor INSTANCE --version 1 --context main
 ```
 
 If you sent the task through another interface instead, use `register-task` as described in the setup guide. Details: [scheduling.md](references/scheduling.md).
@@ -176,7 +176,7 @@ If you sent the task through another interface instead, use `register-task` as d
 python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 ```
 
-The monitor polls every 300 seconds by default and runs until completion or an exception. There is no default overall time limit, but each status query has a timeout. With `workflow_state`, `--notify` records an inbox event even when `authorization.notify_reviewer` is false. With `inbox_only`, it never prompts the reviewer directly. Background startup and the full status contract: [monitoring.md](references/monitoring.md).
+The monitor makes a full check every 300 seconds by default and uses read-only status checks every 30 seconds to notice a change sooner. Set `fast_poll_seconds: 0` to disable those checks. There is no default overall time limit, but each status query has a timeout. With `workflow_state`, `--notify` records an inbox event even when `authorization.notify_reviewer` is false. With `inbox_only`, it never prompts the reviewer directly. Background startup and the full status contract: [monitoring.md](references/monitoring.md).
 
 If the Executor stops early (quota, rate limit, network) or waits on a permission prompt, the monitor reports it once and keeps watching the same task, so a later delivery still reaches review. After a stop without delivery, the controller can send one bounded `workflow_scheduler.py continue --task TASK-ID` for the same task instead of resending it. Permission prompts are left for you to answer in the Executor's own window. Details: [scheduling.md](references/scheduling.md#stalls-permission-prompts-and-bounded-continuation).
 
@@ -184,12 +184,11 @@ If the Executor stops early (quota, rate limit, network) or waits on a permissio
 
 ```sh
 python scripts/workflow_control.py --state /abs/state inbox
-python scripts/workflow_control.py --state /abs/state ack --event EVENT_ID --actor INSTANCE --version 1 --context main
-python scripts/workflow_control.py --state /abs/state review --event EVENT_ID --file /abs/task/REVIEW.md --verdict accept --actor INSTANCE --version 1 --context main
-python scripts/workflow_control.py --state /abs/state next-check --event EVENT_ID --actor INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /abs/state settle --event EVENT_ID --file /abs/task/REVIEW.md --verdict accept --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event EVENT_ID --task-id NEXT-ID --taskbook /abs/TASK.md --cwd /abs/next --source "Owner authorization" --out /abs/next/request.json --message-out /abs/next/message.txt --actor INSTANCE --version 1 --context main
 ```
 
-The reviewer reads the raw evidence and writes `REVIEW.md` with the task ID, nonce, and verdict. `next-check` returns a `parent_review` record; put it in the next task's request to link the follow-up. Without `continuous_execution_authorized`, the controller stops here and reports back to you.
+The reviewer reads the raw evidence and writes `REVIEW.md` with the task ID, nonce, and verdict. `settle` records the decision and releases or closes the attempt; `follow-up` uses its sealed review and current bindings to prepare the next request and message without sending. Run `dispatch` separately when authorized. Without `continuous_execution_authorized`, the controller stops here and reports back to you.
 
 For a local ledger view, open the optional dashboard. It reads the ledger without contacting agents and leads with what needs you: open and recent tasks (older finished ones fold behind a range selector), follow-up chains as compact cards, updates waiting for review, and alerts that need a check. Titles come from each task's `TASK.md`, without IDs, hashes, or paths. **Check agents now** queries agents only when clicked. The interface switches between English and Chinese. Any of these opens it in your browser:
 

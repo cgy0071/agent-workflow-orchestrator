@@ -93,7 +93,6 @@ register-task 用于登记现有控制器已经提交的任务。也可使用[�
 
 ```sh
 python scripts/workflow_control.py --state /absolute/workflow-state inbox
-python scripts/workflow_control.py --state /absolute/workflow-state ack --event EVENT_ID --actor CONTROLLER_INSTANCE --version 1 --context main
 ```
 
 独立阅读冻结请求、交付、变更和原始证据，再写审核文件，格式例如：
@@ -110,11 +109,10 @@ Verdict: accept
 ```
 
 ```sh
-python scripts/workflow_control.py --state /absolute/workflow-state review --event EVENT_ID --file /absolute/task/REVIEW.md --verdict accept --actor CONTROLLER_INSTANCE --version 1 --context main
-python scripts/workflow_control.py --state /absolute/workflow-state next-check --event EVENT_ID --actor CONTROLLER_INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /absolute/workflow-state settle --event EVENT_ID --file /absolute/task/REVIEW.md --verdict accept --actor CONTROLLER_INSTANCE --version 1 --context main
 ```
 
-把返回的 `parent_review` 对象写入下一份请求，同时将其 `task_id` 写入 `parent_task`。脚本核对台账和当前审核文件哈希。默认 accept/repair 可以继续，通过 `workflow.continuation_verdicts` 修改。通过门槛只允许在既有授权内进入配置的下一阶段，不会自行派工或证明技术判断正确。reviewer 与 controller 可以是不同角色。
+`settle` 会确认待处理事件、登记独立审核，然后释放有效的 accept，或依据 `REVIEW.md` 关闭已结束交付的非 accept 执行。配置允许续派时返回 `parent_review`；中途失败后用相同输入重复运行可从断点继续。它不会自行派工。reviewer 与 controller 分属不同角色时，仍可分别使用 `ack`、`review`、`next-check` 和 `release` 作为备用命令。脚本核对父审核台账和当前文件哈希，默认 accept/repair 允许续派。
 
 ## 6. 安全切换客户端或窗口
 

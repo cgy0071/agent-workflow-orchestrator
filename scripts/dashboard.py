@@ -543,7 +543,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     <section class="panel wide hidden" id="manage-panel"><div class="panel-head"><h2 id="manage-title">Action</h2>
       <span class="panel-caption">Preview first; confirm performs one step</span></div>
       <p id="manage-target" class="muted"></p><div id="manage-fields" class="form-grid"></div>
-      <div class="actions"><button id="manage-preview" class="primary" type="button">Check and preview</button>
+        <div class="actions"><button id="manage-auto-check" class="hidden" type="button">Auto-check worker</button>
+          <button id="manage-preview" class="primary" type="button">Check and preview</button>
         <button id="manage-confirm" type="button" disabled>Confirm once</button>
         <button id="manage-cancel" type="button">Close</button></div>
       <p id="manage-error" class="error" role="alert"></p>
@@ -758,7 +759,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (code === 'start_unconfirmed') return {
       label:'Start not confirmed', title:'Sent task has not started', tone:'check',
       explanation:'The task was sent more than 10 minutes ago and nobody has confirmed that the worker started it. The pane may have been replaced or the prompt lost.',
-      next:'Look at the worker. Confirm the start if it is working, or record that the task never arrived. Do not resend.'
+      next:'Use Auto-check worker or confirm-start to check for a start. If it was not observed, inspect the worker before recording what happened. Do not resend.'
     };
     if (code === 'review_waiting') return {
       label:'Review waiting', title:'Delivered work has waited over an hour', tone:'check',
@@ -1316,8 +1317,10 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     try { reviewPreview = await api('/api/review/preview', payload);
       id('review-summary').textContent = reviewPreview.step === 'acknowledge' ?
         'Confirm marks this update as received by ' + reviewPreview.actor + '. It does not accept the work.' :
-        'Confirm records ' + named(reviewPreview.verdict, reviewNames) + ' (next: ' + reviewPreview.action +
-        ') from ' + reviewPreview.review_path + ' (sha256 ' + reviewPreview.review_sha256.slice(0, 12) + ').';
+        'Confirm records ' + named(reviewPreview.verdict, reviewNames) + ', then ' +
+        (reviewPreview.verdict === 'accept' ? 'releases the work slot' : 'closes the delivered attempt') +
+        ' and checks the next step. Review file: ' + reviewPreview.review_path +
+        ' (sha256 ' + reviewPreview.review_sha256.slice(0, 12) + ').';
       id('review-text').textContent = reviewPreview.review_text || '';
       show('review-output', true); id('review-confirm').disabled = false;
     } catch (error) { id('review-error').textContent = error.message; }
@@ -1330,8 +1333,10 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     try { const result = await api('/api/review/confirm', payload);
       id('review-status').textContent = result.status === 'ACKNOWLEDGED' ?
         'Acknowledged. Write the review file, then record the review.' :
-        'Review recorded: ' + named(result.verdict, reviewNames) + '.';
-      id('review-status').className = 'success'; show('review-form', true); reviewEvent = null;
+        result.status === 'SETTLED' ? 'Review settled: ' + named(result.verdict, reviewNames) + '.' :
+        'Review settlement needs attention: ' + (result.error || result.status);
+      id('review-status').className = result.status === 'SETTLE_INCOMPLETE' ? 'error' : 'success';
+      show('review-form', true); reviewEvent = null;
       show('review-output', false); await refresh();
     } catch (error) { id('review-error').textContent = error.message; }
     reviewPreview = null;
@@ -1342,6 +1347,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       ['outcome', 'select', 'What did you observe?', [['running', 'The worker started this task'], ['not_sent', 'The task never reached the worker']]],
       ['observation', 'textarea', 'What you saw in the worker (saved as evidence)']]},
     monitor_start: {title:'Start monitoring', fields:[]},
+    observe_start: {title:'Auto-check worker', fields:[]},
     monitor_stop: {title:'Stop monitoring', fields:[]},
     continue: {title:'Continue the worker once', fields:[]},
     close: {title:'Close this attempt', fields:[['reason', 'textarea', 'Why you are closing it (saved as evidence)']]},
@@ -1378,6 +1384,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       input.dataset.field = name; input.addEventListener('input', manageInvalidate);
     }
     show('manage-panel', true); show('manage-preview', true);
+    show('manage-auto-check', action === 'reconcile');
     id('manage-panel').scrollIntoView({behavior:'smooth', block:'start'});
   }
   function managePayload() {
@@ -1391,6 +1398,9 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (step.action === 'reconcile') lines.push(step.outcome === 'running' ?
       'Confirm records that the worker started. The evidence file below is written first.' :
       'Confirm records that the task never reached the worker and closes the attempt.');
+    if (step.action === 'observe_start') lines.push(step.status === 'OBSERVED' ?
+      'Worker start observed: ' + step.conditions.join(', ') + '. Confirm writes EXECUTION.md and the confirmed request.' :
+      'Worker start was not observed (' + (step.worker_status || step.status) + '). You can still enter a manual observation.');
     if (step.action === 'monitor_start') lines.push('Confirm starts one background monitor that checks the worker every ' +
       step.interval_seconds + ' seconds and records completion. ' + (step.notify ?
       'The task allows one reviewer notification.' : 'Updates go to the inbox only.'));
@@ -1425,9 +1435,24 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       for (const line of manageSummary(managePreview)) add(box, 'p', managePreview.action === 'config' ? 'manage-diff' : '', line);
       const text = managePreview.evidence_text || managePreview.message || (managePreview.argv || []).join(' ');
       id('manage-text').textContent = text || ''; show('manage-text', !!text);
-      show('manage-output', true); id('manage-confirm').disabled = false;
+      show('manage-output', true); id('manage-confirm').disabled = managePreview.action === 'observe_start' &&
+        managePreview.status !== 'OBSERVED';
     } catch (error) { id('manage-error').textContent = error.message; }
     finally { id('manage-preview').disabled = false; }
+  });
+  id('manage-auto-check').addEventListener('click', async () => {
+    const base = {...manageBase}; manageInvalidate(); id('manage-error').textContent = '';
+    try { const result = await api('/api/manage/preview', {...base, action:'observe_start'});
+      if (result.status === 'OBSERVED') {
+        manageAction = 'observe_start'; managePreview = result;
+        id('manage-title').textContent = 'Confirm the observed start';
+        id('manage-fields').replaceChildren(); show('manage-auto-check', false);
+        id('manage-confirm').disabled = false;
+      }
+      const box = id('manage-summary'); box.replaceChildren();
+      for (const line of manageSummary(result)) add(box, 'p', '', line);
+      show('manage-output', true);
+    } catch (error) { id('manage-error').textContent = error.message; }
   });
   id('manage-confirm').addEventListener('click', async () => {
     if (!managePreview) return; id('manage-confirm').disabled = true; id('manage-error').textContent = '';
@@ -2255,9 +2280,8 @@ class DashboardServer(ThreadingHTTPServer):
                 raise ValueError("preview missing or expired; preview again")
             if result["step"] == "acknowledge":
                 return control.acknowledge(self.state, result["event_id"], self.actor, self.version, self.context)
-            recorded = control.record_review(self.state, result["event_id"], self.actor, self.version, self.context,
-                                             result["review_path"], result["verdict"])
-            return dict(recorded, status="REVIEW_RECORDED")
+            return control.settle(self.state, result["event_id"], self.actor, self.version, self.context,
+                                  result["review_path"], result["verdict"])
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
