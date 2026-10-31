@@ -291,11 +291,31 @@ def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context
     nonce = secrets.token_hex(8)
     completion = copy.deepcopy(parent["completion"])
     completion["marker"] = "TASK_DONE " + task_id + " " + nonce
+    created = not target.exists()
     target.mkdir(parents=True, exist_ok=True)
     local_book = (target / "TASK.md").resolve()
-    if book != local_book:
-        with local_book.open("xb") as stream:
-            stream.write(book.read_bytes())
+    copied = False
+    try:
+        if book != local_book:
+            with local_book.open("xb") as stream:
+                stream.write(book.read_bytes())
+            copied = True
+        return _follow_up_request(state, parent, gate, allowed, task_id, nonce, target, local_book,
+                                  worker, reviewer, completion, source)
+    except BaseException:
+        # Leave no half-prepared folder: a rerun would otherwise refuse the non-empty cwd.
+        if copied:
+            local_book.unlink(missing_ok=True)
+        if created:
+            try:
+                target.rmdir()
+            except OSError:
+                pass
+        raise
+
+
+def _follow_up_request(state, parent, gate, allowed, task_id, nonce, target, local_book, worker, reviewer,
+                       completion, source):
     request = {"task_id": task_id, "nonce": nonce, "generation": 1, "cwd": str(target),
                "workflow_state": str(Path(state).resolve()), "worker": worker, "reviewer": reviewer,
                "dispatch_confirmed": False, "parent_task": gate["task_id"], "parent_review": gate,

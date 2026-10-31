@@ -104,7 +104,14 @@ class ManageTests(unittest.TestCase):
         self.assertFalse((Path(request["cwd"]) / "EXECUTION.md").exists())
         original = self.fake.status
         self.fake.status = lambda spec: dict(original(spec), status="working")
-        preview, result = self.step("observe_start", task_id="AUTO-START")
+        _, live, _ = self.http("POST", "/api/manage/preview", {"action": "observe_start", "task_id": "AUTO-START"})
+        # The worker keeps working: its sequence moves between preview and confirm, which must still succeed.
+        self.fake.status = lambda spec: dict(original(spec), status="idle", completion_seq=12)
+        status, result, _ = self.http("POST", "/api/manage/confirm", {"action": "observe_start", "task_id": "AUTO-START",
+                                                                      "preview_sha256": live["preview_sha256"]})
+        self.assertEqual((status, live["conditions"], result["status"]), (200, ["working"], "RUNNING"), result)
+        self.assertIn("completion_seq_advanced", result["conditions"])
+        preview = live
         self.assertEqual((preview["status"], result["status"]), ("OBSERVED", "RUNNING"))
         self.assertTrue((Path(request["cwd"]) / "EXECUTION.md").is_file())
         confirmed = json.loads((Path(request["cwd"]) / "confirmed.json").read_text(encoding="utf-8"))

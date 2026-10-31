@@ -113,6 +113,20 @@ class FlowTests(unittest.TestCase):
         self.assertFalse(message_out.exists())
         self.assertFalse((self.root / "COLLISION").exists())
 
+    def test_follow_up_failure_leaves_no_folder_so_a_rerun_works(self):
+        req, event, review = self.delivered("PARENT-RETRY")
+        control.settle(self.state, event, *self.actor(), review, "accept")
+        book = self.root / "TASK.md"
+        book.write_text("# Retry\n", encoding="utf-8")
+        with patch.object(scheduler, "validate_request", side_effect=ValueError("bad request")):
+            with self.assertRaisesRegex(ValueError, "bad request"):
+                scheduler.follow_up(self.state, event, "RETRY", book, actor=self.actor()[0], version=1,
+                                    context="main", source="owner", transport=self.fake)
+        self.assertFalse((self.root / "RETRY").exists())
+        follow = scheduler.follow_up(self.state, event, "RETRY", book, actor=self.actor()[0], version=1,
+                                     context="main", source="owner", transport=self.fake)
+        self.assertEqual(follow["status"], "FOLLOW_UP_READY")
+
     def test_settle_restarts_after_release_failure_without_duplicate_review(self):
         req, event, review = self.delivered("SETTLE-FAIL")
         with patch.object(scheduler, "release", side_effect=RuntimeError("temporary failure")):

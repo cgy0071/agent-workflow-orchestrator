@@ -107,8 +107,10 @@ class Manager:
             self._guard(con)
             step = getattr(self, "_prepare_" + action)(con, payload)
         step["action"] = action
+        # Live readings are shown but not frozen; the confirm observes the worker again.
+        volatile = step.pop("_volatile", {})
         step["preview_sha256"] = control.digest(step)
-        return step
+        return dict(step, **volatile)
 
     def preview(self, action, payload):
         step = self.prepare(action, payload)
@@ -165,11 +167,15 @@ class Manager:
         if task["dispatch"] not in DISPATCH_OPEN:
             raise ValueError("this task has no unconfirmed send")
         observed = scheduler.observe_start(self.state, payload["task_id"], self.transport())
-        return dict(observed, request_out=str(Path(task["request"]["cwd"]) / "confirmed.json"))
+        return {"task_id": payload["task_id"], "status": observed["status"],
+                "request_out": str(Path(task["request"]["cwd"]) / "confirmed.json"),
+                "_volatile": {key: observed.get(key) for key in ("worker_status", "completion_seq",
+                                                                 "conditions", "output_error")}}
 
     def _run_observe_start(self, step):
         if step["status"] != "OBSERVED":
             raise ValueError("start was not observed; do not confirm")
+        # confirm_start observes again and writes nothing unless the start is still visible.
         return scheduler.confirm_start(self.state, step["task_id"], step["request_out"],
                                        *self.who(), transport=self.transport())
 
