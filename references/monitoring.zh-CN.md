@@ -96,13 +96,13 @@ python -B scripts/dashboard.py --state /absolute/workflow-state
 
 要启用表单派发，启动时与 `--state` 一起增加 `--allow-dispatch --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks`；此时状态目录固定，不能切换。actor 必须是当前有效控制者；`main` 是操作者的明确声明。预览实时检查空闲 Worker，返回任务绑定请求、nonce、消息与摘要，不写文件。确认时重新检查预览和完成序列，创建新任务目录，并交给 `workflow_scheduler.dispatch` 单次发送；不自动重试不确定派发。独立确认执行后，由操作者自行编写 `EXECUTION.md` 并运行页面显示的 `reconcile` 命令，再启动监控。
 
-任务详情中的 **View result files** 只读取该任务声明的文件（绑定文件、交付文件、审核文件），每个最多 200000 字节，并与完成回执中的哈希比对。派发模式下，属于 actor 自身审核角色的完成更新会显示 **Acknowledge** 和 **Record review**。两者都先做只读预览，再一次性确认，确认时以绑定的 actor 调用 `workflow_control.acknowledge` 或 `record_review`，并重新执行全部审核门检查。页面从不写入审核文件：请自行编写 `REVIEW.md`（或冻结的 `review_path`），包含任务 ID、nonce 和 `Verdict:` 行；文件在预览后改动会使预览失效。页面不执行 reconcile、绑定切换、续派检查或 DAG tick。
+任务详情中的 **View result files** 只读取该任务声明的文件（绑定文件、交付文件、审核文件），每个最多 200000 字节，并与完成回执中的哈希比对。派发模式下，属于 actor 自身审核角色的完成更新会显示 **Acknowledge** 和 **Record review**。两者都先做只读预览，再一次性确认；记录审核会调用 `settle`，随后释放有效的 accept，或关闭已结束交付的非 accept 执行，并在允许时检查续派门。页面从不写入审核文件：请自行编写包含任务 ID、nonce 和 `Verdict:` 行的 `REVIEW.md`（或冻结的 `review_path`）。文件在预览后改动会使预览失效。
 
 要使用 **与角色对话**，启动时与 `--state` 一起加 `--allow-chat --actor INSTANCE --version 1 --context main`（可与 `--allow-dispatch` 同时使用）；默认关闭，并且状态目录固定。发送者必须是当前有效的控制者。可以选择任意已激活角色作为目标；每次发送前重新检查双方绑定和目标的实时身份。向忙碌的 Worker 发送需要单独确认；不支持提示输入的适配器不能发送。每条消息只尝试一次，不自动重试；结果为 `SENT` 或 `SEND_UNCERTAIN`。`dashboard_chat` 审计记录发送者、目标角色和绑定版本、忙碌确认、字符数与 SHA-256，不保存正文。**读取最近输出**只按需读取当前选中角色的输出。
 
 要在页面上管理工作流，启动时与 `--state` 一起加 `--allow-manage --actor INSTANCE --version 1 --context main --tasks-root /absolute/tasks`（可与 `--allow-dispatch`、`--allow-chat` 同时使用）。actor 必须是当前有效的控制者。每项操作先显示只读预览；**确认一次**会重新执行全部检查，并通过与命令行相同的函数只执行一步。任务详情中会按情况提供：
 
-- **确认开始**：根据你填写的观察写入 `EXECUTION.md`（或 `NOT_SENT.md`），运行 `reconcile`，并写入 `confirmed.json`。
+- **确认开始**：可先点 **自动检查 Worker**，只读查询状态、完成序号和包含任务标识的近期输出。观察到开始后，确认才写 `EXECUTION.md`、运行 `reconcile` 并写 `confirmed.json`；未观察到时仍可人工填写观察，人工路径也支持 `NOT_SENT.md`。检查过程不发送消息。
 - **启动监控**：为任务目录中的 `confirmed.json` 启动一个后台 `monitor_task.py`（只有任务授权审核通知时才带 `--notify`）；**停止监控**创建 `STOP_MONITOR`，从不停止 Worker。
 - **继续一次**：调用 `workflow_scheduler.continue_task`，仅在监控报告 `incomplete` 时可用，每次停顿只发一次，并受 `scheduler.max_continue_prompts` 限制。Worker 受阻时仍需 Owner 在 harness 中处理提示。
 - **关闭此次执行**：根据你填写的原因写入 `TERMINATION.md` 并在台账中关闭此次执行；已交付的工作应当审核而不是关闭。**释放工作占用**需要有效的接收审核。

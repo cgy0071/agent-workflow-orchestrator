@@ -653,6 +653,86 @@ def next_gate(state, event_id, actor, version, context):
         return {"status": "NEXT_GATE_PASS", "parent_review": review}
 
 
+def settle(state, event_id, actor, version, context, file, verdict):
+    """Resume the protected acknowledge, review, and claim-close sequence."""
+    from workflow_scheduler import acceptance, has_schema, journal, release
+    from monitor_task import STALLED
+    path = Path(file).resolve()
+    raw = path.read_bytes()
+    sha = hashlib.sha256(raw).hexdigest()
+    completed = []
+    with database(state) as con:
+        reviewer = guard(con, actor, version, context, "review")
+        guard(con, actor, version, context, "dispatch")
+        event = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+        if not event or event["role"] != reviewer["role"]:
+            raise ValueError("event belongs to another reviewer role")
+        task_status = con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0]
+        delivery = json.loads(event["data"])["report"]["status"]
+        if delivery in STALLED and task_status == "running":
+            raise ValueError("delivery is still open; wait, continue, or close the attempt before review")
+        previous = con.execute("SELECT data FROM reviews WHERE event=?", (event_id,)).fetchone()
+        if previous:
+            review = json.loads(previous[0])
+            if (review["path"], review["sha256"], review["verdict"]) != (str(path), sha, verdict):
+                raise ValueError("existing review differs in path, file hash, or verdict")
+        elif event["status"] not in ("pending", "acknowledged"):
+            raise ValueError("event cannot be reviewed from status " + event["status"])
+    if not previous:
+        if event["status"] == "pending":
+            acknowledge(state, event_id, actor, version, context)
+            completed.append("acknowledged")
+        try:
+            review = record_review(state, event_id, actor, version, context, path, verdict)
+            completed.append("reviewed")
+        except Exception as exc:
+            if completed:
+                return {"status": "SETTLE_INCOMPLETE", "event_id": event_id, "completed": completed,
+                        "error": str(exc)[:500]}
+            raise
+    else:
+        completed.append("reviewed")
+    try:
+        with database(state) as con:
+            row = con.execute("SELECT status,data FROM tasks WHERE id=?", (review["task_id"],)).fetchone()
+            task_status = row["status"]
+            accepted = bool(acceptance(con, review["task_id"])) if verdict == "accept" else False
+        if verdict == "accept":
+            if not accepted:
+                raise ValueError("acceptance evidence is no longer valid")
+            if task_status != "resolved":
+                release(state, review["task_id"], actor, version, context)
+            completed.append("released")
+        else:
+            if task_status == "finished":
+                with database(state) as con:
+                    guard(con, actor, version, context, "dispatch")
+                    row = con.execute("SELECT status,data FROM tasks WHERE id=?", (review["task_id"],)).fetchone()
+                    if row["status"] != "finished":
+                        raise ValueError("task status changed before closing reviewed attempt")
+                    con.execute("UPDATE tasks SET status='resolved' WHERE id=?", (review["task_id"],))
+                    request = json.loads(row["data"])["request"]
+                    evidence = {"event_id": event_id, "path": str(path), "sha256": sha, "verdict": verdict}
+                    if has_schema(con):
+                        journal(con, review["task_id"], request.get("generation", 1), actor,
+                                "attempt_closed_after_review", evidence)
+                    audit(con, "attempt_closed_after_review", evidence)
+            elif task_status != "resolved":
+                raise ValueError("reviewed attempt has not finished")
+            completed.append("closed")
+        with database(state) as con:
+            allowed = config_of(con).get("workflow", {}).get("continuation_verdicts", ["accept", "repair"])
+        result = {"status": "SETTLED", "event_id": event_id, "task_id": review["task_id"],
+                  "verdict": verdict, "completed": completed}
+        if verdict in allowed:
+            result["parent_review"] = next_gate(state, event_id, actor, version, context)["parent_review"]
+            completed.append("next_gate")
+        return result
+    except Exception as exc:
+        return {"status": "SETTLE_INCOMPLETE", "event_id": event_id, "task_id": review["task_id"],
+                "completed": completed, "error": str(exc)[:500]}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True)
@@ -665,7 +745,7 @@ def main():
         cmd.add_argument("--policy", choices=["inbox_only", "exact_thread", "dedicated_window"], default="inbox_only")
         cmd.add_argument("--reason", default=""); cmd.add_argument("--defer", action="store_true")
     activate_cmd = sub.add_parser("activate"); activate_cmd.add_argument("--role", required=True)
-    for name in ("register-task", "ack", "review", "next-check", "resolve-task", "set-config"):
+    for name in ("register-task", "ack", "review", "settle", "next-check", "resolve-task", "set-config"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--actor", required=True); cmd.add_argument("--version", type=int, required=True)
         cmd.add_argument("--context", choices=["main", "side", "unknown"], default="unknown")
@@ -675,7 +755,8 @@ def main():
             cmd.add_argument("--task", required=True); cmd.add_argument("--evidence", required=True)
         elif name == "register-task": cmd.add_argument("--request", required=True)
         else: cmd.add_argument("--event", required=True)
-        if name == "review": cmd.add_argument("--file", required=True); cmd.add_argument("--verdict", required=True)
+        if name in ("review", "settle"):
+            cmd.add_argument("--file", required=True); cmd.add_argument("--verdict", required=True)
     for name in ("bindings", "inbox", "roles", "label-panes"):
         sub.add_parser(name)
     sub.choices["label-panes"].add_argument("--force", action="store_true")
@@ -708,6 +789,8 @@ def main():
     elif args.command == "resolve-task": result = resolve_task(args.state, args.task, args.actor, args.version, args.context, args.evidence)
     elif args.command == "ack": result = acknowledge(args.state, args.event, args.actor, args.version, args.context)
     elif args.command == "review": result = record_review(args.state, args.event, args.actor, args.version, args.context, args.file, args.verdict)
+    elif args.command == "settle": result = settle(args.state, args.event, args.actor, args.version,
+                                                 args.context, args.file, args.verdict)
     elif args.command == "next-check": result = next_gate(args.state, args.event, args.actor, args.version, args.context)
     elif args.command == "deliver": result = deliver_event(args.state, args.event, Transport({}))
     elif args.command == "roles": result = roles(args.state)

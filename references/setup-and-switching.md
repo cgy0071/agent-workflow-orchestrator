@@ -91,7 +91,6 @@ Completion is persisted before notification. A successful send, acknowledgment, 
 
 ```sh
 python scripts/workflow_control.py --state /absolute/workflow-state inbox
-python scripts/workflow_control.py --state /absolute/workflow-state ack --event EVENT_ID --actor CONTROLLER_INSTANCE --version 1 --context main
 ```
 
 Independently read the frozen request, delivery, changes, and raw evidence. Write a review, for example:
@@ -108,11 +107,10 @@ Decision and next authorized action: ...
 ```
 
 ```sh
-python scripts/workflow_control.py --state /absolute/workflow-state review --event EVENT_ID --file /absolute/task/REVIEW.md --verdict accept --actor CONTROLLER_INSTANCE --version 1 --context main
-python scripts/workflow_control.py --state /absolute/workflow-state next-check --event EVENT_ID --actor CONTROLLER_INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /absolute/workflow-state settle --event EVENT_ID --file /absolute/task/REVIEW.md --verdict accept --actor CONTROLLER_INSTANCE --version 1 --context main
 ```
 
-Put the returned `parent_review` object and its `task_id` as `parent_task` in the next request. The gate verifies the parent ledger entry and current file hash. Default continuation verdicts are `accept` and `repair`; configure `workflow.continuation_verdicts` to change them. A passing gate permits the configured next stage within existing authorization; it does not itself send a task or prove technical acceptance. Distinct reviewer and controller roles can perform review and continuation respectively.
+`settle` acknowledges a pending event, records the independent review, then releases a valid accept or closes a finished non-accept attempt using `REVIEW.md` as evidence. It returns `parent_review` for configured continuation verdicts; a repeated identical call resumes after an interrupted step. It never sends a follow-up. For separate reviewer and controller roles, use the individual `ack`, `review`, `next-check`, and `release` commands as a fallback. The gate verifies the parent ledger entry and current file hash; default continuation verdicts are `accept` and `repair`.
 
 ## 6. Switch a harness/window safely
 

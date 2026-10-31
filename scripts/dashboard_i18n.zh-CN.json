@@ -336,6 +336,8 @@
     "Preview first; confirm performs one step": "先预览；确认只执行一步",
     "Close": "关闭",
     "Confirm the start": "确认已开始执行",
+    "Auto-check worker": "自动检查 Worker",
+    "Confirm the observed start": "确认观察到的开始",
     "What did you observe?": "你观察到了什么？",
     "The worker started this task": "Worker 已开始执行此任务",
     "The task never reached the worker": "任务没有送达 Worker",
@@ -391,7 +393,7 @@
     "No data": "无数据",
     "Sent task has not started": "已发送的任务尚未开始",
     "The task was sent more than 10 minutes ago and nobody has confirmed that the worker started it. The pane may have been replaced or the prompt lost.": "任务已发送超过 10 分钟，仍无人确认 Worker 已开始执行。窗格可能已被替换，或提示已丢失。",
-    "Look at the worker. Confirm the start if it is working, or record that the task never arrived. Do not resend.": "查看 Worker。如果正在执行，确认开始；如果任务从未送达，记录未送达。不要重发。",
+    "Use Auto-check worker or confirm-start to check for a start. If it was not observed, inspect the worker before recording what happened. Do not resend.": "可用“自动检查 Worker”或 confirm-start 查看是否开始。若未观察到，请先检查 Worker，再记录实际情况。不要重发。",
     "Review waiting": "等待审核",
     "Delivered work has waited over an hour": "交付已等待审核超过 1 小时",
     "The worker delivered and is idle until the reviewer records a decision.": "Worker 已交付，在审核者登记结论前处于空闲。",
@@ -620,6 +622,30 @@
     [
       "^(\\d+) steps - (\\d+) finished$",
       "共 $1 步 - 已结束 $2"
+    ],
+    [
+      "^Worker start observed: (.+)\\. Confirm writes EXECUTION\\.md and the confirmed request\\.$",
+      "已观察到 Worker 开始：$1。确认后会写入 EXECUTION.md 和已确认请求。"
+    ],
+    [
+      "^Worker start was not observed \\((.+)\\)\\. You can still enter a manual observation\\.$",
+      "未观察到 Worker 开始（$1）。仍可填写人工观察。"
+    ],
+    [
+      "^Review settled: (.+)\\.$",
+      "审核已结案：#1。"
+    ],
+    [
+      "^Review settlement needs attention: (.+)$",
+      "审核结案需处理：$1"
+    ],
+    [
+      "^Confirm records (.+?), then releases the work slot and checks the next step\\. Review file: (.+) \\(sha256 (\\w+)\\)\\.$",
+      "确认登记 #1，然后释放工作占用并检查下一步。审核文件：$2（sha256 $3）。"
+    ],
+    [
+      "^Confirm records (.+?), then closes the delivered attempt and checks the next step\\. Review file: (.+) \\(sha256 (\\w+)\\)\\.$",
+      "确认登记 #1，然后关闭已交付的执行并检查下一步。审核文件：$2（sha256 $3）。"
     ]
   ]
 }

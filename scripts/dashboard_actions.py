@@ -24,7 +24,7 @@ NOTE_LIMIT = 4000  # characters of an operator observation written into an evide
 PREVIEW_TTL = 600  # seconds a preview stays confirmable
 TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
 DISPATCH_OPEN = ("reserved", "uncertain", "submitted")
-ACTIONS = ("reconcile", "monitor_start", "monitor_stop", "continue", "close", "release", "tick",
+ACTIONS = ("reconcile", "observe_start", "monitor_start", "monitor_stop", "continue", "close", "release", "tick",
            "config", "labels", "activate", "assign")
 ASSIGN_MODES = ("worker", "reviewer", "advisor")
 
@@ -159,6 +159,19 @@ class Manager:
         if step["request_out"]:
             _write_once(Path(step["request_out"]), _request_text(result["request"]))
         return {"status": result["status"], "task_id": step["task_id"], "request_out": step["request_out"]}
+
+    def _prepare_observe_start(self, con, payload):
+        task = self._task(con, payload.get("task_id"))
+        if task["dispatch"] not in DISPATCH_OPEN:
+            raise ValueError("this task has no unconfirmed send")
+        observed = scheduler.observe_start(self.state, payload["task_id"], self.transport())
+        return dict(observed, request_out=str(Path(task["request"]["cwd"]) / "confirmed.json"))
+
+    def _run_observe_start(self, step):
+        if step["status"] != "OBSERVED":
+            raise ValueError("start was not observed; do not confirm")
+        return scheduler.confirm_start(self.state, step["task_id"], step["request_out"],
+                                       *self.who(), transport=self.transport())
 
     def monitor_info(self, task_id):
         folder = _monitor_dir(self.tasks_root, task_id)

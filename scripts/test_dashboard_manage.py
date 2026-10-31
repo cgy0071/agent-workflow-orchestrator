@@ -92,6 +92,25 @@ class ManageTests(unittest.TestCase):
         self.assertEqual(again[0], 400)  # No longer an unconfirmed send.
         self.assertEqual(len(self.fake.messages), 1)
 
+    def test_auto_check_worker_previews_without_writing_and_confirms_observed_start(self):
+        self.manage_server()
+        request = self.sent("AUTO-START")
+        database = self.state / "workflow.sqlite3"
+        before = database.read_bytes()
+        status, preview, _ = self.http("POST", "/api/manage/preview",
+                                       {"action": "observe_start", "task_id": "AUTO-START"})
+        self.assertEqual((status, preview["status"]), (200, "NOT_OBSERVED"))
+        self.assertEqual(database.read_bytes(), before)
+        self.assertFalse((Path(request["cwd"]) / "EXECUTION.md").exists())
+        original = self.fake.status
+        self.fake.status = lambda spec: dict(original(spec), status="working")
+        preview, result = self.step("observe_start", task_id="AUTO-START")
+        self.assertEqual((preview["status"], result["status"]), ("OBSERVED", "RUNNING"))
+        self.assertTrue((Path(request["cwd"]) / "EXECUTION.md").is_file())
+        confirmed = json.loads((Path(request["cwd"]) / "confirmed.json").read_text(encoding="utf-8"))
+        control.check_registered(self.state, confirmed)
+        self.assertEqual(len(self.fake.messages), 1)
+
     def test_monitor_start_and_stop_use_files_only(self):
         self.manage_server()
         self.sent("MAN-2")
