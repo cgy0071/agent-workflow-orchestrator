@@ -35,6 +35,8 @@ python scripts/workflow_control.py --state /absolute/workflow-state bindings
 
 Binding performs a live identity query. Save the returned `instance_id` and `version` for the controller. A workflow has one active controller. Other roles can be `worker`, `reviewer`, or `advisor`; a reviewer can record decisions without dispatching. The default permissions are controller=dispatch/review, reviewer=review, worker/advisor=none. An explicit role `permissions` list can restrict these actions.
 
+The same agent cannot be bound as both a worker and a controller or reviewer, including through a pending switch. Activation rechecks the conflict. Separate agents may share a working directory; that alone does not establish identity.
+
 The SQLite ledger stores configuration, versioned bindings, frozen tasks, pending events, notification attempts, reviews, and audit records. Workflow configuration is a snapshot at initialization. Edit the source configuration and initialize a new state directory for a revised workflow; preserve old state and explicitly hand off existing tasks. Runtime changes of role targets use the switch protocol below.
 
 ## 3. Choose a conversation policy
@@ -84,6 +86,8 @@ python scripts/monitor_task.py --request /absolute/task/request.json --notify
 ```
 
 The register-task command records work submitted through an existing controller. Alternatively, use [durable dispatch and DAG scheduling](scheduling.md) to reserve and send once, confirm execution, and enforce workspace/resource claims within the shared state database. The monitor requires an identical confirmed registered request and writes `frozen_request.json`. Follow-up registration checks the sealed parent review; DAG dependencies separately require accepted evidence. Business review remains an authorized reviewer responsibility.
+
+If work was already sent through the legacy path, registration still succeeds when the running-task limit has been reached. It returns `max_concurrency_exceeded` and records an audit warning so an already-running task is not lost from monitoring. New dispatches remain subject to the limit.
 
 ## 5. Receive, acknowledge, review, and continue
 

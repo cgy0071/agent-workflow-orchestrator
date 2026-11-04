@@ -37,6 +37,8 @@ python scripts/workflow_control.py --state /absolute/workflow-state bindings
 
 绑定会实际查询身份。保存 controller 返回的 `instance_id` 和 `version`。同一流程只允许一个活动 controller；其他角色可设置为 `worker`、`reviewer` 或 `advisor`。默认 controller 可派工和审核，reviewer 只能审核，worker/advisor 没有这两项权限。角色的 `permissions` 列表可进一步限制权限。
 
+同一个 agent 不能同时绑定为 worker 和 controller／reviewer，待生效切换也会检查，激活时再次核对。不同 agent 共用工作目录并不代表身份相同。
+
 SQLite 台账保存配置快照、绑定版本、冻结任务、待审核事件、通知尝试、审核和审计记录。需要更改角色架构或流程策略时，修改配置并初始化新的状态目录，保留旧记录并明确交接未完成任务。更换角色的客户端或窗口使用下面的切换命令。
 
 ## 3. 主对话和侧对话策略
@@ -86,6 +88,8 @@ python scripts/monitor_task.py --request /absolute/task/request.json --notify
 ```
 
 register-task 用于登记现有控制器已经提交的任务。也可使用[持久派工与 DAG 调度](scheduling.zh-CN.md)先登记再单次发送、核实执行，并在共享状态库中约束目录／资源占用。监控要求已确认请求与台账一致，并保存 `frozen_request.json`。续派登记检查父审核，DAG 依赖另行要求审核通过的证据；业务审核仍由获授权的审核者负责。
+
+旧路径已发送的任务即使达到运行任务上限，也照常登记，并返回 `max_concurrency_exceeded`、写入审计告警，避免已运行任务脱离监控。新的派发仍受并发上限约束。
 
 ## 5. 收取、确认、审核与续派
 

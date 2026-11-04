@@ -109,11 +109,14 @@ def task_summary(task_id, cwd, messages, delivery_folder=None):
 
 
 def summarize(state, task=None, stale_after=900, now=None):
-    from workflow_scheduler import snapshot
+    from workflow_scheduler import snapshot, _read_database
     if type(stale_after) not in (int, float) or not math.isfinite(stale_after) or stale_after <= 0:
         raise ValueError("stale_after must be positive")
     now = datetime.now(timezone.utc) if now is None else now
     raw = snapshot(state)
+    with _read_database(state) as con:
+        over_limit = {json.loads(row[0])["task_id"] for row in con.execute(
+            "SELECT data FROM audit WHERE action='register_over_concurrency'")}
     rows = {}
     for item in raw["tasks"]:
         dispatch = (item.get("dispatch") or {}).get("status")
@@ -121,6 +124,8 @@ def summarize(state, task=None, stale_after=900, now=None):
         reports = [event["data"]["report"]["status"] for event in item["events"]]
         decisions = [review["verdict"] for review in item["reviews"]]
         warnings = []
+        if item["task_id"] in over_limit:
+            warnings.append("over_concurrency")
         age = None
         if observation.get("observed_at"):
             try:

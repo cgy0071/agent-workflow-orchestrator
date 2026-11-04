@@ -166,6 +166,39 @@ def active(con, role):
     return json.loads(row[0])
 
 
+AGENT_IDS = ("terminal", "session_id", "instance_id", "conversation_id", "job_id")
+
+
+def same_agent(a, b):
+    """Compare unique agent identifiers, never a shared working directory."""
+    return any(a.get(key) and b.get(key) and a[key] == b[key] for key in AGENT_IDS)
+
+
+def same_binding_agent(a, b):
+    if same_agent(a["observed_identity"], b["observed_identity"]):
+        return True
+    left, right = a["spec"], b["spec"]
+    return (left.get("adapter") == right.get("adapter") == "herdr" and
+            bool(left.get("session") and left.get("pane")) and
+            (left["session"], left["pane"]) == (right.get("session"), right.get("pane")))
+
+
+def check_binding_conflict(con, binding):
+    for row in con.execute("SELECT data FROM bindings WHERE status IN ('active','pending') AND role<>?",
+                           (binding["role"],)):
+        other = json.loads(row[0])
+        incompatible = ((binding["mode"] == "worker" and other["mode"] in ("controller", "reviewer")) or
+                        (other["mode"] == "worker" and binding["mode"] in ("controller", "reviewer")))
+        if incompatible and same_binding_agent(binding, other):
+            raise ValueError("agent is already bound to conflicting role: " + other["role"])
+
+
+def check_self_review(con, reviewer, task):
+    row = con.execute("SELECT data FROM tasks WHERE id=?", (task,)).fetchone()
+    if row and same_binding_agent(reviewer, json.loads(row[0])["worker_binding"]):
+        raise ValueError("reviewer and worker are the same agent; self-review is forbidden")
+
+
 def prepare_binding_spec(spec, mode, policy, reason):
     from monitor_task import validate_spec
     if mode != "worker":
@@ -285,6 +318,7 @@ def bind(state, role, spec, observed, mode="worker", policy="inbox_only", defer=
         record = {"instance_id": uuid.uuid4().hex, "role": role, "version": version, "mode": mode,
                   "context_policy": policy, "spec": spec, "observed_identity": observed,
                   "reason": reason, "created_at": stamp()}
+        check_binding_conflict(con, record)
         status = "pending" if defer else "active"
         retired = con.execute("SELECT data FROM bindings WHERE role=? AND status='active'", (role,)).fetchone()
         if not defer:
@@ -311,6 +345,7 @@ def activate(state, role, observed):
             spec = dict(value["spec"], context_policy=value["context_policy"])
             if not identity_matches(Transport({}).reviewer_identity(spec), spec["expected_identity"]):
                 raise ValueError("pending reviewer identity changed during activation")
+        check_binding_conflict(con, value)
         retired = con.execute("SELECT data FROM bindings WHERE role=? AND status='active'", (role,)).fetchone()
         con.execute("UPDATE bindings SET status='retired' WHERE role=? AND status='active'", (role,))
         con.execute("UPDATE bindings SET status='active' WHERE id=?", (value["instance_id"],))
@@ -479,7 +514,7 @@ def register_task(state, request, actor, version, context, *, reservation=None):
                              str(limit) + "); ask the Owner whether to replan, then set "
                              "authorization.allow_long_repair_chain with that decision as the source")
         from workflow_scheduler import check_claim, reserve
-        check_claim(con, request, reservation)
+        claim_warnings = check_claim(con, request, reservation)
         data = {"request": request, "request_sha256": digest(request),
                 "authorization_sha256": digest(request["authorization"]), "worker_binding": worker,
                 "controller": who, "registered_at": stamp()}
@@ -488,7 +523,13 @@ def register_task(state, request, actor, version, context, *, reservation=None):
         if reservation is not None:
             reserve(con, request, who, reservation)
         audit(con, "task_registered", data)
-        return {"status": "REGISTERED", "request_sha256": digest(request)}
+        if claim_warnings:
+            limit = config_of(con).get("scheduler", {}).get("max_concurrency", 1)
+            running = con.execute("SELECT count(*) FROM tasks WHERE status='running' AND id<>?",
+                                  (request["task_id"],)).fetchone()[0]
+            audit(con, "register_over_concurrency", {"task_id": request["task_id"],
+                                                      "running": running, "max_concurrency": limit})
+        return {"status": "REGISTERED", "request_sha256": digest(request), "warnings": claim_warnings}
 
 
 def repair_chain(con, task):
@@ -626,6 +667,7 @@ def record_review(state, event_id, actor, version, context, file, verdict):
         event = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
         if not event or event["role"] != who["role"] or event["status"] != "acknowledged":
             raise ValueError("acknowledge this role's event before recording a review")
+        check_self_review(con, who, event["task"])
         if event["task"] not in text or event["nonce"] not in text:
             raise ValueError("REVIEW.md must bind the task ID and nonce")
         task_status = con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0]
@@ -693,6 +735,7 @@ def settle(state, event_id, actor, version, context, file, verdict):
         event = con.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
         if not event or event["role"] != reviewer["role"]:
             raise ValueError("event belongs to another reviewer role")
+        check_self_review(con, reviewer, event["task"])
         task_status = con.execute("SELECT status FROM tasks WHERE id=?", (event["task"],)).fetchone()[0]
         delivery = json.loads(event["data"])["report"]["status"]
         if delivery in STALLED and task_status == "running":

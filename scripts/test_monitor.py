@@ -146,6 +146,26 @@ class Tests(unittest.TestCase):
         self.assertIn("Do not record a review", module.event_guidance("incomplete"))
         self.assertIn("Never answer approval dialogs", module.event_guidance("blocked"))
 
+    def test_stall_status_changes_create_distinct_events_once(self):
+        import test_scheduler
+        import workflow_control as control
+        fixture = test_scheduler.SchedulerTests('test_real_command_send_and_confirmation')
+        fixture.setUp()
+        try:
+            request = fixture.request()
+            fixture.send(request)
+            request = fixture.confirm(request)
+            first = control.publish_event(fixture.state, request, {"status": "incomplete", "stall_episode": 1})
+            second = control.publish_event(fixture.state, request, {"status": "blocked", "stall_episode": 1})
+            repeated = control.publish_event(fixture.state, request, {"status": "incomplete", "stall_episode": 1})
+            self.assertEqual(first, repeated)
+            self.assertNotEqual(first, second)
+            with control.database(fixture.state) as con:
+                self.assertEqual(con.execute("SELECT count(*) FROM events WHERE task=?", (request["task_id"],)).fetchone()[0], 2)
+        finally:
+            fixture.doCleanups()
+            fixture.tearDown()
+
     def test_uncertain_notice_not_retried(self):
         client = FakeTransport(self.request)
         client.raise_on_send = True
