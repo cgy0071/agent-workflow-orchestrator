@@ -1,0 +1,15 @@
+{
+  "lang": "zh",
+  "channels": {
+    "local": {
+      "type": "file",
+      "path": "E:/awo-notify/inbox.log"
+    },
+    "phone": {
+      "type": "webhook",
+      "format": "feishu",
+      "url_env": "AWO_NOTIFY_FEISHU_URL",
+      "kinds": ["permission_prompt", "worker_question", "review_waiting"]
+    }
+  }
+}

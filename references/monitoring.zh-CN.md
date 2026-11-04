@@ -67,6 +67,40 @@ working 时只查状态。新完成且交付齐全后才读有限输出验证 ma
 
 台账模式在 SQLite 事务中记录通知尝试，包含目标、请求/授权哈希和 UTC 时间。只读查询错误有限重试。交付未完成、blocked（通常是权限提示）和查询持续失败在每次停顿中对每种不同状态各报告一次，监控继续进行，见[中途停顿与受限继续](scheduling.zh-CN.md#中途停顿权限提示与受限继续)。身份变化、未知状态、失败和退出停止等待检查。检查异常后显式 --resume，可保留旧摘要为历史并使用冻结输入恢复监控；不会重发已经尝试的提示，也不会把已待审核交付当成新执行。
 
+## 通知 Owner
+
+只有 Owner 明确要求推送通知时，才把[示例配置](../examples/notify.json)复制到私有的 `notify.json`，选择通道及类型后运行：
+
+```sh
+python scripts/owner_notify.py --state /absolute/workflow-state --config /private/notify.json --dry-run
+python scripts/owner_notify.py --state /absolute/workflow-state --config /private/notify.json --once
+python scripts/owner_notify.py --state /absolute/workflow-state --config /private/notify.json --interval 60
+```
+
+六种类型：`permission_prompt`（blocked 事件）、`worker_question`（提问原因）、`worker_failed`（失败、退出或身份改变）、`start_unconfirmed`（发送超过 10 分钟仍未确认开始）、`review_waiting`（交付超过一小时仍未审核）、`over_concurrency`（旧登记超出并发上限；有此告警时）。只考虑未结束任务及未处理事件。脚本只读工作流台账，不联系 Agent；消息只含任务短标题、建议和已脱敏的线索，不发送任务文件或身份。
+
+例如，将网址放在环境变量中，不要写入 `notify.json`：
+
+```json
+{"lang":"zh","channels":{"local":{"type":"file","path":"C:/private/owner-inbox.log"},"phone":{"type":"webhook","format":"feishu","url_env":"AWO_NOTIFY_FEISHU_URL","kinds":["permission_prompt","worker_question","review_waiting"]}}}
+```
+
+文件通道追加 JSON 行；Webhook 支持 `generic`、`feishu`、`dingtalk`、`wecom`，只接受 HTTPS 或本机回环 HTTP。命令通道使用含一个独立 `{text}` 参数的 argv 数组，不经 shell。配置和网址均不要提交仓库。网址环境变量缺失时，该通道只跳过本轮。
+
+独立的 `owner_notify.sqlite3` 发件箱按通道和固定键去重。首次失败后分别在第 1、3、7、15、25、35、45、55 分钟重试，57 分钟后放弃。投递是**至少一次**：消息已到达但成功记录前进程崩溃时，五分钟后可能重复。`--dry-run` 不发送也不写发件箱。循环模式下，在 `<state>/STOP_NOTIFY` 创建文件，可在当前一轮结束后停止。此脚本不会重试任务派发或审核者提示。
+
+Windows 后台运行示例（替换为已核验的本地路径，并在启动环境中设置私有 Webhook 网址）：
+
+```powershell
+Start-Process -FilePath 'python.exe' -ArgumentList @(
+  'C:/skills/agent-workflow-orchestrator/scripts/owner_notify.py',
+  '--state', 'C:/workflow-state', '--config', 'C:/private/notify.json', '--interval', '60'
+) -WindowStyle Hidden -RedirectStandardOutput 'C:/private/notify.stdout.log' `
+  -RedirectStandardError 'C:/private/notify.stderr.log'
+```
+
+看板只读显示发件箱的待发数、已放弃数和最近一次发送时间，不自行发送。
+
 ## 非 Herdr 适配
 
 Herdr 优先读取 completion_seq，缺失时读取 state_change_seq；计数器缺失或类型错误会报错，不再静默返回 0。派工前将实际观测的归一化值写入 baseline_completion_seq。state_change_seq 记录所有状态变化，其递增只证明发生了新活动，仍须满足 idle/done、任务 ID/nonce 绑定文件及 marker 合同。其交付宽限从第一次新活动后的 idle/done 开始，不因计数变化或中间的 working 状态重新计时。真正的 completion_seq 仍为每次完成提供新宽限。回执记录 sequence_source。

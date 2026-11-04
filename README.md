@@ -180,6 +180,8 @@ The monitor makes a full check every 300 seconds by default and uses read-only s
 
 If the Executor stops early (quota, rate limit, network) or waits on a permission prompt, the monitor reports it once and keeps watching the same task, so a later delivery still reaches review. After a stop without delivery, the controller can send one bounded `workflow_scheduler.py continue --task TASK-ID` for the same task instead of resending it. Permission prompts are left for you to answer in the Executor's own window. Details: [scheduling.md](references/scheduling.md#stalls-permission-prompts-and-bounded-continuation).
 
+When you want Owner-facing push alerts, configure the optional `owner_notify.py` with a private file, webhook, or command channel. It reads the ledger and keeps its own outbox; it never changes task state or contacts agents. See [Notify the Owner](references/monitoring.md#notify-the-owner).
+
 ### 7. Review and continue
 
 ```sh
