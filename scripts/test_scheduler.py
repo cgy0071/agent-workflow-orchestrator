@@ -682,7 +682,8 @@ class SchedulerTests(unittest.TestCase):
                 return {"identity": spec["expected_identity"], "status": state, "completion_seq": 10}
         out = io.StringIO()
         with patch.object(sys, "argv", ["monitor", "--request", str(reqfile)]), patch.object(monitor, "Transport", Worker), \
-                patch.object(monitor.time, "sleep"), redirect_stdout(out):
+                patch.object(monitor.time, "sleep"), patch.object(monitor, "wait_for_change", return_value="interval"), \
+                redirect_stdout(out):
             monitor.main()
         reports = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual([r["status"] for r in reports], ["blocked", "blocked", "working", "review_ready"])

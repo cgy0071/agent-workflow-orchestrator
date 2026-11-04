@@ -357,6 +357,9 @@ def validate_request(request, require_dispatch=True):
     monitor = request.get("monitor", {})
     if not isinstance(monitor, dict): raise ValueError("monitor must be an object")
     number(monitor.get("interval_seconds", 300), "interval_seconds", 1, True, 86400)
+    fast = monitor.get("fast_poll_seconds", min(30, monitor.get("interval_seconds", 300)))
+    if type(fast) is not int or fast < 0 or fast > monitor.get("interval_seconds", 300):
+        raise ValueError("fast_poll_seconds must be an integer from 0 through interval_seconds")
     number(monitor.get("command_timeout_seconds", 15), "command_timeout_seconds", maximum=3600)
     number(monitor.get("settle_grace_seconds", 120), "settle_grace_seconds", 0, True)
     number(monitor.get("retry_interval_seconds", 5), "retry_interval_seconds", maximum=86400)
@@ -546,6 +549,28 @@ def attempt_closed(request):
     return bool(row) and row[0] == "resolved"
 
 
+def wait_for_change(request, transport, baseline, directory, interval, fast_poll, sleep=None):
+    """Read-only interim status checks; errors defer to the next full inspection."""
+    sleep = sleep or time.sleep
+    if fast_poll == 0 or baseline is None:
+        sleep(interval)
+        return "interval"
+    remaining = interval
+    while remaining > 0:
+        step = min(fast_poll, remaining)
+        sleep(step)
+        remaining -= step
+        if (directory / "STOP_MONITOR").exists() or attempt_closed(request):
+            return "closed"
+        try:
+            live = transport.status(request["worker"])
+            if (live.get("status"), live.get("completion_seq")) != baseline:
+                return "changed"
+        except Exception:
+            return "query_failed"
+    return "interval"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--request")
@@ -603,6 +628,15 @@ def main():
             print(json.dumps(previous, ensure_ascii=False))
             return
         transport = Transport(request)
+        last_live = [None]
+        class RecordingTransport:
+            def status(self, spec):
+                state = transport.status(spec)
+                last_live[0] = (state.get("status"), state.get("completion_seq"))
+                return state
+            def __getattr__(self, name):
+                return getattr(transport, name)
+        recording = RecordingTransport()
         checkpoint_path = directory / "monitor_checkpoint.json"
         checkpoint = read_json(checkpoint_path) if checkpoint_path.exists() else {}
         if checkpoint and checkpoint.get("request_sha256") != object_hash(request):
@@ -629,7 +663,8 @@ def main():
                 elif attempt_closed(request):
                     status, detail, receipt = "monitoring_stopped", "Attempt closed in the ledger; worker not cancelled.", None
                 else:
-                    status, detail, idle_since, receipt = inspect_once(request, transport, idle_since, now=time.time())
+                    last_live[0] = None
+                    status, detail, idle_since, receipt = inspect_once(request, recording, idle_since, now=time.time())
                 errors = 0
             except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
                 errors += 1
@@ -683,7 +718,12 @@ def main():
                     notify_once(request, report, directory, transport)
                 return
             retry = min(config.get("retry_max_seconds", 60), config.get("retry_interval_seconds", 5) * (2 ** min(max(errors - 1, 0), 16)))
-            time.sleep(retry if status in ("transient_error", "adapter_error") else config.get("interval_seconds", 300))
+            if status in ("transient_error", "adapter_error"):
+                time.sleep(retry)
+            else:
+                interval = config.get("interval_seconds", 300)
+                fast = config.get("fast_poll_seconds", min(30, interval))
+                wait_for_change(request, transport, last_live[0], directory, interval, fast)
     finally:
         lock.unlink(missing_ok=True)
 

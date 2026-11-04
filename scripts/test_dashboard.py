@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import dashboard
 import demo_scheduler
+import monitor_task as monitor
 import workflow_control as control
 import workflow_scheduler as scheduler
 from test_scheduler import FakeTransport
@@ -436,7 +437,14 @@ class DashboardTests(unittest.TestCase):
         note = Path(request["cwd"]) / "EXECUTION.md"
         note.write_text(name + " " + request["nonce"] + "\nOutcome: running\nObserved offline.\n", encoding="utf-8")
         confirmed = scheduler.reconcile(self.state, name, "running", note, *self.actor())["request"]
-        return confirmed, control.publish_event(self.state, confirmed, {"status": "review_ready"})
+        for filename in ("HANDOFF.md", "RESULT.md"):
+            (Path(confirmed["cwd"]) / filename).write_text(name + " " + confirmed["nonce"] + "\n", encoding="utf-8")
+        class Done:
+            def status(inner, spec):
+                return {"identity": spec["expected_identity"], "status": "done", "completion_seq": 11}
+        status, _, _, receipt = monitor.inspect_once(confirmed, Done())
+        self.assertEqual(status, "review_ready")
+        return confirmed, control.publish_event(self.state, confirmed, {"status": status}, receipt)
 
     def test_review_actions_disabled_by_default(self):
         _, event = self.review_event("REV-OFF")
@@ -485,8 +493,9 @@ class DashboardTests(unittest.TestCase):
         step = self.http("POST", "/api/review/preview", {"event_id": event, "verdict": "accept"})[1]
         status, result, _ = self.http("POST", "/api/review/confirm",
                                       {"event_id": event, "verdict": "accept", "preview_sha256": step["preview_sha256"]})
-        self.assertEqual((status, result["status"], result["verdict"]), (200, "REVIEW_RECORDED", "accept"))
-        self.assertEqual(result["actor"]["instance_id"], self.controller["instance_id"])
+        self.assertEqual((status, result["status"], result["verdict"]), (200, "SETTLED", "accept"))
+        self.assertEqual(result["parent_review"]["actor"]["instance_id"], self.controller["instance_id"])
+        self.assertFalse(scheduler.snapshot(self.state, "REV-1")["tasks"][0]["claim_held"])
         data = self.http("GET", "/api/status")[1]
         self.assertEqual(data["inbox"][0]["status"], "reviewed")
         self.assertEqual(data["actor_role"], "planner")

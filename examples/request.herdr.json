@@ -43,6 +43,7 @@
   },
   "monitor": {
     "interval_seconds": 300,
+    "fast_poll_seconds": 30,
     "command_timeout_seconds": 15,
     "settle_grace_seconds": 120,
     "max_consecutive_errors": 3,

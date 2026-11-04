@@ -7,8 +7,11 @@ from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
+import re
+import secrets
 import sqlite3
 import subprocess
+import time
 import uuid
 
 import workflow_control as control
@@ -241,6 +244,97 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
         return {"status": "DISPATCH_UNCERTAIN", "task_id": request["task_id"], "error": str(exc)[:500]}
 
 
+def _delivery_instructions(request):
+    completion = request["completion"]
+    files = [completion["binding_artifact"]] + list(completion.get("artifacts", []))
+    names = [item if isinstance(item, str) else item["path"] for item in files]
+    text = "Deliverables: " + ", ".join(names) + "."
+    if completion.get("marker"):
+        text += "\nThe final line of " + names[0] + " must be exactly: " + completion["marker"]
+    return text
+
+
+def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context,
+              worker_role=None, cwd=None, source, transport=None):
+    """Prepare a follow-up request and message without registering or sending it."""
+    if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", task_id) or task_id in (".", ".."):
+        raise ValueError("invalid follow-up task ID")
+    if not isinstance(source, str) or not source.strip():
+        raise ValueError("authorization source is required")
+    book = Path(taskbook).resolve()
+    if not book.is_file() or book.name != "TASK.md":
+        raise ValueError("taskbook must be an existing TASK.md")
+    gate = control.next_gate(state, parent_event, actor, version, context)["parent_review"]
+    with _read_database(state) as con:
+        control.guard(con, actor, version, context, "dispatch")
+        event = con.execute("SELECT task FROM events WHERE id=?", (parent_event,)).fetchone()
+        if not event or event["task"] != gate["task_id"]:
+            raise ValueError("parent review event differs from the task")
+        parent_row = con.execute("SELECT data FROM tasks WHERE id=?", (gate["task_id"],)).fetchone()
+        parent = json.loads(parent_row[0])["request"]
+        role = worker_role or parent["worker"]["role"]
+        worker_binding = control.active(con, role)
+        reviewer_binding = control.active(con, parent["reviewer"]["role"])
+        if worker_binding["mode"] != "worker" or reviewer_binding["mode"] not in ("controller", "reviewer"):
+            raise ValueError("current bindings do not hold worker and reviewer modes")
+        allowed = control.config_of(con).get("workflow", {}).get("continuation_verdicts", ["accept", "repair"])
+    target = Path(cwd).resolve() if cwd else Path(parent["cwd"]).resolve().parent / task_id
+    if target.exists() and (not target.is_dir() or any(target.iterdir())):
+        raise FileExistsError("follow-up cwd already exists and is not empty")
+    worker = copy.deepcopy(worker_binding["spec"])
+    reviewer = copy.deepcopy(reviewer_binding["spec"])
+    transport = transport or Transport(parent)
+    observed = transport.status(worker)
+    if not identity_matches(observed.get("identity", {}), worker["expected_identity"]):
+        raise ValueError("worker identity changed while preparing follow-up")
+    worker["baseline_completion_seq"] = sequence(observed.get("completion_seq"))
+    nonce = secrets.token_hex(8)
+    completion = copy.deepcopy(parent["completion"])
+    completion["marker"] = "TASK_DONE " + task_id + " " + nonce
+    created = not target.exists()
+    target.mkdir(parents=True, exist_ok=True)
+    local_book = (target / "TASK.md").resolve()
+    copied = False
+    try:
+        if book != local_book:
+            with local_book.open("xb") as stream:
+                stream.write(book.read_bytes())
+            copied = True
+        return _follow_up_request(state, parent, gate, allowed, task_id, nonce, target, local_book,
+                                  worker, reviewer, completion, source)
+    except BaseException:
+        # Leave no half-prepared folder: a rerun would otherwise refuse the non-empty cwd.
+        if copied:
+            local_book.unlink(missing_ok=True)
+        if created:
+            try:
+                target.rmdir()
+            except OSError:
+                pass
+        raise
+
+
+def _follow_up_request(state, parent, gate, allowed, task_id, nonce, target, local_book, worker, reviewer,
+                       completion, source):
+    request = {"task_id": task_id, "nonce": nonce, "generation": 1, "cwd": str(target),
+               "workflow_state": str(Path(state).resolve()), "worker": worker, "reviewer": reviewer,
+               "dispatch_confirmed": False, "parent_task": gate["task_id"], "parent_review": gate,
+               "allowed_parent_verdicts": allowed,
+               "authorization": {"source": source, "dispatch_worker": True,
+                                 "notify_reviewer": parent["authorization"]["notify_reviewer"]},
+               "completion": completion, "taskbook_path": str(local_book)}
+    for key in ("monitor", "status_map"):
+        if key in parent: request[key] = copy.deepcopy(parent[key])
+    if parent.get("review_path"):
+        request["review_path"] = str(target / "REVIEW.md")
+    validate_request(request, require_dispatch=False)
+    message = ("Task ID: " + task_id + "\nNonce: " + nonce + "\nCwd: " + str(target) +
+               "\nRead the taskbook first: " + str(local_book) + "\nParent task: " + gate["task_id"] +
+               "\nParent review: " + gate["path"] + "\n" + _delivery_instructions(request) +
+               "\nThere is no time limit; finish the task before stopping and save partial results as you go.\n")
+    return {"status": "FOLLOW_UP_READY", "request": request, "message": message}
+
+
 def reconcile(state, task, outcome, evidence, actor, version, context):
     if outcome not in ("running", "not_sent", "terminated"):
         raise ValueError("invalid reconciliation outcome")
@@ -277,6 +371,68 @@ def reconcile(state, task, outcome, evidence, actor, version, context):
         con.execute("UPDATE dispatches SET status=?,data=? WHERE task=?", (outcome, json.dumps(value), task))
         journal(con, task, value["generation"], actor, "dispatch_reconciled", record)
         return {"status": outcome.upper(), "request": data["request"]}
+
+
+def observe_start(state, task, transport=None):
+    """Read a submitted worker once; never infer a start from the send receipt."""
+    with _read_database(state) as con:
+        row = con.execute("SELECT status,data FROM dispatches WHERE task=?", (task,)).fetchone()
+        if not row or row["status"] not in ("submitted", "uncertain", "reserved"):
+            raise ValueError("task has no unconfirmed dispatch")
+        task_row = con.execute("SELECT data FROM tasks WHERE id=?", (task,)).fetchone()
+        request = json.loads(task_row[0])["request"]
+    transport = transport or Transport(request)
+    observed = transport.status(request["worker"])
+    result = {"task_id": task, "status": "NOT_OBSERVED", "worker_status": observed.get("status"),
+              "completion_seq": observed.get("completion_seq"), "conditions": []}
+    if not identity_matches(observed.get("identity", {}), request["worker"]["expected_identity"]):
+        result["status"] = "IDENTITY_CHANGED"
+        return result
+    if observed.get("status") == "working": result["conditions"].append("working")
+    if sequence(observed.get("completion_seq")) > request["worker"]["baseline_completion_seq"]:
+        result["conditions"].append("completion_seq_advanced")
+    spec = request["worker"]
+    if spec["adapter"] == "herdr" or (spec["adapter"] == "command" and spec.get("output_argv")):
+        try:
+            output = transport.output(spec)
+            if task in output and request["nonce"] in output:
+                result["conditions"].append("task_and_nonce_in_output")
+        except Exception as exc:
+            result["output_error"] = str(exc)[:300]
+    if result["conditions"]: result["status"] = "OBSERVED"
+    return result
+
+
+def confirm_start(state, task, request_out, actor, version, context, *, wait=0, transport=None,
+                  sleep=None):
+    if type(wait) not in (int, float) or wait < 0 or wait > 86400:
+        raise ValueError("wait must be between 0 and 86400 seconds")
+    with control.database(state) as con:
+        control.guard(con, actor, version, context, "dispatch")
+    sleep = sleep or time.sleep
+    deadline = time.monotonic() + wait
+    while True:
+        observed = observe_start(state, task, transport)
+        if observed["status"] != "NOT_OBSERVED": break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0: return observed
+        sleep(min(5, remaining))
+    if observed["status"] == "IDENTITY_CHANGED": return observed
+    with _read_database(state) as con:
+        request = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (task,)).fetchone()[0])["request"]
+    evidence = Path(request["cwd"]).resolve() / "EXECUTION.md"
+    output_path = Path(request_out).resolve()
+    if evidence.exists() or output_path.exists():
+        raise FileExistsError("EXECUTION.md or confirmed request already exists; inspect before retrying")
+    text = ("Task ID: " + task + "\nNonce: " + request["nonce"] + "\nOutcome: running\n" +
+            "Observed status: " + str(observed["worker_status"]) + "\nCompletion sequence: " +
+            str(observed["completion_seq"]) + "\nStart condition: " + ", ".join(observed["conditions"]) +
+            "\nObserved at: " + control.stamp() + "\n")
+    with evidence.open("x", encoding="utf-8", newline="\n") as stream: stream.write(text)
+    confirmed = reconcile(state, task, "running", evidence, actor, version, context)
+    with output_path.open("x", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(confirmed["request"], ensure_ascii=True, indent=2) + "\n")
+    return dict(observed, status="RUNNING", evidence=str(evidence), request_out=str(output_path))
 
 
 def validate_capabilities(profile, root):
@@ -572,17 +728,14 @@ def _resumable(request, state):
 
 
 def _continue_message(request):
-    completion = request["completion"]
-    files = [completion["binding_artifact"]] + list(completion.get("artifacts", []))
-    names = [item if isinstance(item, str) else item["path"] for item in files]
+    first = request["completion"]["binding_artifact"]
+    first = first if isinstance(first, str) else first["path"]
     text = ("Continue task " + request["task_id"] + " (nonce " + request["nonce"] + ") from where it stopped. "
             "This is the same authorized task after an interruption such as a quota, rate-limit or network "
             "error, not a new task: keep the scope unchanged and do not redo finished steps. There is no time limit on this turn: do the "
             "remaining work now instead of stopping after checks, and save partial results as you go. Working directory: " +
-            request["cwd"] + ". Deliverables still required: " + ", ".join(names) + ".")
-    if completion.get("marker"):
-        text += " The final line of " + names[0] + " must be exactly: " + completion["marker"]
-    return text + " If you cannot continue, write the blocker into " + names[0] + " and stop."
+            request["cwd"] + ". " + _delivery_instructions(request))
+    return text + "\nIf you cannot continue, write the blocker into " + first + " and stop."
 
 
 def release(state, task, actor, version, context):
@@ -658,6 +811,18 @@ def main():
     prepare.add_argument("--file", required=True); prepare.add_argument("--root", required=True)
     prepare.add_argument("--output", required=True)
     caps = sub.add_parser("capabilities"); caps.add_argument("--file", required=True)
+    follow = sub.add_parser("follow-up")
+    follow.add_argument("--parent-event", required=True); follow.add_argument("--task-id", required=True)
+    follow.add_argument("--taskbook", required=True); follow.add_argument("--source", required=True)
+    follow.add_argument("--out", required=True); follow.add_argument("--message-out", required=True)
+    follow.add_argument("--worker-role"); follow.add_argument("--cwd")
+    follow.add_argument("--actor", required=True); follow.add_argument("--version", type=int, required=True)
+    follow.add_argument("--context", choices=("main", "side", "unknown"), default="unknown")
+    start = sub.add_parser("confirm-start")
+    start.add_argument("--task", required=True); start.add_argument("--request-out", required=True)
+    start.add_argument("--wait", type=float, default=0)
+    start.add_argument("--actor", required=True); start.add_argument("--version", type=int, required=True)
+    start.add_argument("--context", choices=("main", "side", "unknown"), default="unknown")
     for name in ("migrate", "dispatch", "reconcile", "dag-load", "tick", "release", "continue"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--actor", required=True); cmd.add_argument("--version", type=int, required=True)
@@ -701,6 +866,22 @@ def main():
                 # Exclusive creation; a crash here can be recovered with ALREADY_CONFIRMED.
                 with Path(args.request_out).open("x", encoding="utf-8", newline="\n") as stream:
                     stream.write(json.dumps(result["request"], ensure_ascii=True, indent=2) + "\n")
+            elif args.command == "follow-up":
+                if Path(args.out).exists() or Path(args.message_out).exists():
+                    raise FileExistsError("follow-up output path already exists")
+                if Path(args.out).resolve() == Path(args.message_out).resolve():
+                    raise ValueError("request and message outputs must differ")
+                result = follow_up(args.state, args.parent_event, args.task_id, args.taskbook,
+                                   actor=args.actor, version=args.version, context=args.context,
+                                   worker_role=args.worker_role, cwd=args.cwd, source=args.source)
+                with Path(args.out).open("x", encoding="utf-8", newline="\n") as stream:
+                    stream.write(json.dumps(result["request"], ensure_ascii=True, indent=2) + "\n")
+                with Path(args.message_out).open("x", encoding="utf-8", newline="\n") as stream:
+                    stream.write(result["message"])
+                result = {"status": result["status"], "request_out": str(Path(args.out).resolve()),
+                          "message_out": str(Path(args.message_out).resolve())}
+            elif args.command == "confirm-start":
+                result = confirm_start(args.state, args.task, args.request_out, *who, wait=args.wait)
             elif args.command == "dag-load": result = load_dag(args.state, args.run, read_json(args.file), *who)
             elif args.command == "tick": result = tick(args.state, args.run, *who)
             elif args.command == "continue": result = continue_task(args.state, args.task, *who)

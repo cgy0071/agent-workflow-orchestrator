@@ -17,11 +17,16 @@ def worker(directory, message=None):
             task = json.loads(message)
         except json.JSONDecodeError:
             lines = message.splitlines()
-            names = ("Task ID: ", "Nonce: ", "Cwd: ", "Completion marker: ")
-            if len(lines) < 4 or any(not line.startswith(prefix) for line, prefix in zip(lines[:4], names)):
-                raise ValueError("fixture message needs four task-bound header lines")
+            names = ("Task ID: ", "Nonce: ", "Cwd: ")
+            if len(lines) < 4 or any(not line.startswith(prefix) for line, prefix in zip(lines[:3], names)):
+                raise ValueError("fixture message needs three task-bound header lines and a completion marker")
+            markers = [line.split(": ", 1)[1] for line in lines[3:]
+                       if line.startswith("Completion marker: ") or
+                       (line.startswith("The final line of ") and " must be exactly: " in line)]
+            if len(markers) != 1:
+                raise ValueError("fixture message needs one exact completion marker")
             task = {"task_id": lines[0][len(names[0]):], "nonce": lines[1][len(names[1]):],
-                    "cwd": lines[2][len(names[2]):], "marker": lines[3][len(names[3]):],
+                    "cwd": lines[2][len(names[2]):], "marker": markers[0],
                     "completion_status": "idle"}
             if not task["task_id"] or not task["nonce"] or task["marker"] != (
                     "TASK_DONE " + task["task_id"] + " " + task["nonce"]):
@@ -46,7 +51,7 @@ def demo(directory, completion_status="idle"):
     state = root / "state"
     config = {"goal": "Offline demo: run A and B in parallel, then JOIN after both are accepted",
               "roles": {"planner": {}, "executor": {}, "executor-b": {}},
-              "workflow": {"reviewer_role": "planner", "transitions": {"accept": "next", "reject": "stop"}},
+              "workflow": {"reviewer_role": "planner", "transitions": {"accept": "next", "reject": "stop", "repair": "repair"}},
               "scheduler": {"max_concurrency": 2, "resources": {}}}
     control.initialize(state, config)
     script = str(Path(__file__).resolve())

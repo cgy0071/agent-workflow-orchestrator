@@ -231,6 +231,20 @@ continuation cannot help; change the harness permissions or close the attempt.
 Dispatch to a worker that shows a permission prompt is refused before anything
 is sent, with that reason.
 
+## Follow-up tasks and observed starts
+
+After a task has a sealed review, prepare the next request and standard message without writing the ledger or sending to a worker:
+
+```sh
+python scripts/workflow_scheduler.py --state STATE follow-up --parent-event EVENT_ID --task-id NEXT-ID --taskbook /abs/TASK.md --cwd /abs/next --source "Owner authorization" --out /abs/next/request.json --message-out /abs/next/message.txt --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state STATE dispatch --request /abs/next/request.json --message-file /abs/next/message.txt --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state STATE confirm-start --task NEXT-ID --request-out /abs/next/confirmed.json --wait 60 --actor INSTANCE --version 1 --context main
+```
+
+`follow-up` checks the parent review hash and current worker/reviewer bindings, captures a fresh completion baseline, copies `TASK.md` into the new task directory, and creates a new nonce and exact completion marker. Output paths must not already exist. `confirm-start` reads worker status and, where available, recent output every five seconds. It writes `EXECUTION.md` and reconciles only after observing `working`, a newer completion sequence, or both task ID and nonce in output. `NOT_OBSERVED` and `IDENTITY_CHANGED` leave files and ledger unchanged; neither command resends a task. You can still use manual `reconcile` after inspecting the worker yourself.
+
+The monitor keeps the configured full `interval_seconds` check. Between full checks it queries status every `fast_poll_seconds` (default 30, capped at the interval) and runs a full check as soon as status or completion sequence changes. Set `fast_poll_seconds: 0` to use the original single wait. Fast queries never send messages or consume the error budget.
+
 ## Local demo
 
 ```sh

@@ -162,10 +162,10 @@ python scripts/monitor_task.py --request /abs/task/request.json --preflight
 python scripts/workflow_scheduler.py --state /abs/state dispatch --request /abs/task/request.json --message-file task.md --actor INSTANCE --version 1 --context main
 ```
 
-确认 Executor 确实已开始执行后，编写 `EXECUTION.md`（任务 ID、nonce、`Outcome: running` 以及你观察到的情况），再生成已确认的请求：
+派发后只读检查 Executor 的实时状态；观察到已开始时才生成已确认的请求：
 
 ```sh
-python scripts/workflow_scheduler.py --state /abs/state reconcile --task TASK-ID --outcome running --evidence /abs/task/EXECUTION.md --request-out /abs/task/confirmed.json --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state /abs/state confirm-start --task TASK-ID --request-out /abs/task/confirmed.json --wait 60 --actor INSTANCE --version 1 --context main
 ```
 
 如果任务是通过其他接口发送的，请按设置指南使用 `register-task`。详见 [scheduling.zh-CN.md](references/scheduling.zh-CN.md)。
@@ -176,7 +176,7 @@ python scripts/workflow_scheduler.py --state /abs/state reconcile --task TASK-ID
 python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 ```
 
-监控默认每 300 秒轮询一次，直到完成或出现异常为止。默认没有总时长上限，但每次状态查询都有超时。设置了 `workflow_state` 后，即使 `authorization.notify_reviewer` 为 false，`--notify` 仍会记录收件箱事件；在 `inbox_only` 策略下绝不直接提示审核者。后台启动方式和完整的状态约定见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+监控默认每 300 秒做一次完整检查，并每 30 秒只读查询状态，以便更快发现变化。设置 `fast_poll_seconds: 0` 可关闭快速查询。默认没有总时长上限，但每次状态查询都有超时。设置了 `workflow_state` 后，即使 `authorization.notify_reviewer` 为 false，`--notify` 仍会记录收件箱事件；在 `inbox_only` 策略下绝不直接提示审核者。后台启动方式和完整的状态约定见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
 如果 Executor 提前停止（额度、限流、网络）或停在权限提示上，监控只报告一次，然后继续观察同一个任务，之后完成的交付仍会进入审核。未交付就停止时，控制者可以对同一任务发送一次受限的 `workflow_scheduler.py continue --task TASK-ID`，而不是重新派发。权限提示留给你在 Executor 自己的窗口中处理。详见 [scheduling.zh-CN.md](references/scheduling.zh-CN.md#中途停顿权限提示与受限继续)。
 
@@ -184,12 +184,11 @@ python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 
 ```sh
 python scripts/workflow_control.py --state /abs/state inbox
-python scripts/workflow_control.py --state /abs/state ack --event EVENT_ID --actor INSTANCE --version 1 --context main
-python scripts/workflow_control.py --state /abs/state review --event EVENT_ID --file /abs/task/REVIEW.md --verdict accept --actor INSTANCE --version 1 --context main
-python scripts/workflow_control.py --state /abs/state next-check --event EVENT_ID --actor INSTANCE --version 1 --context main
+python scripts/workflow_control.py --state /abs/state settle --event EVENT_ID --file /abs/task/REVIEW.md --verdict accept --actor INSTANCE --version 1 --context main
+python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event EVENT_ID --task-id NEXT-ID --taskbook /abs/TASK.md --cwd /abs/next --source "用户授权来源" --out /abs/next/request.json --message-out /abs/next/message.txt --actor INSTANCE --version 1 --context main
 ```
 
-审核者阅读原始证据，编写包含任务 ID、nonce 和结论的 `REVIEW.md`。`next-check` 返回一条 `parent_review` 记录，把它写入下一个任务的请求以关联后续任务。未授权 `continuous_execution_authorized` 时，控制者到此停止并向你汇报。
+审核者阅读原始证据，编写包含任务 ID、nonce 和结论的 `REVIEW.md`。`settle` 登记结论并释放或关闭此次执行；`follow-up` 根据封存的审核和当前绑定生成下一个请求与消息，不自行发送。获得授权后另行运行 `dispatch`。未授权 `continuous_execution_authorized` 时，控制者到此停止并向你汇报。
 
 如需在本机查看台账，可打开可选状态面板。它只读台账、不联系 Agent，并把需要你处理的内容放在前面：进行中和最近的任务（较早已结束的任务按时间范围折叠）、以卡片显示的后续任务链、等待审核的更新，以及需要检查的提醒。任务标题取自各任务的 `TASK.md`，不显示 ID、哈希或路径。**立即检查 Agent** 只在点击时查询 Agent。界面可在中文和英文之间切换。以下任一方式都会在浏览器中打开面板：
 
