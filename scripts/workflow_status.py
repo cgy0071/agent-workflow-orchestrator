@@ -124,8 +124,8 @@ def summarize(state, task=None, stale_after=900, now=None):
         reports = [event["data"]["report"]["status"] for event in item["events"]]
         decisions = [review["verdict"] for review in item["reviews"]]
         warnings = []
-        if item["task_id"] in over_limit:
-            warnings.append("over_concurrency")
+        if item["task_id"] in over_limit and item["execution"] != "resolved":
+            warnings.append("over_concurrency")  # Only while the task still holds a slot.
         age = None
         if observation.get("observed_at"):
             try:

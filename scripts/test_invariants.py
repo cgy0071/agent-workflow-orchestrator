@@ -125,6 +125,11 @@ class InvariantTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "max_concurrency reached"):
             scheduler.dispatch(self.state, third, self.message(third), *self.actor(), transport=self.fake)
         self.assertEqual(self.fake.messages, [])
+        note = Path(second["cwd"]) / "TERMINATION.md"
+        note.write_text(second["task_id"] + " " + second["nonce"] + "\nStopped after inspection.\n", encoding="utf-8")
+        control.resolve_task(self.state, second["task_id"], *self.actor(), note)
+        # A closed task no longer holds a slot, so the over-limit warning goes away.
+        self.assertNotIn("over_concurrency", workflow_status.summarize(self.state, "OLD-B")["tasks"][0]["warnings"])
 
     def test_closed_reconcile_exact_replay_is_read_only(self):
         req = self.request()
