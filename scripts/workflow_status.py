@@ -41,6 +41,16 @@ def workflow_text(value):
     return re.sub(r"\s{2,}", " ", value).strip()[:300] or None
 
 
+def _worker_report(event):
+    """The worker's own account from a stall report or a delivery receipt, as short page text."""
+    value = (event.get("report") or {}).get("worker_report") or (event.get("receipt") or {}).get("worker_report")
+    if not isinstance(value, dict):
+        return None
+    result = {key: workflow_text(value.get(key)) for key in ("outcome", "summary", "question", "error")}
+    result["remaining"] = [text for text in (workflow_text(item) for item in value.get("remaining") or []) if text]
+    return {key: item for key, item in result.items() if item}
+
+
 def _delivery_folder(request):
     # A task spec often sits beside its deliverables, e.g. history/TASK-ID/TASK.md next to HANDOFF.md.
     binding = request.get("completion", {}).get("binding_artifact")
@@ -218,6 +228,7 @@ def dashboard_details(state, summary=None):
                           "created_at": data.get("created_at"),
                           "report_status": (data.get("report") or {}).get("status"),
                           "cause": (data.get("report") or {}).get("cause"),
+                          "worker_report": _worker_report(data),
                           "cause_evidence": workflow_text((data.get("report") or {}).get("evidence"))})
         for row in con.execute("SELECT id,worker,status,data FROM tasks WHERE status!='resolved' ORDER BY id"):
             data = json.loads(row["data"])
@@ -317,6 +328,56 @@ def workflow_metrics(state, days=14, now=None):
             "reviews": reviews, "repair_share": round(reviews.get("repair", 0) / total, 3) if total else None,
             "stalls": stalls, "continuations": continued,
             "daily": [dict(date=day, **daily.get(day, {"sent": 0, "reviewed": 0})) for day in days_list]}
+
+
+HISTORY_DETAIL = ("outcome", "verdict", "cause", "status", "attempt", "error", "event_id")
+
+
+def task_history(state, task):
+    """One task's timeline and its follow-up chain, from the ledger only; read-only, never contacts agents."""
+    from workflow_scheduler import _read_database, has_schema
+    with _read_database(state) as con:
+        rows = {row["id"]: (row["status"], json.loads(row["data"])["request"])
+                for row in con.execute("SELECT id,status,data FROM tasks")}
+        if task not in rows:
+            raise ValueError("unknown task")
+        chain, cursor, seen = [], task, set()
+        while cursor in rows and cursor not in seen:
+            seen.add(cursor)
+            chain.insert(0, cursor)
+            cursor = rows[cursor][1].get("parent_task")
+        children = sorted(key for key, (_, request) in rows.items() if request.get("parent_task") == task)
+        verdicts = {}
+        for row in con.execute("SELECT e.task AS task, r.data AS data FROM reviews r JOIN events e ON r.event=e.id "
+                               "ORDER BY e.rowid"):
+            verdicts.setdefault(row["task"], []).append(json.loads(row["data"])["verdict"])
+        timeline = []
+        if has_schema(con):
+            for row in con.execute("SELECT at,kind,actor,data FROM task_journal WHERE task=? ORDER BY seq", (task,)):
+                data = json.loads(row["data"]) if row["data"] else {}
+                report = data.get("report") if isinstance(data.get("report"), dict) else {}
+                detail = {key: data.get(key, report.get(key)) for key in HISTORY_DETAIL}
+                timeline.append({"at": row["at"], "kind": row["kind"],
+                                 **{key: value for key, value in detail.items() if value not in (None, "")}})
+        request = rows[task][1]
+    title = task_summary(task, request.get("cwd"), [request.get("taskbook_path")], _delivery_folder(request))["title"]
+    return {"task_id": task, "title": title, "execution": rows[task][0],
+            "chain": [{"task_id": key, "verdicts": verdicts.get(key, []), "execution": rows[key][0]} for key in chain],
+            "children": children, "timeline": timeline}
+
+
+def format_history(history):
+    lines = [history["task_id"] + (" - " + history["title"] if history["title"] else "") +
+             " (" + history["execution"] + ")"]
+    if len(history["chain"]) > 1:
+        lines.append("Chain: " + " -> ".join(item["task_id"] + "[" + (",".join(item["verdicts"]) or "open") + "]"
+                                             for item in history["chain"]))
+    if history["children"]:
+        lines.append("Follow-ups: " + ", ".join(history["children"]))
+    for entry in history["timeline"]:
+        extra = ", ".join(key + "=" + str(entry[key]) for key in HISTORY_DETAIL if key in entry)
+        lines.append(str(entry["at"])[:19].replace("T", " ") + "  " + entry["kind"] + ("  " + extra if extra else ""))
+    return "\n".join(lines)
 
 
 def format_text(summary):

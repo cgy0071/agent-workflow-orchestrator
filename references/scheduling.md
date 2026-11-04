@@ -245,6 +245,16 @@ python scripts/workflow_scheduler.py --state STATE confirm-start --task NEXT-ID 
 
 The monitor keeps the configured full `interval_seconds` check. Between full checks it queries status every `fast_poll_seconds` (default 30, capped at the interval) and runs a full check as soon as status or completion sequence changes. Set `fast_poll_seconds: 0` to use the original single wait. Fast queries never send messages or consume the error budget.
 
+## Worker result blocks, guided continuation and the repair-chain limit
+
+Generated messages ask the worker to end its binding file, just before the marker line, with a fenced `awo-result` block: `{"outcome": "done" | "partial" | "blocked", "summary": "...", "remaining": ["..."], "question": "..."}`. The monitor reads only the last block. A malformed block is reported as unreadable, never trusted. The block is the worker's own account and changes no gate: delivery still needs the binding, artifacts and exact marker, and acceptance still needs an independent review. The inbox shows it beside the delivery.
+
+When a stall is `incomplete`, the block sharpens the recorded cause: `worker_question` (blocked, or a question), `marker_missing` (the worker says done but the final line is wrong), or `handoff_without_marker` with the remaining steps. A provider error in the output outranks a partial report but not a stated question. `continue` opens with a line chosen by that cause, for example asking only for the handoff ending to be rewritten when the marker is missing. `continue --note TEXT` (or the note field on the page) appends one controller answer or instruction of up to 2000 characters. The journal records the cause and whether a note was sent, with the message hash, not the note text. The send-once rules do not change.
+
+`scheduler.max_repair_chain` (default 3, 0 turns it off) counts consecutive non-accept reviews up the `parent_task` chain. Registering the next follow-up at the limit fails until the Owner decides: replan, or continue with `follow-up --allow-long-chain --source "<the Owner's decision>"`, which sets `authorization.allow_long_repair_chain`. The check runs in `register_task`, so hand-written requests are covered too. Change the limit with `workflow_control.py set-config --changes '{"scheduler.max_repair_chain": 5}'` or on the dashboard.
+
+`workflow_control.py --state STATE history --task TASK-ID` prints one task's timeline (reserve, send, start, deliveries, continuations, reviews, closing) and its follow-up chain with each step's verdicts; `--format json` gives the same data. It reads the ledger only.
+
 ## Local demo
 
 ```sh

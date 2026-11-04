@@ -57,6 +57,9 @@ def validate_workflow(value):
     if not isinstance(resources, dict) or any(not isinstance(k, str) or not k or type(v) is not int or v < 1
                                               for k, v in resources.items()):
         raise ValueError("scheduler.resources must map names to positive integer capacities")
+    chain = scheduler.get("max_repair_chain", 3)
+    if type(chain) is not int or not 0 <= chain <= 50:
+        raise ValueError("scheduler.max_repair_chain must be an integer from 0 to 50 (0 turns the limit off)")
     continues = scheduler.get("max_continue_prompts", 2)
     if type(continues) is not int or not 0 <= continues <= 10:
         raise ValueError("scheduler.max_continue_prompts must be an integer from 0 to 10")
@@ -110,7 +113,8 @@ def initialize(state, config):
 
 # Operating limits only. Roles, permissions and review transitions stay as initialized, so an edit can
 # never grant an actor new authority or change what a verdict means for recorded reviews.
-EDITABLE_CONFIG = ("goal", "scheduler.max_concurrency", "scheduler.max_continue_prompts", "scheduler.resources")
+EDITABLE_CONFIG = ("goal", "scheduler.max_concurrency", "scheduler.max_continue_prompts",
+                   "scheduler.max_repair_chain", "scheduler.resources")
 
 
 def config_value(config, key):
@@ -467,6 +471,13 @@ def register_task(state, request, actor, version, context, *, reservation=None):
             return {"status": "ALREADY_REGISTERED"}
         if con.execute("SELECT count(*) FROM tasks WHERE worker=? AND status='running'", (worker_role,)).fetchone()[0]:
             raise ValueError("role already has an active or uncertain task")
+        # Like a packet TTL: a run of repairs stops for an Owner decision instead of narrowing forever.
+        limit = config_of(con).get("scheduler", {}).get("max_repair_chain", 3)
+        depth = repair_chain(con, request.get("parent_task"))
+        if limit and depth >= limit and request["authorization"].get("allow_long_repair_chain") is not True:
+            raise ValueError("this would be repair " + str(depth + 1) + " in a row (scheduler.max_repair_chain is " +
+                             str(limit) + "); ask the Owner whether to replan, then set "
+                             "authorization.allow_long_repair_chain with that decision as the source")
         from workflow_scheduler import check_claim, reserve
         check_claim(con, request, reservation)
         data = {"request": request, "request_sha256": digest(request),
@@ -478,6 +489,21 @@ def register_task(state, request, actor, version, context, *, reservation=None):
             reserve(con, request, who, reservation)
         audit(con, "task_registered", data)
         return {"status": "REGISTERED", "request_sha256": digest(request)}
+
+
+def repair_chain(con, task):
+    """Consecutive non-accept reviews ending at task, walking parent_task links; read-only."""
+    depth, seen = 0, set()
+    while task and task not in seen:
+        seen.add(task)
+        rows = [json.loads(row[0])["verdict"] for row in con.execute(
+            "SELECT r.data FROM reviews r JOIN events e ON r.event=e.id WHERE e.task=? ORDER BY e.rowid", (task,))]
+        if not rows or rows[-1] == "accept":
+            break
+        depth += 1
+        row = con.execute("SELECT data FROM tasks WHERE id=?", (task,)).fetchone()
+        task = json.loads(row[0])["request"].get("parent_task") if row else None
+    return depth
 
 
 def check_registered(state, request):
@@ -762,6 +788,9 @@ def main():
     sub.choices["label-panes"].add_argument("--force", action="store_true")
     status_cmd = sub.add_parser("status")
     inspect_cmd = sub.add_parser("inspect"); inspect_cmd.add_argument("--task", required=True)
+    history_cmd = sub.add_parser("history", help="one task's timeline and follow-up chain, read-only")
+    history_cmd.add_argument("--task", required=True)
+    history_cmd.add_argument("--format", choices=("json", "text"), default="text")
     for cmd in (status_cmd, inspect_cmd):
         cmd.add_argument("--summary", action="store_true")
         cmd.add_argument("--format", choices=("json", "text"), default="json")
@@ -793,6 +822,11 @@ def main():
                                                  args.context, args.file, args.verdict)
     elif args.command == "next-check": result = next_gate(args.state, args.event, args.actor, args.version, args.context)
     elif args.command == "deliver": result = deliver_event(args.state, args.event, Transport({}))
+    elif args.command == "history":
+        from workflow_status import format_history, task_history
+        result = task_history(args.state, args.task)
+        if args.format == "text":
+            print(format_history(result)); return
     elif args.command == "roles": result = roles(args.state)
     elif args.command == "label-panes": result = label_panes(args.state, force=args.force)
     elif args.command in ("status", "inspect"):
