@@ -1167,7 +1167,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       add(owner, 'span', '', 'Given up'); owner.append(': ');
       add(owner, 'span', 'raw', data.owner_notify.given_up); owner.append(' | ');
       add(owner, 'span', '', 'Last sent'); owner.append(': ');
-      add(owner, 'span', data.owner_notify.last_sent ? 'raw' : '', data.owner_notify.last_sent || 'Never');
+      add(owner, 'span', data.owner_notify.last_sent ? 'raw' : '', data.owner_notify.last_sent ?
+        when(data.owner_notify.last_sent) : 'Never');
     }
     const alerts = id('alerts'); alerts.replaceChildren();
     const tasks = new Map(data.tasks.map(task => [task.task_id, task]));

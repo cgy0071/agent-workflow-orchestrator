@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
@@ -244,6 +245,20 @@ class OwnerNotifyTests(unittest.TestCase):
             self.assertEqual(fixture.fake.status_calls, 0)
         finally:
             fixture.doCleanups(); fixture.tearDown()
+
+
+class WindowsBatchTests(unittest.TestCase):
+    def test_batch_file_command_is_refused_on_windows(self):
+        config = {"channels": {"bat": {"type": "command", "argv": ["C:/bot/send.cmd", "{text}"]}}}
+        folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "notify.json"
+        path.write_text(json.dumps(config), encoding="utf-8")
+        with patch.object(notify.os, "name", "nt"):
+            with self.assertRaisesRegex(ValueError, "bat or .cmd"):
+                notify.config_of(path)
+            config["channels"]["bat"]["argv"] = ["node", "C:/bot/send.js", "{text}"]
+            path.write_text(json.dumps(config), encoding="utf-8")
+            self.assertIn("bat", notify.config_of(path)["channels"])
 
 
 if __name__ == "__main__":

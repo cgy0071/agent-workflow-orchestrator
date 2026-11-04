@@ -85,7 +85,7 @@ For example, keep the URL in an environment variable; do not put it in `notify.j
 {"lang":"en","channels":{"local":{"type":"file","path":"C:/private/owner-inbox.log"},"phone":{"type":"webhook","format":"feishu","url_env":"AWO_NOTIFY_FEISHU_URL","kinds":["permission_prompt","worker_question","review_waiting"]}}}
 ```
 
-File channels append JSON lines. Webhooks support `generic`, `feishu`, `dingtalk`, and `wecom`; only HTTPS or loopback HTTP is accepted. A command channel uses an argv array with one standalone `{text}` argument, without a shell. Keep the configuration and URL out of the repository. A missing URL environment variable skips that channel for the round.
+File channels append JSON lines. Webhooks support `generic`, `feishu`, `dingtalk`, and `wecom`; only HTTPS or loopback HTTP is accepted. A command channel uses an argv array with one standalone `{text}` argument, without a shell. On Windows it refuses a `.bat` or `.cmd` target: cmd.exe re-parses the arguments, and the text can include what a worker wrote. Call the interpreter directly, such as `node` or `python` with the script path. Keep the configuration and URL out of the repository. A missing URL environment variable skips that channel for the round.
 
 The separate `owner_notify.sqlite3` outbox remembers each channel/key and retries failures 1, 3, 7, 15, 25, 35, 45, and 55 minutes after the first failure; it gives up after 57 minutes. Sending is **at least once**: a crash after delivery but before recording success can cause a duplicate after five minutes. `--dry-run` neither sends nor writes the outbox. In interval mode, create `<state>/STOP_NOTIFY` to stop after the current round. This process does not retry task dispatch or reviewer prompts.
 

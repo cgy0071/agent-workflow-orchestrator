@@ -85,7 +85,7 @@ python scripts/owner_notify.py --state /absolute/workflow-state --config /privat
 {"lang":"zh","channels":{"local":{"type":"file","path":"C:/private/owner-inbox.log"},"phone":{"type":"webhook","format":"feishu","url_env":"AWO_NOTIFY_FEISHU_URL","kinds":["permission_prompt","worker_question","review_waiting"]}}}
 ```
 
-文件通道追加 JSON 行；Webhook 支持 `generic`、`feishu`、`dingtalk`、`wecom`，只接受 HTTPS 或本机回环 HTTP。命令通道使用含一个独立 `{text}` 参数的 argv 数组，不经 shell。配置和网址均不要提交仓库。网址环境变量缺失时，该通道只跳过本轮。
+文件通道追加 JSON 行；Webhook 支持 `generic`、`feishu`、`dingtalk`、`wecom`，只接受 HTTPS 或本机回环 HTTP。命令通道使用含一个独立 `{text}` 参数的 argv 数组，不经 shell。在 Windows 上不接受 `.bat` 或 `.cmd` 目标：cmd.exe 会重新解析参数，而消息文本可能包含 Worker 写的内容。请直接调用解释器，例如 `node` 或 `python` 加脚本路径。配置和网址均不要提交仓库。网址环境变量缺失时，该通道只跳过本轮。
 
 独立的 `owner_notify.sqlite3` 发件箱按通道和固定键去重。首次失败后分别在第 1、3、7、15、25、35、45、55 分钟重试，57 分钟后放弃。投递是**至少一次**：消息已到达但成功记录前进程崩溃时，五分钟后可能重复。`--dry-run` 不发送也不写发件箱。循环模式下，在 `<state>/STOP_NOTIFY` 创建文件，可在当前一轮结束后停止。此脚本不会重试任务派发或审核者提示。
 

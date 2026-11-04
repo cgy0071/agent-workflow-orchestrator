@@ -75,6 +75,11 @@ def config_of(path):
             validate_argv(channel.get("argv"))
             if channel["argv"].count("{text}") != 1:
                 raise ValueError("command argv needs one standalone {text} argument")
+            # On Windows a .bat/.cmd target runs through cmd.exe, which re-parses its arguments. The text includes
+            # what a worker wrote, so a batch file would let that text run commands. Require a real program.
+            if os.name == "nt" and Path(channel["argv"][0]).suffix.lower() in (".bat", ".cmd"):
+                raise ValueError("command channel cannot start a .bat or .cmd file on Windows; call the "
+                                 "interpreter directly, for example node or python with the script path")
         elif kind == "webhook":
             if channel.get("format", "generic") not in ("generic", "feishu", "dingtalk", "wecom"):
                 raise ValueError("invalid webhook format")
@@ -352,7 +357,13 @@ def main(argv=None):
         else:
             print(json.dumps(run_once(args.state, config, dry_run=args.dry_run), ensure_ascii=True))
     except (OSError, ValueError, sqlite3.Error) as exc:
-        parser.exit(2, "owner_notify: " + redact(exc, tuple(os.environ.values())) + "\n")
+        # Redact only the configured webhook URLs, not every environment value (short values mangle the text).
+        try:
+            names = [ch.get("url_env") for ch in json.loads(Path(args.config).read_text(encoding="utf-8"))
+                     .get("channels", {}).values() if isinstance(ch, dict)]
+        except (OSError, ValueError, AttributeError):
+            names = []
+        parser.exit(2, "owner_notify: " + redact(exc, tuple(os.environ.get(n) for n in names if n)) + "\n")
 
 
 if __name__ == "__main__":
