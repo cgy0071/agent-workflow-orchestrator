@@ -30,6 +30,10 @@ CAUSE_GUIDANCE = {
     "handoff_without_marker": " The worker wrote a handoff without the completion marker, usually an early stop: read "
                               "what it says is left, then continue once if the remaining work fits this task.",
     "no_delivery": " The worker wrote no handoff: read its recent output before choosing continue or close.",
+    "worker_question": " The worker stopped to ask a question in its handoff: answer it in the continuation note, or "
+                       "close the attempt if the answer changes the task.",
+    "marker_missing": " The worker reports the work as done but the exact final marker line is missing: continue once so "
+                      "it rewrites only the end of the handoff.",
 }
 
 
@@ -329,6 +333,8 @@ def validate_request(request, require_dispatch=True):
         raise ValueError("authorization needs a boolean notify_reviewer and nonempty source")
     if "allow_reviewer_override" in auth and type(auth["allow_reviewer_override"]) is not bool:
         raise ValueError("reviewer override must be a boolean")
+    if "allow_long_repair_chain" in auth and type(auth["allow_long_repair_chain"]) is not bool:
+        raise ValueError("allow_long_repair_chain must be a boolean")
     if not isinstance(request["completion"], dict): raise ValueError("completion must be an object")
     if not request["completion"].get("binding_artifact"):
         raise ValueError("task/nonce binding artifact required")
@@ -440,10 +446,13 @@ def inspect_once(request, transport, idle_since=None, now=None):
                 raise ValueError("completion marker missing from binding artifact")
             if marker and source in ("output", "both") and marker not in transport.output(worker):
                 raise ValueError("completion marker missing from worker output")
+            account = worker_report(text)
             receipt = {"task_id": request["task_id"], "nonce": request["nonce"],
                        "completion_seq": state["completion_seq"],
                        "sequence_source": state.get("sequence_source", "completion_seq"), "artifacts": artifacts,
                        "binding_artifact": binding}
+            if account:
+                receipt["worker_report"] = account
             return "review_ready", "Task-bound delivery received; independent review required.", timer, receipt
         except (OSError, ValueError) as exc:
             detail = str(exc)
@@ -460,6 +469,37 @@ PROVIDER_ERROR = re.compile(r"rate.?limit|usage limit|quota|insufficient.?credit
                             r"request timed out|network error|retry failed", re.I)
 
 
+RESULT_BLOCK = re.compile(r"```awo-result\s*(.*?)```", re.S)
+RESULT_OUTCOMES = ("done", "partial", "blocked")
+
+
+def worker_report(text):
+    """The worker's own account from the last ```awo-result block of its handoff; None if absent.
+
+    It tells the reviewer what the worker claims: done, partial with what remains, or blocked with one question.
+    It never decides delivery or acceptance, and a malformed block is reported, not trusted.
+    """
+    blocks = RESULT_BLOCK.findall(text or "")
+    if not blocks:
+        return None
+    try:
+        value = json.loads(blocks[-1])
+    except ValueError as exc:
+        return {"error": "result block is not valid JSON: " + str(exc)[:120]}
+    if not isinstance(value, dict) or value.get("outcome") not in RESULT_OUTCOMES:
+        return {"error": "result block needs outcome done, partial or blocked"}
+    report = {"outcome": value["outcome"]}
+    remaining = value.get("remaining", [])
+    if isinstance(remaining, str):
+        remaining = [remaining]
+    if isinstance(remaining, list):
+        report["remaining"] = [str(item)[:200] for item in remaining[:10] if str(item).strip()]
+    for key in ("summary", "question"):
+        if isinstance(value.get(key), str) and value[key].strip():
+            report[key] = value[key].strip()[:500]
+    return report
+
+
 def stall_cause(request, transport):
     """Why a worker went idle without delivery, from its files and recent output; read-only, never raises.
 
@@ -474,8 +514,19 @@ def stall_cause(request, transport):
         if path.is_file():
             text = path.read_text(encoding="utf-8-sig", errors="replace")[:65536]
             if request["task_id"] in text and request["nonce"] in text:
-                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                lines = [line.strip() for line in RESULT_BLOCK.sub("", text).splitlines() if line.strip()]
                 result = {"cause": "handoff_without_marker", "evidence": " / ".join(lines[-3:])[:300]}
+                report = worker_report(text)
+                if report:
+                    result["worker_report"] = report
+                    if report.get("outcome") == "blocked" or report.get("question"):
+                        result.update(cause="worker_question", evidence=report.get("question") or
+                                      "; ".join(report.get("remaining", []))[:300])
+                    elif report.get("outcome") == "done":
+                        # The worker says it finished but the exact final line is missing or wrong.
+                        result.update(cause="marker_missing", evidence=report.get("summary", "")[:300])
+                    elif report.get("remaining"):
+                        result["evidence"] = "; ".join(report["remaining"])[:300]
     except (OSError, KeyError, TypeError):
         pass
     try:
@@ -483,8 +534,8 @@ def stall_cause(request, transport):
     except Exception:
         return result
     hits = [line.strip() for line in output.splitlines() if PROVIDER_ERROR.search(line)]
-    if hits:
-        result = {"cause": "provider_error", "evidence": hits[-1][:300]}
+    if hits and result["cause"] in ("no_delivery", "handoff_without_marker"):
+        result.update(cause="provider_error", evidence=hits[-1][:300])
     return result
 
 

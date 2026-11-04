@@ -192,6 +192,16 @@ python scripts/workflow_scheduler.py --state STATE confirm-start --task NEXT-ID 
 
 监控仍按 `interval_seconds` 做完整检查。完整检查之间，每隔 `fast_poll_seconds`（默认 30 秒，上限为完整检查间隔）只读查询状态；状态或完成序号变化时立即做完整检查。设为 0 可恢复原来的单次等待。快速查询不发送消息，也不消耗错误预算。
 
+## Worker 结果块、按原因继续与连续返修上限
+
+生成的派发消息会要求 Worker 在绑定文件末尾、完成标记行之前写一个 `awo-result` 代码块：`{"outcome": "done" | "partial" | "blocked", "summary": "...", "remaining": ["..."], "question": "..."}`。监控只读取最后一个代码块；格式不对时标为无法读取，不予采信。这只是 Worker 的自述，不改变任何关卡：交付仍需绑定文件、交付文件和精确标记，接收仍需独立审核。收件箱会把它显示在交付旁边。
+
+停顿为 `incomplete` 时，结果块会细化记录的原因：`worker_question`（受阻或提了问题）、`marker_missing`（Worker 说已完成，但最后一行不对），或带剩余步骤的 `handoff_without_marker`。输出中的服务商错误优先于“部分完成”，但不优先于明确提出的问题。`continue` 会按该原因选择开头一句，例如缺少标记时只要求重写交接文件的结尾。`continue --note 文本`（或页面上的说明字段）可附加一条控制者的回答或指示，最多 2000 字符。日志记录原因、是否附带说明和消息哈希，不保存说明正文。只发送一次的规则不变。
+
+`scheduler.max_repair_chain`（默认 3，0 表示关闭）沿 `parent_task` 链统计连续的非接收审核。达到上限后，登记下一个后续任务会失败，直到 Owner 作出决定：重新规划，或用 `follow-up --allow-long-chain --source "<Owner 的决定>"` 继续，这会设置 `authorization.allow_long_repair_chain`。检查在 `register_task` 中执行，手写的请求同样受约束。可用 `workflow_control.py set-config --changes '{"scheduler.max_repair_chain": 5}'` 或看板修改上限。
+
+`workflow_control.py --state STATE history --task TASK-ID` 输出一个任务的时间线（预留、发送、开始、交付、继续、审核、关闭）和它的后续任务链及每一步的审核结论；`--format json` 输出同样的数据。它只读台账。
+
 ## 本地演示
 
 ```sh

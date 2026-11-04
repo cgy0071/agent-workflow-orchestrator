@@ -249,13 +249,37 @@ def _delivery_instructions(request):
     files = [completion["binding_artifact"]] + list(completion.get("artifacts", []))
     names = [item if isinstance(item, str) else item["path"] for item in files]
     text = "Deliverables: " + ", ".join(names) + "."
+    text += ("\nBefore the final line, end " + names[0] + " with a fenced awo-result block such as "
+             "```awo-result {\"outcome\": \"done\", \"summary\": \"one line\", \"remaining\": []} ```. "
+             "If you stop early, use outcome partial with the remaining steps, or blocked with one question. "
+             "The reviewer still checks the work itself.")
     if completion.get("marker"):
         text += "\nThe final line of " + names[0] + " must be exactly: " + completion["marker"]
     return text
 
 
+# The opening of a continuation, chosen by the stall cause the monitor recorded for this episode.
+CONTINUE_OPENINGS = {
+    "marker_missing": "Your handoff says the work is done, but its ending is incomplete. Do not redo or re-check "
+                      "any work: rewrite only the end of the handoff so it follows the instructions below.",
+    "worker_question": "The controller read the question in your handoff; the answer is in the note at the end.",
+    "handoff_without_marker": "Your handoff lists remaining work. Do those steps now, then finish the handoff.",
+    "provider_error": "The provider error that stopped you has passed. Resume from where you stopped.",
+}
+CONTINUE_NOTE_LIMIT = 2000
+
+
+def _stall_cause(con, task, episode):
+    """The cause the monitor attached to this stall episode, if any; read-only."""
+    for (data,) in con.execute("SELECT data FROM events WHERE task=? ORDER BY rowid DESC", (task,)):
+        report = json.loads(data)["report"]
+        if report.get("status") == "incomplete" and report.get("stall_episode", 1) == episode:
+            return report.get("cause")
+    return None
+
+
 def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context,
-              worker_role=None, cwd=None, source, transport=None):
+              worker_role=None, cwd=None, source, transport=None, allow_long_chain=False):
     """Prepare a follow-up request and message without registering or sending it."""
     if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", task_id) or task_id in (".", ".."):
         raise ValueError("invalid follow-up task ID")
@@ -278,6 +302,12 @@ def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context
         if worker_binding["mode"] != "worker" or reviewer_binding["mode"] not in ("controller", "reviewer"):
             raise ValueError("current bindings do not hold worker and reviewer modes")
         allowed = control.config_of(con).get("workflow", {}).get("continuation_verdicts", ["accept", "repair"])
+        limit = control.config_of(con).get("scheduler", {}).get("max_repair_chain", 3)
+        depth = control.repair_chain(con, gate["task_id"])
+    if limit and depth >= limit and not allow_long_chain:
+        raise ValueError(gate["task_id"] + " ends " + str(depth) + " repairs in a row (scheduler.max_repair_chain is " +
+                         str(limit) + "). Ask the Owner whether to replan; to continue anyway pass "
+                         "--allow-long-chain with the Owner's decision as --source")
     target = Path(cwd).resolve() if cwd else Path(parent["cwd"]).resolve().parent / task_id
     if target.exists() and (not target.is_dir() or any(target.iterdir())):
         raise FileExistsError("follow-up cwd already exists and is not empty")
@@ -301,7 +331,7 @@ def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context
                 stream.write(book.read_bytes())
             copied = True
         return _follow_up_request(state, parent, gate, allowed, task_id, nonce, target, local_book,
-                                  worker, reviewer, completion, source)
+                                  worker, reviewer, completion, source, allow_long_chain)
     except BaseException:
         # Leave no half-prepared folder: a rerun would otherwise refuse the non-empty cwd.
         if copied:
@@ -315,13 +345,14 @@ def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context
 
 
 def _follow_up_request(state, parent, gate, allowed, task_id, nonce, target, local_book, worker, reviewer,
-                       completion, source):
+                       completion, source, allow_long_chain=False):
     request = {"task_id": task_id, "nonce": nonce, "generation": 1, "cwd": str(target),
                "workflow_state": str(Path(state).resolve()), "worker": worker, "reviewer": reviewer,
                "dispatch_confirmed": False, "parent_task": gate["task_id"], "parent_review": gate,
                "allowed_parent_verdicts": allowed,
                "authorization": {"source": source, "dispatch_worker": True,
-                                 "notify_reviewer": parent["authorization"]["notify_reviewer"]},
+                                 "notify_reviewer": parent["authorization"]["notify_reviewer"],
+                                 **({"allow_long_repair_chain": True} if allow_long_chain else {})},
                "completion": completion, "taskbook_path": str(local_book)}
     for key in ("monitor", "status_map"):
         if key in parent: request[key] = copy.deepcopy(parent[key])
@@ -648,7 +679,7 @@ def tick(state, run, actor, version, context, *, transport=None):
     return {"run": run, "results": results}
 
 
-def continue_task(state, task, actor, version, context, *, transport=None):
+def continue_task(state, task, actor, version, context, *, transport=None, note=None):
     """Ask a stalled worker to resume the same attempt once per stall episode, within a bounded budget.
 
     Never a new dispatch: same task ID, nonce, frozen request, monitor and baseline. The attempt is
@@ -667,6 +698,7 @@ def continue_task(state, task, actor, version, context, *, transport=None):
         if observation.get("status") != "incomplete":
             raise ValueError("continue applies only while the monitor reports incomplete (worker idle without delivery)")
         episode = observation.get("stall_episode", 1)
+        cause = _stall_cause(con, task, episode)
         done = [json.loads(item[0]) for item in con.execute(
             "SELECT data FROM task_journal WHERE task=? AND kind='continue_reserved'", (task,))]
         budget = control.config_of(con).get("scheduler", {}).get("max_continue_prompts", 2)
@@ -690,8 +722,11 @@ def continue_task(state, task, actor, version, context, *, transport=None):
         raise ValueError("worker is not idle; wait for the monitor before continuing")
     if spec["adapter"] == "herdr":
         Transport.check_prompt_available(observed)
-    message = _continue_message(request)
-    attempt = {"attempt": len(done) + 1, "budget": budget, "stall_episode": episode,
+    if note is not None and (not isinstance(note, str) or not note.strip() or len(note) > CONTINUE_NOTE_LIMIT
+                             or "\x00" in note):
+        raise ValueError("continuation note must be 1 to " + str(CONTINUE_NOTE_LIMIT) + " characters of text")
+    message = _continue_message(request, cause, note.strip() if note else None)
+    attempt = {"cause": cause, "note": bool(note), "attempt": len(done) + 1, "budget": budget, "stall_episode": episode,
                "message_sha256": control.digest(message), "observed_completion_seq": observed.get("completion_seq"),
                "actor_version": version}
     with control.database(state) as con:
@@ -727,15 +762,18 @@ def _resumable(request, state):
             and mapped_status(request, state) in ("idle", "done"))
 
 
-def _continue_message(request):
+def _continue_message(request, cause=None, note=None):
     first = request["completion"]["binding_artifact"]
     first = first if isinstance(first, str) else first["path"]
-    text = ("Continue task " + request["task_id"] + " (nonce " + request["nonce"] + ") from where it stopped. "
+    text = (CONTINUE_OPENINGS[cause] + " " if cause in CONTINUE_OPENINGS else "") + ("Continue task " + request["task_id"] + " (nonce " + request["nonce"] + ") from where it stopped. "
             "This is the same authorized task after an interruption such as a quota, rate-limit or network "
             "error, not a new task: keep the scope unchanged and do not redo finished steps. There is no time limit on this turn: do the "
             "remaining work now instead of stopping after checks, and save partial results as you go. Working directory: " +
             request["cwd"] + ". " + _delivery_instructions(request))
-    return text + "\nIf you cannot continue, write the blocker into " + first + " and stop."
+    text += "\nIf you cannot continue, write the blocker into " + first + " and stop."
+    if note:
+        text += "\nController note (from the reviewer, about this task only): " + note
+    return text
 
 
 def release(state, task, actor, version, context):
@@ -816,6 +854,8 @@ def main():
     follow.add_argument("--taskbook", required=True); follow.add_argument("--source", required=True)
     follow.add_argument("--out", required=True); follow.add_argument("--message-out", required=True)
     follow.add_argument("--worker-role"); follow.add_argument("--cwd")
+    follow.add_argument("--allow-long-chain", action="store_true",
+                        help="continue past scheduler.max_repair_chain; --source must record the Owner's decision")
     follow.add_argument("--actor", required=True); follow.add_argument("--version", type=int, required=True)
     follow.add_argument("--context", choices=("main", "side", "unknown"), default="unknown")
     start = sub.add_parser("confirm-start")
@@ -839,6 +879,8 @@ def main():
             cmd.add_argument("--file", required=True)
         if name in ("release", "continue"):
             cmd.add_argument("--task", required=True)
+        if name == "continue":
+            cmd.add_argument("--note", help="controller answer or instruction appended to the continuation")
     args = parser.parse_args()
     if args.command == "prepare-dag":
         from workflow_evidence import prepare_graph
@@ -873,7 +915,8 @@ def main():
                     raise ValueError("request and message outputs must differ")
                 result = follow_up(args.state, args.parent_event, args.task_id, args.taskbook,
                                    actor=args.actor, version=args.version, context=args.context,
-                                   worker_role=args.worker_role, cwd=args.cwd, source=args.source)
+                                   worker_role=args.worker_role, cwd=args.cwd, source=args.source,
+                                   allow_long_chain=args.allow_long_chain)
                 with Path(args.out).open("x", encoding="utf-8", newline="\n") as stream:
                     stream.write(json.dumps(result["request"], ensure_ascii=True, indent=2) + "\n")
                 with Path(args.message_out).open("x", encoding="utf-8", newline="\n") as stream:
@@ -884,7 +927,7 @@ def main():
                 result = confirm_start(args.state, args.task, args.request_out, *who, wait=args.wait)
             elif args.command == "dag-load": result = load_dag(args.state, args.run, read_json(args.file), *who)
             elif args.command == "tick": result = tick(args.state, args.run, *who)
-            elif args.command == "continue": result = continue_task(args.state, args.task, *who)
+            elif args.command == "continue": result = continue_task(args.state, args.task, *who, note=args.note)
             else: result = release(args.state, args.task, *who)
     if args.command == "status" and args.format == "text":
         from workflow_status import format_text

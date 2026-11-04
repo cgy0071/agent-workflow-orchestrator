@@ -252,11 +252,16 @@ class Manager:
             raise ValueError("this stall episode already received a continuation; wait for the monitor")
         if len(done) >= budget:
             raise ValueError("continuation budget exhausted (" + str(budget) + "); close the attempt instead")
+        note = payload.get("note") or None
+        if note is not None:
+            note = _text(payload, "note", scheduler.CONTINUE_NOTE_LIMIT)
+        cause = scheduler._stall_cause(con, payload["task_id"], episode)
         return {"task_id": payload["task_id"], "stall_episode": episode, "used": len(done), "budget": budget,
-                "message": scheduler._continue_message(task["request"])}
+                "cause": cause, "note": note, "message": scheduler._continue_message(task["request"], cause, note)}
 
     def _run_continue(self, step):
-        return scheduler.continue_task(self.state, step["task_id"], *self.who(), transport=self.transport())
+        return scheduler.continue_task(self.state, step["task_id"], *self.who(), transport=self.transport(),
+                                       note=step["note"])
 
     # Record an inspected stop of the attempt. It never cancels the worker process.
     def _prepare_close(self, con, payload):

@@ -176,7 +176,7 @@ python scripts/workflow_scheduler.py --state /abs/state confirm-start --task TAS
 python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 ```
 
-监控默认每 300 秒做一次完整检查，并每 30 秒只读查询状态，以便更快发现变化。设置 `fast_poll_seconds: 0` 可关闭快速查询。默认没有总时长上限，但每次状态查询都有超时。设置了 `workflow_state` 后，即使 `authorization.notify_reviewer` 为 false，`--notify` 仍会记录收件箱事件；在 `inbox_only` 策略下绝不直接提示审核者。后台启动方式和完整的状态约定见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
+监控默认每 300 秒做一次完整检查，并每 30 秒只读查询状态，以便更快发现变化。设置 `fast_poll_seconds: 0` 可关闭快速查询。Worker 会在交接文件末尾写一个简短的 `awo-result` 结果块（已完成；部分完成并列出剩余步骤；或受阻并提出问题）；收件箱会显示它，继续提示可以回答它，但只有审核才能接收工作。连续返修达到 `scheduler.max_repair_chain` 次（默认 3）后，下一个后续任务要等 Owner 决定。`workflow_control.py history --task ID` 显示一个任务的时间线和任务链。默认没有总时长上限，但每次状态查询都有超时。设置了 `workflow_state` 后，即使 `authorization.notify_reviewer` 为 false，`--notify` 仍会记录收件箱事件；在 `inbox_only` 策略下绝不直接提示审核者。后台启动方式和完整的状态约定见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
 如果 Executor 提前停止（额度、限流、网络）或停在权限提示上，监控只报告一次，然后继续观察同一个任务，之后完成的交付仍会进入审核。未交付就停止时，控制者可以对同一任务发送一次受限的 `workflow_scheduler.py continue --task TASK-ID`，而不是重新派发。权限提示留给你在 Executor 自己的窗口中处理。详见 [scheduling.zh-CN.md](references/scheduling.zh-CN.md#中途停顿权限提示与受限继续)。
 

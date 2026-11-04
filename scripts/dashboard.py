@@ -531,6 +531,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
         <label class="full"><span>Goal</span><input id="set-goal" maxlength="2000"></label>
         <label><span>Tasks that may run at once</span><input id="set-concurrency" type="number" min="1" step="1"></label>
         <label><span>Continuations allowed per attempt (0 to 10)</span><input id="set-continues" type="number" min="0" max="10" step="1"></label>
+        <label><span>Repairs in a row before the Owner decides (0 = no limit)</span><input id="set-chain" type="number" min="0" max="50" step="1"></label>
         <label class="full"><span>Resource capacities (JSON, e.g. {"gpu": 1})</span><input id="set-resources"></label>
       </div><div class="actions"><button id="set-preview" class="primary" type="button">Check changes...</button>
         <button id="set-reset" type="button">Reset form</button></div></section>
@@ -681,7 +682,9 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   const reviewNames = {accept:'Accepted', reject:'Rejected', repair:'Needs repair'};
   const causeNames = {provider_error:'Likely cause: provider quota, rate limit or connection error',
     handoff_without_marker:'Likely cause: the worker stopped early and left an unfinished handoff',
-    no_delivery:'Likely cause: the worker wrote no handoff; read its recent output'};
+    no_delivery:'Likely cause: the worker wrote no handoff; read its recent output',
+    worker_question:'The worker stopped to ask a question',
+    marker_missing:'The worker says it is done, but the final marker line is missing'};
   const nextNames = {
     release_claim_or_advance:'Release reserved resources or continue the plan',
     inspect_changed_evidence:'Check why accepted evidence changed',
@@ -1104,6 +1107,16 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   }
   // Only updates that still need someone are listed; handled ones stay one click away.
   let inboxDone = false;
+  // What the worker says about its own result. The reviewer still checks the files; this is not acceptance.
+  function workerReport(root, r) {
+    const box = add(root, 'div', 'detail-note');
+    if (r.error) { add(box, 'p', 'muted', 'Worker report unreadable: ' + r.error); return; }
+    add(box, 'strong', '', 'Worker says: ' + named(r.outcome, {done:'done', partial:'partly done', blocked:'blocked'}));
+    if (r.summary) add(box, 'p', 'raw', r.summary);
+    if (r.question) add(box, 'p', 'raw alert-next', r.question);
+    if ((r.remaining || []).length) { const list = add(box, 'ul', 'chain-steps');
+      for (const step of r.remaining) add(list, 'li', 'raw', step); }
+  }
   function eventCard(root, data, e) {
     const item = add(root, 'article', 'event-item'); const head = add(item, 'div', 'event-head');
     add(head, 'strong', 'raw', taskName(data, e.task_id)); add(head, 'span', 'badge ' + e.status, named(e.status, stageNames));
@@ -1114,6 +1127,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     else if (e.status === 'pending') add(item, 'p', 'role-summary', 'Reviewer: open this update and acknowledge it before reviewing.');
     if (paused && e.cause) add(item, 'p', 'role-summary', named(e.cause, causeNames));
     if (paused && e.cause_evidence) add(item, 'p', 'raw role-summary', e.cause_evidence);
+    if (e.worker_report) workerReport(item, e.worker_report);
     else if (e.status === 'acknowledged') add(item, 'p', 'role-summary', 'Reviewer: inspect the evidence and record a review.');
     if (data.allow_dispatch && e.role === data.actor_role && ['pending','acknowledged'].includes(e.status)) {
       const open = add(item, 'button', '', e.status === 'pending' ? 'Acknowledge...' : 'Record review...');
@@ -1349,7 +1363,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     monitor_start: {title:'Start monitoring', fields:[]},
     observe_start: {title:'Auto-check worker', fields:[]},
     monitor_stop: {title:'Stop monitoring', fields:[]},
-    continue: {title:'Continue the worker once', fields:[]},
+    continue: {title:'Continue the worker once', fields:[['note', 'textarea',
+      'Note to the worker (optional): answer its question or narrow the next step']]},
     close: {title:'Close this attempt', fields:[['reason', 'textarea', 'Why you are closing it (saved as evidence)']]},
     release: {title:'Release the work slot', fields:[]},
     tick: {title:'Run the task plan', fields:[]},
@@ -1407,6 +1422,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (step.action === 'monitor_stop') lines.push('Confirm asks the monitor to stop at its next check. The worker keeps running.');
     if (step.action === 'continue') lines.push('Confirm sends this message once (continuation ' + (step.used + 1) + ' of ' +
       step.budget + '). An uncertain send is counted and never repeated.');
+    if (step.action === 'continue' && step.cause) lines.push(named(step.cause, causeNames));
     if (step.action === 'close') lines.push('Confirm records the attempt as closed. It does not stop the worker process.');
     if (step.action === 'release') lines.push('Confirm releases the reserved work slot of this accepted task.');
     if (step.action === 'tick') {
@@ -1490,6 +1506,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (key === settingsShown) return; settingsShown = key;
     id('set-goal').value = s.goal || ''; id('set-concurrency').value = s['scheduler.max_concurrency'] ?? 1;
     id('set-continues').value = s['scheduler.max_continue_prompts'] ?? 2;
+    id('set-chain').value = s['scheduler.max_repair_chain'] ?? 3;
     id('set-resources').value = JSON.stringify(s['scheduler.resources'] || {});
   }
   id('set-reset').addEventListener('click', () => { settingsShown = ''; if (lastData) settingsForm(lastData); });
@@ -1497,7 +1514,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     let resources; try { resources = JSON.parse(id('set-resources').value || '{}'); }
     catch { id('manage-error').textContent = 'Resource capacities must be JSON'; return; }
     const changes = {goal:id('set-goal').value, 'scheduler.max_concurrency':Number(id('set-concurrency').value),
-      'scheduler.max_continue_prompts':Number(id('set-continues').value), 'scheduler.resources':resources};
+      'scheduler.max_continue_prompts':Number(id('set-continues').value),
+      'scheduler.max_repair_chain':Number(id('set-chain').value), 'scheduler.resources':resources};
     const current = lastData?.settings || {};
     for (const k of Object.keys(changes)) if (JSON.stringify(changes[k]) === JSON.stringify(current[k] ?? (k === 'goal' ? '' : undefined))) delete changes[k];
     openManage('config', {changes}, 'Only the values you changed are sent.');

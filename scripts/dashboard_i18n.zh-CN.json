@@ -400,9 +400,22 @@
     "Acknowledge the update and review the evidence.": "确认收到更新并审核证据。",
     "Likely cause: provider quota, rate limit or connection error": "可能原因：服务商额度、限流或连接错误",
     "Likely cause: the worker stopped early and left an unfinished handoff": "可能原因：Worker 提前停止，留下未完成的交接",
-    "Likely cause: the worker wrote no handoff; read its recent output": "可能原因：Worker 未写交接文件，请读取其最近输出"
+    "Likely cause: the worker wrote no handoff; read its recent output": "可能原因：Worker 未写交接文件，请读取其最近输出",
+    "Note to the worker (optional): answer its question or narrow the next step": "给 Worker 的说明（可选）：回答它的问题，或缩小下一步范围",
+    "Repairs in a row before the Owner decides (0 = no limit)": "连续返修多少次后交给 Owner 决定（0 表示不限制）",
+    "The worker stopped to ask a question": "Worker 停下来提了一个问题",
+    "The worker says it is done, but the final marker line is missing": "Worker 说已完成，但缺少最后一行完成标记",
+    "partly done": "部分完成"
   },
   "patterns": [
+    [
+      "^Worker says: (.+)$",
+      "Worker 自述：#1"
+    ],
+    [
+      "^Worker report unreadable: (.+)$",
+      "Worker 自述无法读取：$1"
+    ],
     [
       "^(\\d+) reviews$",
       "$1 次审核"
