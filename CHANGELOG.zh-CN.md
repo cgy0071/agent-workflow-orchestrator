@@ -27,6 +27,7 @@
 
 ### 文档
 
+- README 改为简短介绍和快速开始；手动操作步骤、核心概念、配置文件、完整安全模型和仓库结构移到 [references/manual-workflow.zh-CN.md](references/manual-workflow.zh-CN.md)。
 - README 说明了禁止自审、字段规则和桥接残留（#18）。收件文档补充了 `inbox_only` 下的提示行为和未知项目名的处理（#20）。
 
 ## 2026-11-04
