@@ -11,6 +11,7 @@ from unittest.mock import patch
 from monitor_task import Transport, inspect_once, read_json, save_json
 from native_events import inspect_turn
 import native_worker
+from process_util import pid_alive
 import run_job
 import test_scheduler as fixtures
 import validate_native
@@ -183,6 +184,13 @@ class CompletionTests(unittest.TestCase):
                     break
                 time.sleep(.05)
             self.assertEqual(state["status"], "idle", state)
+            # The runner writes outcome.json and only then exits. On Windows it still holds runner.log open
+            # until it exits, so wait for the process itself or the next send and tearDown race it.
+            for _ in range(200):
+                if pid_alive(result["runner_pid"]) is False:
+                    break
+                time.sleep(.05)
+            self.assertIs(pid_alive(result["runner_pid"]), False, "runner did not exit")
             self.assertEqual(read_json(worker / "config.json")["native_session_id"], "fixture-thread")
             self.assertEqual((cwd / "RESULT.md").read_text(encoding="utf-8").strip(), "323")
         second = json.loads((self.root / "second.argv").read_text(encoding="utf-8"))
