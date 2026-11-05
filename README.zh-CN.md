@@ -180,6 +180,8 @@ python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 
 如果 Executor 提前停止（额度、限流、网络）或停在权限提示上，监控只报告一次，然后继续观察同一个任务，之后完成的交付仍会进入审核。未交付就停止时，控制者可以对同一任务发送一次受限的 `workflow_scheduler.py continue --task TASK-ID`，而不是重新派发。权限提示留给你在 Executor 自己的窗口中处理。详见 [scheduling.zh-CN.md](references/scheduling.zh-CN.md#中途停顿权限提示与受限继续)。
 
+需要把提醒推送给 Owner 时，可选用 `owner_notify.py`，配置私有文件、Webhook 或命令通道。它只读台账，使用独立发件箱，不改变任务状态，也不联系 Agent。用法见[通知 Owner](references/monitoring.zh-CN.md#通知-owner)。
+
 ### 7. 审核并继续
 
 ```sh

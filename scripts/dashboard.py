@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 import webbrowser
 
 import dashboard_actions
+import owner_notify
 import workflow_control as control
 import workflow_scheduler as scheduler
 import workflow_status
@@ -462,7 +463,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       <span class="panel-caption">Updates waiting for a reviewer</span></div><div id="inbox" class="list"></div>
       <div id="inbox-done" class="hidden"><button id="inbox-toggle" type="button"></button><div id="inbox-history" class="list"></div></div></section>
     <section class="panel"><div class="panel-head"><h2>Alerts & guidance</h2>
-      <span class="panel-caption">Meaning and next step</span></div><div id="alerts" class="list"></div></section>
+      <span class="panel-caption">Meaning and next step</span></div>
+      <p id="owner-notify-summary" class="muted hidden"></p><div id="alerts" class="list"></div></section>
     <section class="panel"><div class="panel-head"><h2>Resource limits</h2>
       <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
     <section class="panel" id="probe-panel"><div class="panel-head"><h2>Current agent check</h2>
@@ -1155,6 +1157,18 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (inboxDone) {
       for (const e of done.slice(0, 20)) eventCard(history, data, e);
       if (done.length > 20) add(history, 'p', 'muted', 'Showing the latest 20 of ' + done.length + ' handled updates.');
+    }
+    const owner = id('owner-notify-summary'); owner.replaceChildren();
+    show('owner-notify-summary', !!data.owner_notify);
+    if (data.owner_notify) {
+      add(owner, 'strong', '', 'Owner notifications'); owner.append(' | ');
+      add(owner, 'span', '', 'Pending'); owner.append(': ');
+      add(owner, 'span', 'raw', data.owner_notify.pending); owner.append(' | ');
+      add(owner, 'span', '', 'Given up'); owner.append(': ');
+      add(owner, 'span', 'raw', data.owner_notify.given_up); owner.append(' | ');
+      add(owner, 'span', '', 'Last sent'); owner.append(': ');
+      add(owner, 'span', data.owner_notify.last_sent ? 'raw' : '', data.owner_notify.last_sent ?
+        when(data.owner_notify.last_sent) : 'Never');
     }
     const alerts = id('alerts'); alerts.replaceChildren();
     const tasks = new Map(data.tasks.map(task => [task.task_id, task]));
@@ -2020,7 +2034,8 @@ class DashboardServer(ThreadingHTTPServer):
             # File checks only: whether a monitor lock or summary exists in each open task's folder.
             base["monitors"] = {row["task_id"]: self.manager.monitor_info(row["task_id"])["state"]
                                 for row in summary["tasks"] if row["phase"] not in ("accepted", "closed")}
-        return dict(summary, **details, **base, state=str(state))
+        return dict(summary, **details, **base, state=str(state),
+                    owner_notify=owner_notify.outbox_summary(state))
 
     def metrics(self, days):
         if self.state is None:

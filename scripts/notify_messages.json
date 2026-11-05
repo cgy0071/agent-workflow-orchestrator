@@ -1,0 +1,18 @@
+{
+  "en": {
+    "permission_prompt": ["Worker needs a permission decision", "Check the worker's harness and answer the prompt yourself."],
+    "worker_question": ["Worker has a question", "Read the question and answer it in the worker's harness."],
+    "worker_failed": ["Worker stopped or changed identity", "Inspect the worker and the saved task status before acting."],
+    "start_unconfirmed": ["Task start has not been confirmed", "Check whether the worker started; do not resend blindly."],
+    "review_waiting": ["Delivery is waiting for review", "Inspect the delivery and ask the reviewer to record a decision."],
+    "over_concurrency": ["Running work exceeds the configured limit", "Inspect active tasks before starting more work."]
+  },
+  "zh": {
+    "permission_prompt": ["Worker 需要权限决定", "请到 Worker 的执行窗口检查并亲自处理权限提示。"],
+    "worker_question": ["Worker 提出了问题", "请阅读问题并在 Worker 的执行窗口回答。"],
+    "worker_failed": ["Worker 已停止或身份改变", "请先检查 Worker 和已记录的任务状态。"],
+    "start_unconfirmed": ["尚未确认任务已开始", "请检查 Worker 是否开始执行，不要盲目重发。"],
+    "review_waiting": ["交付正在等待审核", "请查看交付，并请审核者记录结论。"],
+    "over_concurrency": ["运行任务超过配置上限", "启动更多任务前，请先检查正在运行的任务。"]
+  }
+}

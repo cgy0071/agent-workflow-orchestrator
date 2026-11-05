@@ -67,6 +67,40 @@ When a stall episode is `incomplete`, the monitor reads the worker's recent outp
 
 Ledger mode records attempts transactionally in SQLite instead of a task-local attempt file. Each attempt binds the target, request/authorization hashes, and UTC time. Read-only query failures have bounded retries. Incomplete delivery, blocked states (usually permission prompts) and persistent query failures are reported once per distinct status in each stall episode while monitoring continues; see [stalls and bounded continuation](scheduling.md#stalls-permission-prompts-and-bounded-continuation). Identity changes, unknown states, failures and exits stop for inspection. After inspection, --resume preserves the old summary as history and resumes unchanged frozen inputs. It never retries a previously attempted prompt or resumes review-ready delivery into new execution.
 
+## Notify the Owner
+
+Only when the Owner requests push notifications, copy [the example](../examples/notify.json) to a private `notify.json`, choose the channels and kinds, and run:
+
+```sh
+python scripts/owner_notify.py --state /absolute/workflow-state --config /private/notify.json --dry-run
+python scripts/owner_notify.py --state /absolute/workflow-state --config /private/notify.json --once
+python scripts/owner_notify.py --state /absolute/workflow-state --config /private/notify.json --interval 60
+```
+
+The six kinds are `permission_prompt` (blocked event), `worker_question` (question cause), `worker_failed` (failed, exited, or changed identity), `start_unconfirmed` (sent over 10 minutes without confirmed start), `review_waiting` (unreviewed delivery over an hour), and `over_concurrency` (legacy registration above the running-task limit, when available). Only open tasks and unhandled events are considered; the notifier reads the workflow ledger without changing it or contacting agents. It sends short task titles and guidance, not task files or identities.
+
+For example, keep the URL in an environment variable; do not put it in `notify.json`:
+
+```json
+{"lang":"en","channels":{"local":{"type":"file","path":"C:/private/owner-inbox.log"},"phone":{"type":"webhook","format":"feishu","url_env":"AWO_NOTIFY_FEISHU_URL","kinds":["permission_prompt","worker_question","review_waiting"]}}}
+```
+
+File channels append JSON lines. Webhooks support `generic`, `feishu`, `dingtalk`, and `wecom`; only HTTPS or loopback HTTP is accepted. A command channel uses an argv array with one standalone `{text}` argument, without a shell. On Windows it refuses a `.bat` or `.cmd` target: cmd.exe re-parses the arguments, and the text can include what a worker wrote. Call the interpreter directly, such as `node` or `python` with the script path. Keep the configuration and URL out of the repository. A missing URL environment variable skips that channel for the round.
+
+The separate `owner_notify.sqlite3` outbox remembers each channel/key and retries failures 1, 3, 7, 15, 25, 35, 45, and 55 minutes after the first failure; it gives up after 57 minutes. Sending is **at least once**: a crash after delivery but before recording success can cause a duplicate after five minutes. `--dry-run` neither sends nor writes the outbox. In interval mode, create `<state>/STOP_NOTIFY` to stop after the current round. This process does not retry task dispatch or reviewer prompts.
+
+Windows background example (use verified local paths and an environment already containing the private webhook URL):
+
+```powershell
+Start-Process -FilePath 'python.exe' -ArgumentList @(
+  'C:/skills/agent-workflow-orchestrator/scripts/owner_notify.py',
+  '--state', 'C:/workflow-state', '--config', 'C:/private/notify.json', '--interval', '60'
+) -WindowStyle Hidden -RedirectStandardOutput 'C:/private/notify.stdout.log' `
+  -RedirectStandardError 'C:/private/notify.stderr.log'
+```
+
+The dashboard shows pending, given-up, and last successful sends from the outbox without sending anything.
+
 ## Other adapters
 
 Herdr responses use completion_seq when present, otherwise state_change_seq. Missing or invalid counters are errors, not zero. Copy the observed normalized value into baseline_completion_seq before dispatch. state_change_seq records every state change, so its advance is only freshness evidence: idle/done, task/nonce-bound artifacts, and the configured marker are still required. Its delivery grace starts at the first fresh idle/done observation and is not renewed by counter churn, including intervening working states. A true completion_seq retains a new grace period for each completion. Receipts record sequence_source.
