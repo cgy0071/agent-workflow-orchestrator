@@ -52,7 +52,7 @@ def redact(value, secrets=()):
     return (workflow_status.workflow_text(text) or "")[:300]
 
 
-def config_of(path):
+def config_of(path, windows=None):
     config = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(config, dict) or config.get("lang", "en") not in MESSAGES:
         raise ValueError("lang must be en or zh")
@@ -77,7 +77,7 @@ def config_of(path):
                 raise ValueError("command argv needs one standalone {text} argument")
             # On Windows a .bat/.cmd target runs through cmd.exe, which re-parses its arguments. The text includes
             # what a worker wrote, so a batch file would let that text run commands. Require a real program.
-            if os.name == "nt" and Path(channel["argv"][0]).suffix.lower() in (".bat", ".cmd"):
+            if (os.name == "nt" if windows is None else windows) and                     Path(channel["argv"][0]).suffix.lower() in (".bat", ".cmd"):
                 raise ValueError("command channel cannot start a .bat or .cmd file on Windows; call the "
                                  "interpreter directly, for example node or python with the script path")
         elif kind == "webhook":

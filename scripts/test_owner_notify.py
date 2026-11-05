@@ -253,12 +253,13 @@ class WindowsBatchTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory(); self.addCleanup(folder.cleanup)
         path = Path(folder.name) / "notify.json"
         path.write_text(json.dumps(config), encoding="utf-8")
-        with patch.object(notify.os, "name", "nt"):
-            with self.assertRaisesRegex(ValueError, "bat or .cmd"):
-                notify.config_of(path)
-            config["channels"]["bat"]["argv"] = ["node", "C:/bot/send.js", "{text}"]
-            path.write_text(json.dumps(config), encoding="utf-8")
-            self.assertIn("bat", notify.config_of(path)["channels"])
+        # Pass the platform in: faking os.name makes pathlib build Windows paths on Linux.
+        with self.assertRaisesRegex(ValueError, "bat or .cmd"):
+            notify.config_of(path, windows=True)
+        self.assertIn("bat", notify.config_of(path, windows=False)["channels"])  # POSIX has no cmd.exe re-parse.
+        config["channels"]["bat"]["argv"] = ["node", "C:/bot/send.js", "{text}"]
+        path.write_text(json.dumps(config), encoding="utf-8")
+        self.assertIn("bat", notify.config_of(path, windows=True)["channels"])
 
 
 if __name__ == "__main__":
