@@ -63,9 +63,13 @@ L = {
            "monitor": ("monitor_task.py", ["polls status every 300 s", "checks files, task ID, nonce",
                                            "reports a stop once, keeps watching"]),
            "ledger": ("SQLite ledger", ["records exactly one", "inbox event"]),
-           "reviewer": ("Reviewer", ["reads the raw evidence", "accept / repair / reject"]),
+           "reviewer": ("Reviewer", ["reads the raw evidence", "accept / repair / reject", "settle, then follow-up"]),
            "once": "sent once", "next": "next or repair task", "continue": "dashed: continue once after a stop",
            "legend_agent": "AI agent (any harness)", "legend_tool": "script in this repository",
+           "owner": ("Owner channel", ["chat bot, webhook or file", "optional"]),
+           "notify": ("owner_notify.py", ["prompts, failures, waits", "push once to the Owner"]),
+           "intake": ("owner_intake.py", ["signed request, ID hint", "data, not authorization"]),
+           "alerts": "alerts", "requests": "requests", "hint": "ID hint only when idle",
            "overview": "Workflow overview"},
     "zh": {"you": ("你", ["目标与授权"]),
            "planner": ("Planner 规划者", ["编写 task.md", "派发任务"]),
@@ -73,9 +77,13 @@ L = {
            "monitor": ("monitor_task.py", ["每 300 秒查询一次状态", "核对文件、任务 ID、nonce",
                                            "中途停止只报告一次，继续观察"]),
            "ledger": ("SQLite 台账", ["只记录一条", "收件箱事件"]),
-           "reviewer": ("Reviewer 审核者", ["阅读原始证据", "accept / repair / reject"]),
+           "reviewer": ("Reviewer 审核者", ["阅读原始证据", "accept / repair / reject", "settle 后生成 follow-up"]),
            "once": "只发送一次", "next": "下一任务或返工任务", "continue": "虚线：中途停止后继续一次",
            "legend_agent": "AI Agent（任意客户端）", "legend_tool": "本仓库中的脚本",
+           "owner": ("Owner 通道", ["聊天机器人、Webhook 或文件", "可选"]),
+           "notify": ("owner_notify.py", ["提示、失败、久等", "推送给 Owner 一次"]),
+           "intake": ("owner_intake.py", ["签名请求，只提示编号", "是资料，不是授权"]),
+           "alerts": "提醒", "requests": "请求", "hint": "空闲时只提示编号",
            "overview": "工作流概览"},
 }
 
@@ -104,8 +112,16 @@ def overview(lang):
             arrow([(745, 130), (745, 188)]), arrow([(600, 242), (542, 242)]), arrow([(320, 242), (262, 242)]),
             arrow([(200, 190), (200, 166), (390, 166), (390, 132)], dashed=True),
             text(295, 160, t["next"], 11.5, "m"),
-            legend(328, lang)]
-    return svg(920, 346, t["overview"], body)
+            # Optional Owner channel: alerts go out, signed requests come in as data for the Planner.
+            box(320, 340, 220, 90, *t["notify"], cls="tool", mono_title=True),
+            box(30, 340, 230, 90, *t["owner"], cls="chip"),
+            box(600, 340, 290, 90, *t["intake"], cls="tool", mono_title=True),
+            arrow([(430, 294), (430, 338)], dashed=True),
+            arrow([(320, 385), (262, 385)], dashed=True), text(291, 377, t["alerts"], 11.5, "m"),
+            arrow([(145, 430), (145, 452), (745, 452), (745, 432)], dashed=True), text(445, 446, t["requests"], 11.5, "m"),
+            arrow([(890, 385), (906, 385), (906, 22), (390, 22), (390, 38)], dashed=True), text(650, 17, t["hint"], 11.5, "m"),
+            legend(486, lang)]
+    return svg(920, 504, t["overview"], body)
 def terminal(demo_line, status_lines):
     # Real captured output; a terminal stays dark in both page themes.
     lines = [("$ ", "python -B scripts/demo_scheduler.py --directory runtime/first-run")]
@@ -157,20 +173,20 @@ def dag(lang):
     return svg(780, 262, t["title"], body)
 S = {"en": {"title": "Task lifecycle",
             "steps": [("ready", ["dependencies met"]), ("execution_unconfirmed", ["sent once, never resent"]),
-                      ("executing", ["start confirmed", "by reconcile"]), ("awaiting_review", ["review_ready:", "files + nonce valid"]),
+                      ("executing", ["start confirmed", "confirm-start / reconcile"]), ("awaiting_review", ["review_ready:", "files + nonce valid"]),
                       ("accepted", ["review recorded", "dependents unlocked"])],
             "e1": ("needs_inspection", ["stop, prompt or outage:", "watched; continue or close"]),
             "e2": ("review_blocked", ["reject or repair:", "plan a new scoped task"]),
             "e3": ("evidence_changed", ["accepted files changed:", "dependents stay blocked"]),
-            "dispatch": "dispatch", "reconcile": "reconcile", "monitor": "monitor", "review": "review"},
+            "dispatch": "dispatch", "reconcile": "confirm-start", "monitor": "monitor", "review": "settle"},
      "zh": {"title": "任务生命周期",
             "steps": [("ready", ["依赖已满足"]), ("execution_unconfirmed", ["只发送一次，不重发"]),
-                      ("executing", ["reconcile 确认", "已开始执行"]), ("awaiting_review", ["review_ready：", "文件与 nonce 有效"]),
+                      ("executing", ["已确认开始执行", "confirm-start / reconcile"]), ("awaiting_review", ["review_ready：", "文件与 nonce 有效"]),
                       ("accepted", ["审核已记录", "解锁下游任务"])],
             "e1": ("needs_inspection", ["停止、提示或中断：", "继续观察；继续一次或关闭"]),
             "e2": ("review_blocked", ["reject 或 repair：", "新建限定范围任务"]),
             "e3": ("evidence_changed", ["已通过的文件被改动：", "下游保持阻塞"]),
-            "dispatch": "dispatch", "reconcile": "reconcile", "monitor": "monitor", "review": "review"}}
+            "dispatch": "dispatch", "reconcile": "confirm-start", "monitor": "monitor", "review": "settle"}}
 
 
 def lifecycle(lang):
