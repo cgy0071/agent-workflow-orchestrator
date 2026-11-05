@@ -133,7 +133,7 @@ python scripts/workflow_control.py --state /abs/state bind --role planner --spec
 python scripts/workflow_control.py --state /abs/state bind --role executor --spec worker.json --mode worker
 ```
 
-`bind` queries the live session and refuses a mismatched identity. Save the controller `instance_id` and `version` it prints; later commands pass them as `--actor` and `--version`. With Herdr, the bound pane is also named `awo:<role>` so you can see which pane is which; a name you set yourself is kept. `workflow_control.py --state /abs/state roles` shows every role's pane and whether its identity still matches.
+`bind` queries the live session and refuses a mismatched identity. Save the controller `instance_id` and `version` it prints; later commands pass them as `--actor` and `--version`. With Herdr, the bound pane is also named `awo:<role>` so you can see which pane is which; a name you set yourself is kept. `workflow_control.py --state /abs/state roles` shows every role's pane and whether its identity still matches. One agent cannot hold both the worker role and the controller or reviewer role: `bind` and `activate` refuse it, and recording a review refuses a reviewer that is the task's own worker.
 
 ### 4. Write the task and its request
 
@@ -221,11 +221,13 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 - **Done means reviewed.** An idle terminal, a zero exit code, or `review_ready` never counts as acceptance. Only a recorded review does.
 - **No blind retries.** Each task is sent once. If a send or notification is uncertain, it is recorded and left for inspection. A `continue` for a stopped task is bounded, journaled, and never retried.
 - **Pauses are not endings.** A worker that stops early or waits on a prompt keeps its monitor; a pause cannot be reviewed while the task is open, and approval prompts are never answered automatically.
+- **No self-review.** The same agent cannot be both a task's worker and its reviewer, including in older ledgers.
 - **One controller.** Old bindings lose authority after a switch. Side conversations can advise but cannot acknowledge, review, or dispatch.
 - **Stopping the monitor does not stop the worker.** Cancel work separately.
 - **Context flags are trusted input.** `--context main` is declared by the operator or a bridge; it is not authentication.
 - **Live compatibility is not assumed.** Verify each real client's identity, status, and delivery interface the first time you use it. If an interface cannot be verified, report `ADAPTER_NOT_VERIFIED` instead of guessing.
-- Keep credentials out of tasks, command arguments, and the repository.
+- **Task IDs and nonces are plain.** New registrations accept only letters, digits and `._-`, because both are pasted into worker and reviewer messages.
+- Keep credentials out of tasks, command arguments, and the repository. Owner notification webhook URLs live only in environment variables.
 
 ## More guides
 
@@ -241,7 +243,7 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 | Task and review templates | [task-and-review.md](references/task-and-review.md) |
 | Versioned client capability evidence | [capabilities.md](references/capabilities.md) |
 
-**Without Herdr:** a client with a verified one-shot (non-interactive) command can run through `scripts/run_job.py --job job.json` (see [examples/job.json](examples/job.json)). The runner records status, the real exit code, and `output.log` for the `receipt` adapter. Interactive TUIs need a verified bridge instead.
+**Without Herdr:** a client with a verified one-shot (non-interactive) command can run through `scripts/run_job.py --job job.json` (see [examples/job.json](examples/job.json)). The runner records status, the real exit code, and `output.log` for the `receipt` adapter. Interactive TUIs need a verified bridge instead. If a native bridge runner dies before it records an outcome, the bridge reports `exited` instead of waiting forever; clear the leftovers explicitly with `native_worker.py release-lock` or `release`, each with a `--reason`. Releasing never kills a process or closes the task in the ledger. See [harness-adapters.md](references/harness-adapters.md).
 
 ## Development
 
@@ -254,13 +256,18 @@ SKILL.md / SKILL.zh-CN.md          Instructions loaded by the agent
 README.md / README.zh-CN.md        This guide
 agents/openai.yaml                 Skill UI metadata
 references/                        Detailed guides and contracts
-examples/                          workflow.json, request.herdr.json, dag.json, job.json
+examples/                          workflow.json, request.herdr.json, dag.json, job.json, notify.json
 docs/images/                       README images
-scripts/workflow_control.py        State, bindings, pane names, inbox, review gates, status
-scripts/workflow_scheduler.py      Dispatch, bounded continuation, DAGs, resource claims
-scripts/monitor_task.py            Status polling, stall reports, and one-time notification
+scripts/workflow_control.py        State, bindings, pane names, inbox, review gates, settle, history
+scripts/workflow_scheduler.py      Dispatch, confirm-start, follow-up, bounded continuation, DAGs, claims
+scripts/monitor_task.py            Status polling, stall causes, worker result blocks, one-time notification
+scripts/workflow_status.py         Read-only phases, alerts, statistics, task history
+scripts/owner_notify.py            Optional Owner push alerts with its own outbox
 scripts/run_job.py                 One-shot CLI jobs with receipts
+scripts/native_worker.py           Native one-shot and session bridge (Codex, Pi, OMP)
+scripts/process_util.py            Cross-platform process liveness check
 scripts/demo_scheduler.py          Offline demo
-scripts/dashboard.py               Local ledger dashboard with optional dispatch, review, and chat
+scripts/dashboard.py               Local ledger dashboard with optional dispatch, review, chat, management
+scripts/dashboard_actions.py       Dashboard management actions (preview, then confirm once)
 dashboard.cmd / dashboard.command  Double-click launchers for the dashboard
 ```
