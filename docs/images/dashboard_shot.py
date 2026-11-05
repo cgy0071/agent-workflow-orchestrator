@@ -1,4 +1,4 @@
-"""Regenerate docs/images/dashboard-overview.png. Run from the repository root.
+"""Regenerate docs/images/dashboard-overview.png and dashboard-manage.png. Run from the repository root.
 
 The offline demo is extended with a short repair chain (one task stopped before delivery,
 one waiting for review) and a few older finished tasks, so the picture shows the follow-up
@@ -176,25 +176,17 @@ def build_ledger(root):
                 value = json.loads(data)
                 value["created_at"] = (now - ago + timedelta(minutes=2 * len(rows))).isoformat()
                 con.execute("UPDATE events SET data=? WHERE id=?", (json.dumps(value), event_id))
-    return state
+    return state, who
 
 
-def main():
-    browser = next((p for p in BROWSERS if Path(p).is_file()), None)
-    if not browser:
-        sys.exit("Edge or Chrome is required")
-    root = Path(tempfile.mkdtemp(prefix="dashboard-shot-"))
-    server = proc = None
+def capture(browser, root, server, target, prepare, bottom_js, name):
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    proc = subprocess.Popen([browser, "--headless=new", "--disable-gpu", "--remote-debugging-port=%d" % port,
+                             "--force-color-profile=srgb", "--user-data-dir=" + str(root / ("profile-" + name)), "about:blank"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        state = build_ledger(root)
-        server = dashboard.DashboardServer(("127.0.0.1", 0), state, recent_file=root / "recent.json")
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        with socket.socket() as probe:
-            probe.bind(("127.0.0.1", 0))
-            port = probe.getsockname()[1]
-        proc = subprocess.Popen([browser, "--headless=new", "--disable-gpu", "--remote-debugging-port=%d" % port,
-                                 "--force-color-profile=srgb", "--user-data-dir=" + str(root / "profile"), "about:blank"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             try:
                 pages = json.load(urllib.request.urlopen("http://127.0.0.1:%d/json" % port))
@@ -210,24 +202,52 @@ def main():
         time.sleep(3)
         # The state lives in a temporary folder; show the path a reader of the README would use.
         tools.call("Runtime.evaluate", expression="document.getElementById('state').textContent = 'runtime/first-run/state'")
-        # Show the follow-up chain as a graph, the view the README describes.
-        tools.call("Runtime.evaluate", expression=(
-            "[...document.querySelectorAll('.chain-actions button')].filter(b => b.textContent === 'Show as graph')"
-            ".forEach(b => b.click())"))
-        time.sleep(0.5)
-        bottom = tools.call("Runtime.evaluate", returnByValue=True, expression=(
-            "Math.round(Math.max(...[...document.querySelectorAll('#inbox, #alerts')]"
-            ".map(e => e.closest('section').getBoundingClientRect().bottom)) + scrollY + 16)"))["result"]["value"]
+        for expression in prepare:
+            tools.call("Runtime.evaluate", expression=expression)
+            time.sleep(1)
+        top, bottom = tools.call("Runtime.evaluate", returnByValue=True, expression=bottom_js)["result"]["value"]
         shot = tools.call("Page.captureScreenshot", format="png", captureBeyondViewport=True,
-                          clip={"x": 0, "y": 0, "width": 1280, "height": bottom, "scale": 1})
-        target = REPO / "docs" / "images" / "dashboard-overview.png"
+                          clip={"x": 0, "y": top, "width": 1280, "height": bottom - top, "scale": 1})
         target.write_bytes(base64.b64decode(shot["data"]))
-        print("wrote", target.relative_to(REPO), "height", bottom)
+        print("wrote", target.relative_to(REPO), "height", bottom - top)
     finally:
-        if proc:
-            proc.terminate()
-            proc.wait(timeout=10)
-        if server:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+
+def main():
+    browser = next((p for p in BROWSERS if Path(p).is_file()), None)
+    if not browser:
+        sys.exit("Edge or Chrome is required")
+    root = Path(tempfile.mkdtemp(prefix="dashboard-shot-"))
+    servers = []
+    try:
+        state, who = build_ledger(root)
+        images = REPO / "docs" / "images"
+        overview = dashboard.DashboardServer(("127.0.0.1", 0), state, recent_file=root / "recent.json")
+        servers.append(overview)
+        threading.Thread(target=overview.serve_forever, daemon=True).start()
+        # Show the follow-up chain as a graph, the view the README describes.
+        capture(browser, root, overview, images / "dashboard-overview.png",
+                ["[...document.querySelectorAll('.chain-actions button')].filter(b => b.textContent === 'Show as graph')"
+                 ".forEach(b => b.click())"],
+                "[0, Math.round(Math.max(...[...document.querySelectorAll('#inbox, #alerts')]"
+                ".map(e => e.closest('section').getBoundingClientRect().bottom)) + scrollY + 16)]", "overview")
+        # Management console: statistics loaded on request, settings form and agent assignment.
+        tasks = root / "work"
+        manage = dashboard.DashboardServer(("127.0.0.1", 0), state, recent_file=root / "recent.json", allow_manage=True,
+                                           actor=who[0], version=who[1], context="main", tasks_root=tasks)
+        servers.append(manage)
+        threading.Thread(target=manage.serve_forever, daemon=True).start()
+        capture(browser, root, manage, images / "dashboard-manage.png",
+                ["document.getElementById('metrics-load').click()",
+                 "document.getElementById('metrics-panel').scrollIntoView()"],
+                "(() => { const r = s => document.getElementById(s).getBoundingClientRect();"
+                " const top = Math.round(r('metrics-panel').top + scrollY - 16);"
+                " const end = Math.round(Math.max(r('manage-settings').bottom, r('manage-panes').bottom) + scrollY + 16);"
+                " return [top, end]; })()", "manage")
+    finally:
+        for server in servers:
             server.shutdown()
             server.server_close()
         shutil.rmtree(root, ignore_errors=True)

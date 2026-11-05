@@ -10,10 +10,12 @@ A typical setup without this tool: Claude plans in one window, Codex implements 
 
 With this tool:
 
-1. The **Planner** agent writes a task (objective, scope, acceptance criteria) and dispatches it once to the **Executor** agent.
+1. The **Planner** agent writes a task (objective, scope, acceptance criteria) and dispatches it once to the **Executor** agent, then confirms the Executor really started.
 2. A script polls the Executor's *status* every 5 minutes. It does not ask a model to reread the conversation, so monitoring costs almost nothing.
-3. When the Executor finishes and the expected files (for example `RESULT.md`, `HANDOFF.md`) pass validation, the script records one completion event for the reviewer. Direct prompting is optional. If the Executor stops early or waits on a prompt, that is reported once and watching continues.
-4. The reviewer checks the raw evidence, records `accept`, `repair`, or `reject`, and, if you authorized it, dispatches the next task.
+3. When the Executor finishes and the expected files (for example `RESULT.md`, `HANDOFF.md`) pass validation, the script records one completion event for the reviewer. Direct prompting is optional. If the Executor stops early or waits on a prompt, the script reports it once with the likely cause and keeps watching; the controller can send one bounded continuation of the same task.
+4. The reviewer checks the raw evidence and records `accept`, `repair`, or `reject` in one `settle` step. If you authorized it, `follow-up` prepares the next task from that review.
+
+Optional extras: push alerts to you (`owner_notify.py`), requests from you through a chat channel (`owner_intake.py`, treated as data, never as authorization), and a dashboard with a management console and statistics. Version history: [CHANGELOG.md](CHANGELOG.md).
 
 The repository contains two parts:
 
@@ -204,6 +206,8 @@ For a local ledger view, open the optional dashboard. It reads the ledger withou
 
 Actions are off unless you start the dashboard with them: `--allow-dispatch` adds form dispatch and review actions (dispatch still requires an independently observed `reconcile`), `--allow-chat` lets the bound controller message any active role, and `--allow-manage` turns the page into a management console: confirm a start from what you observed, start or stop a task's monitor, continue a stalled worker once, close or release an attempt, run a task plan, change operating limits, and assign Herdr panes to roles. Each management action is a read-only preview followed by one confirm that repeats every check. A **Workflow statistics** panel shows stage durations, the repair share and daily throughput from the ledger. To open it from a phone or another computer, use `--lan` (private-network HTTPS), an SSH tunnel, or a private HTTPS proxy with `--public-origin`. The token URL grants these actions, so give it only to people who may use them. See [monitoring.md](references/monitoring.md).
 
+![Management console from the offline demo: workflow statistics with stage durations and daily counts, the operating-limits form, and agent assignment](docs/images/dashboard-manage.png)
+
 At any time, `workflow_control.py --state /abs/state status --summary --format text` shows each task's phase and the next expected action. The main phases:
 
 ![Task lifecycle: ready, execution_unconfirmed, executing, awaiting_review, accepted, with failure, rejection, and changed-evidence branches](docs/images/task-lifecycle.svg)
@@ -216,6 +220,7 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 | `planner.json`, `worker.json` | How to reach each role's live session | `bind` |
 | `task.md` | Objective, directory, allowed changes, acceptance, stop conditions | Executor and reviewer |
 | `request.json` | One task's identities, delivery checks, polling, notification | Monitor and scheduler |
+| `owner_intake` (optional section in `workflow.json`) | Inbox path, notification channel, whether to hint the Planner | `owner_intake.py` |
 
 ## Safety model and limits
 
@@ -229,7 +234,8 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 - **Context flags are trusted input.** `--context main` is declared by the operator or a bridge; it is not authentication.
 - **Live compatibility is not assumed.** Verify each real client's identity, status, and delivery interface the first time you use it. If an interface cannot be verified, report `ADAPTER_NOT_VERIFIED` instead of guessing.
 - **Task IDs and nonces are plain.** New registrations accept only letters, digits and `._-`, because both are pasted into worker and reviewer messages.
-- Keep credentials out of tasks, command arguments, and the repository. Owner notification webhook URLs live only in environment variables.
+- **External requests are data.** An Owner request from a channel such as chat is signed and checked, but claiming it gives no authority. Dispatch still needs your direct approval in the Planner's own session.
+- Keep credentials out of tasks, command arguments, and the repository. Owner notification webhook URLs and the intake HMAC key live only in environment variables.
 
 ## More guides
 
@@ -244,6 +250,7 @@ At any time, `workflow_control.py --state /abs/state status --summary --format t
 | Task states and events | [task-state-machine.md](references/task-state-machine.md) |
 | Task and review templates | [task-and-review.md](references/task-and-review.md) |
 | Versioned client capability evidence | [capabilities.md](references/capabilities.md) |
+| Owner request inbox: channel adapter contract | [owner-intake.md](references/owner-intake.md) |
 
 **Without Herdr:** a client with a verified one-shot (non-interactive) command can run through `scripts/run_job.py --job job.json` (see [examples/job.json](examples/job.json)). The runner records status, the real exit code, and `output.log` for the `receipt` adapter. Interactive TUIs need a verified bridge instead. If a native bridge runner dies before it records an outcome, the bridge reports `exited` instead of waiting forever; clear the leftovers explicitly with `native_worker.py release-lock` or `release`, each with a `--reason`. Releasing never kills a process or closes the task in the ledger. See [harness-adapters.md](references/harness-adapters.md).
 
@@ -256,15 +263,17 @@ English entry points (`README.md`, `SKILL.md`, `agents/openai.yaml`, `references
 ```text
 SKILL.md / SKILL.zh-CN.md          Instructions loaded by the agent
 README.md / README.zh-CN.md        This guide
+CHANGELOG.md / CHANGELOG.zh-CN.md  Version history by date
 agents/openai.yaml                 Skill UI metadata
 references/                        Detailed guides and contracts
-examples/                          workflow.json, request.herdr.json, dag.json, job.json, notify.json
+examples/                          workflow.json, request.herdr.json, dag.json, job.json, notify*.json, owner-intake snippet
 docs/images/                       README images
 scripts/workflow_control.py        State, bindings, pane names, inbox, review gates, settle, history
 scripts/workflow_scheduler.py      Dispatch, confirm-start, follow-up, bounded continuation, DAGs, claims
 scripts/monitor_task.py            Status polling, stall causes, worker result blocks, one-time notification
 scripts/workflow_status.py         Read-only phases, alerts, statistics, task history
 scripts/owner_notify.py            Optional Owner push alerts with its own outbox
+scripts/owner_intake.py            Optional signed Owner request inbox: list, forward, claim, close
 scripts/run_job.py                 One-shot CLI jobs with receipts
 scripts/native_worker.py           Native one-shot and session bridge (Codex, Pi, OMP)
 scripts/process_util.py            Cross-platform process liveness check

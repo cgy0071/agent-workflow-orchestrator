@@ -10,10 +10,12 @@
 
 使用本工具后：
 
-1. **Planner** Agent 写好任务（目标、范围、验收标准），向 **Executor** Agent 只派发一次。
+1. **Planner** Agent 写好任务（目标、范围、验收标准），向 **Executor** Agent 只派发一次，再确认 Executor 确实已开始执行。
 2. 脚本每 5 分钟查询一次 Executor 的*状态*。它不会让模型反复重读对话，所以监控几乎不消耗成本。
-3. Executor 完成且约定的交付文件（如 `RESULT.md`、`HANDOFF.md`）通过校验后，脚本为审核者记录一次完成事件；直接发送提示是可选的。Executor 提前停止或停在提示上时，也会报告一次并继续观察。
-4. 审核者检查原始证据，记录 `accept`、`repair` 或 `reject`；如果你已授权，再派发下一个任务。
+3. Executor 完成且约定的交付文件（如 `RESULT.md`、`HANDOFF.md`）通过校验后，脚本为审核者记录一次完成事件；直接发送提示是可选的。Executor 提前停止或停在提示上时，脚本报告一次并给出可能的原因，然后继续观察；控制者可以让同一任务有限次地继续一次。
+4. 审核者检查原始证据，用一步 `settle` 记录 `accept`、`repair` 或 `reject`。如果你已授权，`follow-up` 会根据这次审核准备下一个任务。
+
+可选功能：把提醒推送给你（`owner_notify.py`）；通过聊天通道接收你的请求（`owner_intake.py`，请求只是资料，不是授权）；带管理台和统计的状态面板。版本变化见 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
 
 仓库由两部分组成：
 
@@ -204,6 +206,8 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 
 操作功能默认关闭，需要在启动时开启：`--allow-dispatch` 开启表单派发和审核操作（派发后仍须独立观察执行并运行 `reconcile`），`--allow-chat` 让已绑定的控制者给任意有效角色发消息，`--allow-manage` 把页面变成管理台：根据观察确认开始执行、启动或停止任务监控、让停顿的 Worker 继续一次、关闭或释放一次执行、运行任务计划、修改运行限制，以及把 Herdr 窗格分配给角色。每项管理操作都先只读预览，再一次性确认，确认时重新执行全部检查。**工作流统计**面板根据台账显示各阶段耗时、返修比例和每日吞吐。要从手机或其他电脑打开，可使用 `--lan`（私有网络 HTTPS）、SSH 隧道，或配合 `--public-origin` 的私有 HTTPS 代理。带令牌的地址就代表这些操作权限，只交给可以使用它们的人。详见 [monitoring.zh-CN.md](references/monitoring.zh-CN.md)。
 
+![离线演示中的管理台：工作流统计（各阶段耗时和每日数量）、运行限制设置和 Agent 分配](docs/images/dashboard-manage.png)
+
 任何时候都可以用 `workflow_control.py --state /abs/state status --summary --format text` 查看各任务所处阶段和下一步动作。主要阶段如下：
 
 ![任务生命周期：ready、execution_unconfirmed、executing、awaiting_review、accepted，以及失败、驳回和证据变化分支](docs/images/task-lifecycle.zh-CN.svg)
@@ -216,6 +220,7 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 | `planner.json`、`worker.json` | 如何连接各角色的实时会话 | `bind` |
 | `task.md` | 目标、目录、允许的改动、验收、停止条件 | Executor 和审核者 |
 | `request.json` | 单个任务的身份、交付检查、轮询、通知 | 监控脚本和调度器 |
+| `owner_intake`（`workflow.json` 中的可选一节） | 收件目录、通知通道、是否提示 Planner | `owner_intake.py` |
 
 ## 安全模型与限制
 
@@ -229,7 +234,8 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 - **上下文标志是受信输入。** `--context main` 由操作者或桥接程序声明，不是身份认证。
 - **不预设真实客户端兼容。** 首次使用某个真实客户端时，需核验其身份、状态和投递接口。无法核验时报告 `ADAPTER_NOT_VERIFIED`，不要猜测。
 - **任务 ID 和 nonce 只用普通字符。** 新登记的任务只接受字母、数字和 `._-`，因为两者都会拼进发给 Worker 和审核者的消息。
-- 不要把凭证写入任务、命令参数或仓库。通知 Owner 用的 Webhook 网址只放在环境变量里。
+- **外部请求只是资料。** 从聊天等通道来的 Owner 请求经过签名和校验，但认领它不带来任何权限；派发仍需你在 Planner 自己的会话里直接同意。
+- 不要把凭证写入任务、命令参数或仓库。通知 Owner 用的 Webhook 网址和收件 HMAC 密钥只放在环境变量里。
 
 ## 更多指南
 
@@ -244,6 +250,7 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 | 任务状态与事件 | [task-state-machine.zh-CN.md](references/task-state-machine.zh-CN.md) |
 | 任务与审核模板 | [task-and-review.zh-CN.md](references/task-and-review.zh-CN.md) |
 | 带版本的客户端能力证据 | [capabilities.zh-CN.md](references/capabilities.zh-CN.md) |
+| Owner 请求收件：通道适配器约定 | [owner-intake.zh-CN.md](references/owner-intake.zh-CN.md) |
 
 **不使用 Herdr 时：** 具备经核验的一次性（非交互）命令的客户端，可以通过 `scripts/run_job.py --job job.json` 运行（参见 [examples/job.json](examples/job.json)）。运行器会记录状态、真实退出码和 `output.log`，供 `receipt` 适配器使用。交互式 TUI 则需要经核验的桥接程序。原生桥的 runner 在记录结局之前死掉时，桥会报告 `exited`，不再一直等待；残留文件用 `native_worker.py release-lock` 或 `release` 显式清理，两者都要写 `--reason`。释放不会终止进程，也不会关闭台账中的任务。详见 [harness-adapters.zh-CN.md](references/harness-adapters.zh-CN.md)。
 
@@ -256,15 +263,17 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 ```text
 SKILL.md / SKILL.zh-CN.md          Agent 加载的指令
 README.md / README.zh-CN.md        本指南
+CHANGELOG.md / CHANGELOG.zh-CN.md  按日期的版本更新记录
 agents/openai.yaml                 Skill 界面元数据
 references/                        详细指南与约定
-examples/                          workflow.json、request.herdr.json、dag.json、job.json、notify.json
+examples/                          workflow.json、request.herdr.json、dag.json、job.json、notify*.json、owner-intake 配置片段
 docs/images/                       README 配图
 scripts/workflow_control.py        状态、绑定、窗格名称、收件箱、审核关卡、一步结案、任务时间线
 scripts/workflow_scheduler.py      派发、确认开始、生成后续任务、受限继续、DAG、资源占用
 scripts/monitor_task.py            状态轮询、停顿原因、Worker 结果块、一次性通知
 scripts/workflow_status.py         只读的任务阶段、告警、统计和时间线
 scripts/owner_notify.py            可选的 Owner 推送提醒，使用独立发件箱
+scripts/owner_intake.py            可选的签名 Owner 请求收件：list、forward、claim、close
 scripts/run_job.py                 带回执的一次性 CLI 作业
 scripts/native_worker.py           原生一次性与会话桥接（Codex、Pi、OMP）
 scripts/process_util.py            跨平台进程存活检查
