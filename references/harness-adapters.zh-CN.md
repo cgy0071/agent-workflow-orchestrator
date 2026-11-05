@@ -27,6 +27,24 @@ transport: herdr | command | receipt
 
 只有交互 TUI、无官方状态/完成事件时，需要已经验证的 TUI 插件或受控外层桥接；在其就绪前标 `ADAPTER_NOT_VERIFIED`。不要通过盲目键盘注入、回答批准对话框或更改配置来补“兼容性”。
 
+## 原生桥崩溃残留
+
+可选的 `native_worker.py` 命令桥在 `active.json` 记录 runner PID，`run_job.py` 首次写回执时记录自身 PID。runner 未写 `outcome.json` 就退出时，状态为 `exited`，附 `exit_reason: runner_gone` 和作业目录。旧的活动记录没有 runner PID 时仍显示 `working`，需人工核查。Windows 存活检查使用 `OpenProcess` 和 `GetExitCodeProcess`，绝不用 `os.kill(pid, 0)`；PID 可能复用，因此只有明确返回“不存活”才能证明记录的 PID 已结束。
+
+发送进程崩溃留下 `send.lock` 时，先核查其 PID，再显式清除已确认死亡的锁：
+
+```sh
+python scripts/native_worker.py --worker /absolute/native-worker release-lock --reason "verified sender exited"
+```
+
+检查作业后，仅在已有 `outcome.json` 或确认 runner 已结束时释放桥的占用：
+
+```sh
+python scripts/native_worker.py --worker /absolute/native-worker release --reason "inspected failed job"
+```
+
+后一个命令把活动记录归档到作业目录的 `released.json`。两个命令都不会结束进程或重发任务。**释放桥不等于关闭台账任务**：控制者仍须按原流程用 `reconcile --outcome terminated` 登记终止证据，或通过独立审核关闭任务。
+
 ## Command 适配的规范响应
 
 Worker 的 `status_argv` 返回 JSON：

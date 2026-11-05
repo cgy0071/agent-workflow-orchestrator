@@ -11,6 +11,17 @@ import re
 import sqlite3
 import uuid
 
+TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
+TASK_NONCE = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
+
+
+def valid_task_id(value):
+    return isinstance(value, str) and bool(TASK_ID.fullmatch(value)) and value not in (".", "..")
+
+
+def valid_task_nonce(value):
+    return isinstance(value, str) and bool(TASK_NONCE.fullmatch(value))
+
 
 def stamp():
     return datetime.now(timezone.utc).isoformat()
@@ -504,6 +515,12 @@ def register_task(state, request, actor, version, context, *, reservation=None):
             if old[0] != digest(request):
                 raise ValueError("task ID reused with different inputs")
             return {"status": "ALREADY_REGISTERED"}
+        if not valid_task_id(request["task_id"]):
+            raise ValueError("invalid task ID for new registration")
+        if not valid_task_nonce(request["nonce"]):
+            raise ValueError("invalid nonce for new registration")
+        if request.get("parent_task") is not None and not valid_task_id(request["parent_task"]):
+            raise ValueError("invalid parent task ID for new registration")
         if con.execute("SELECT count(*) FROM tasks WHERE worker=? AND status='running'", (worker_role,)).fetchone()[0]:
             raise ValueError("role already has an active or uncertain task")
         # Like a packet TTL: a run of repairs stops for an Owner decision instead of narrowing forever.

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -37,6 +38,7 @@ class CompletionTests(unittest.TestCase):
     def test_zero_exit_pi_error_fails_receipt_without_advancing_sequence(self):
         job = self.job(PI_ERROR, "pi")
         receipt = run_job.run(job)
+        self.assertEqual(receipt["runner_pid"], os.getpid())
         self.assertEqual((receipt["status"], receipt["completion_seq"], receipt["returncode"]), ("failed", 0, 0))
         self.assertEqual(receipt["process_status"], "clean_exit")
         self.assertEqual(receipt["native_turn"]["provider"], "fixture-provider")
@@ -150,6 +152,41 @@ class CompletionTests(unittest.TestCase):
         (worker / "sessions" / ("2026-01-01T00-00-05-000Z_" + session + ".jsonl")).write_text("{}\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "found 2"):
             native_worker.argv_for(config, {"prompt": "third"}, worker)
+
+    def test_codex_session_resumes_saved_thread_across_tasks(self):
+        worker = self.root / "codex-session"
+        native_worker.initialize(worker, "codex", sys.executable, mode="session")
+        fake = self.root / "fake_codex.py"
+        fake.write_text(
+            "import json, pathlib, sys\n"
+            "args = sys.argv[1:]\n"
+            "pathlib.Path(__file__).with_name(args[-1] + '.argv').write_text(json.dumps(args))\n"
+            "if args[-1] == 'second' and args[:3] != ['exec', 'resume', 'fixture-thread']:\n"
+            "    sys.exit(8)\n"
+            "for event in " + repr(CODEX) + ":\n"
+            "    print(json.dumps(event), flush=True)\n", encoding="ascii")
+        config = read_json(worker / "config.json")
+        config["argv_prefix"] = [sys.executable, str(fake)]
+        save_json(worker / "config.json", config)
+        for name in ("first", "second"):
+            cwd = self.root / ("codex-" + name)
+            cwd.mkdir()
+            payload = {"task_id": "CODEX-" + name, "nonce": "nonce-" + name, "cwd": str(cwd),
+                       "prompt": name, "authorization": {"source": "offline fixture",
+                                                          "terminate_on_timeout": True}}
+            result = native_worker.send(worker, payload)
+            self.assertEqual(result["status"], "submitted")
+            self.assertEqual(read_json(worker / "active.json")["runner_pid"], result["runner_pid"])
+            for _ in range(100):
+                state = native_worker.status(worker)
+                if state["status"] != "working":
+                    break
+                time.sleep(.05)
+            self.assertEqual(state["status"], "idle", state)
+            self.assertEqual(read_json(worker / "config.json")["native_session_id"], "fixture-thread")
+            self.assertEqual((cwd / "RESULT.md").read_text(encoding="utf-8").strip(), "323")
+        second = json.loads((self.root / "second.argv").read_text(encoding="utf-8"))
+        self.assertEqual(second[:3], ["exec", "resume", "fixture-thread"])
 
     def test_unresolvable_pi_session_rejects_send_without_job_directory(self):
         worker = self.root / "pi-missing"

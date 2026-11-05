@@ -56,6 +56,7 @@ def run(job):
     directory.mkdir(parents=True, exist_ok=False)
     state = {"task_id": job["task_id"], "nonce": job["nonce"], "identity": job["identity"],
              "status": "working", "completion_seq": 0, "argv": argv, "cwd": job["cwd"],
+             "runner_pid": os.getpid(),
              "started_at": datetime.now(timezone.utc).isoformat(),
              "harness_version": job.get("harness_version"),
              "output_path": str(directory / "output.log"), "stderr_path": str(directory / "stderr.log")}

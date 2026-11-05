@@ -1,5 +1,6 @@
 """Command/Receipt bridge for native CLI jobs. No Herdr dependency or session guessing."""
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import uuid
 
 from monitor_task import read_json, save_json
 from native_events import extract
+from process_util import pid_alive
 import run_job
 from workflow_evidence import task_key
 
@@ -93,6 +95,8 @@ def status(directory):
             result.update(status="idle" if outcome["status"] == "done" else outcome["status"],
                           completion_seq=active["baseline"] + (1 if outcome["status"] == "done" else 0),
                           native_session_id=outcome.get("native_session_id"))
+        elif type(active.get("runner_pid")) is int and active["runner_pid"] > 0 and pid_alive(active["runner_pid"]) is False:
+            result.update(status="exited", exit_reason="runner_gone", job_directory=str(job))
     return result
 
 
@@ -143,7 +147,15 @@ def send(directory, payload):
     if payload.get("authorization", {}).get("source") is None:
         raise ValueError("native job needs explicit authorization source")
     lock = root / "send.lock"
-    with lock.open("x", encoding="ascii") as stream: stream.write(str(os.getpid()))
+    try:
+        with lock.open("x", encoding="ascii") as stream:
+            json.dump({"pid": os.getpid(), "created_at": datetime.now(timezone.utc).isoformat()}, stream)
+    except FileExistsError:
+        owner = lock_pid(lock)
+        if owner and pid_alive(owner) is False:
+            raise ValueError("send lock left by exited process " + str(owner) +
+                             "; use release-lock to inspect and clear it") from None
+        raise ValueError("another send is in progress or its lock cannot be verified") from None
     try:
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
@@ -164,9 +176,67 @@ def send(directory, payload):
             proc = subprocess.Popen([sys.executable, "-B", str(Path(__file__).resolve()), "--worker", str(root),
                                      "run", "--job", str(directory / "job.json")], stdout=log, stderr=log,
                                     creationflags=0x08000000 if os.name == "nt" else 0)
+        save_json(root / "active.json", {"task_id": payload["task_id"], "nonce": payload["nonce"],
+                                       "directory": str(directory), "baseline": current["completion_seq"],
+                                       "runner_pid": proc.pid})
         return {"status": "submitted", "runner_pid": proc.pid}
     finally:
         lock.unlink(missing_ok=True)
+
+
+def lock_pid(path):
+    try:
+        raw = path.read_text(encoding="ascii").strip()
+        value = json.loads(raw)
+        pid = value.get("pid") if isinstance(value, dict) else value
+        return pid if type(pid) is int and pid > 0 else None
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def checked_reason(reason):
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+        raise ValueError("reason must contain 1 to 500 characters")
+    return reason.strip()
+
+
+def release_lock(directory, reason):
+    checked_reason(reason)
+    lock = Path(directory).resolve() / "send.lock"
+    if not lock.is_file():
+        raise ValueError("send lock does not exist")
+    pid = lock_pid(lock)
+    if pid is None or pid_alive(pid) is not False:
+        raise ValueError("send lock owner is still alive or cannot be confirmed exited")
+    lock.unlink()
+    return {"status": "lock_released", "pid": pid}
+
+
+def release(directory, reason):
+    reason = checked_reason(reason)
+    root = Path(directory).resolve()
+    if (root / "send.lock").exists():
+        raise ValueError("send lock is present; inspect it before releasing the active job")
+    active_path = root / "active.json"
+    if not active_path.is_file():
+        raise ValueError("no active native job")
+    active = read_json(active_path)
+    job = Path(active["directory"]).resolve()
+    if not job.is_relative_to(root / "jobs"):
+        raise ValueError("active job directory is outside the native worker")
+    outcome = job / "outcome.json"
+    pid = active.get("runner_pid")
+    if not outcome.is_file() and not (type(pid) is int and pid > 0 and pid_alive(pid) is False):
+        raise ValueError("active job has no outcome and runner exit is not confirmed")
+    released = job / "released.json"
+    if released.exists():
+        raise ValueError("released record already exists")
+    current = status(root)
+    active_path.rename(released)
+    save_json(released, dict(active, release_reason=reason,
+                             released_at=datetime.now(timezone.utc).isoformat(),
+                             released_status=current["status"]))
+    return {"status": "released", "job_directory": str(job)}
 
 
 def run(directory, job_path):
@@ -212,10 +282,14 @@ def main():
     sub.add_parser("status"); sub.add_parser("output")
     submit = sub.add_parser("send"); submit.add_argument("--message", required=True)
     execute = sub.add_parser("run"); execute.add_argument("--job", required=True)
+    unlock = sub.add_parser("release-lock"); unlock.add_argument("--reason", required=True)
+    free = sub.add_parser("release"); free.add_argument("--reason", required=True)
     args = parser.parse_args()
     if args.command == "status": result = status(args.worker)
     elif args.command == "send": result = send(args.worker, json.loads(args.message))
     elif args.command == "run": result = run(args.worker, args.job)
+    elif args.command == "release-lock": result = release_lock(args.worker, args.reason)
+    elif args.command == "release": result = release(args.worker, args.reason)
     else:
         active = read_json(Path(args.worker) / "active.json")
         print((Path(active["directory"]) / "receipt" / "output.log").read_text(encoding="utf-8", errors="replace"))

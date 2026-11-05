@@ -283,7 +283,7 @@ def _stall_cause(con, task, episode):
 def follow_up(state, parent_event, task_id, taskbook, *, actor, version, context,
               worker_role=None, cwd=None, source, transport=None, allow_long_chain=False):
     """Prepare a follow-up request and message without registering or sending it."""
-    if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", task_id) or task_id in (".", ".."):
+    if not control.valid_task_id(task_id):
         raise ValueError("invalid follow-up task ID")
     if not isinstance(source, str) or not source.strip():
         raise ValueError("authorization source is required")

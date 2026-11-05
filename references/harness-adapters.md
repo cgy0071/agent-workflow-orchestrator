@@ -25,6 +25,24 @@ Choose an interface based on verified capabilities:
 
 A TUI without official lifecycle events needs a verified plugin or controlled bridge. Until then, report ADAPTER_NOT_VERIFIED. Do not fill that gap with blind key injection, approval-dialog answers, or configuration changes.
 
+## Native bridge crash residue
+
+The optional `native_worker.py` command bridge records the runner PID in `active.json` and `run_job.py` records its own PID in the first receipt. If the runner exits before writing `outcome.json`, status reports `exited` with `exit_reason: runner_gone` and the job directory. An older active record without a runner PID remains `working` until inspected. Windows liveness checks use `OpenProcess` and `GetExitCodeProcess`, never `os.kill(pid, 0)`; PID reuse means only a confirmed negative result proves the recorded PID is gone.
+
+A crashed sender can leave `send.lock`. Inspect the owner PID, then explicitly clear only a confirmed-dead lock:
+
+```sh
+python scripts/native_worker.py --worker /absolute/native-worker release-lock --reason "verified sender exited"
+```
+
+After inspecting the job, release the bridge slot only if an `outcome.json` exists or the runner PID is confirmed gone:
+
+```sh
+python scripts/native_worker.py --worker /absolute/native-worker release --reason "inspected failed job"
+```
+
+The second command archives the old active record as the job's `released.json`. Neither command stops a process or resends a task. **Releasing the bridge does not close the ledger task**: the controller must separately use the existing `reconcile --outcome terminated` evidence flow or record an independent review closure.
+
 ## Command adapter response
 
 The Worker's status_argv returns:
