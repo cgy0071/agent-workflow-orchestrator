@@ -101,6 +101,30 @@ Start-Process -FilePath 'python.exe' -ArgumentList @(
 
 The dashboard shows pending, given-up, and last successful sends from the outbox without sending anything.
 
+## Owner intake
+
+Only enable intake when the Owner requests it. Add [this optional section](../examples/owner-intake.workflow-snippet.json) to the project's workflow config, or use the controller's `set-config` to add `owner_intake` to an initialized project. Set `AWO_INTAKE_HMAC_KEY` privately. The channel adapter writes a signed schema-1 JSON file into the inbox using a same-directory temporary file and rename; see the [channel-independent contract](owner-intake.md). The example [notification config](../examples/notify-qq.json) explicitly subscribes the selected channel to `intake_update`.
+
+```sh
+python scripts/owner_intake.py --state /absolute/state list
+python scripts/owner_intake.py --state /absolute/state forward --once
+python scripts/owner_intake.py --state /absolute/state forward --interval 30
+python scripts/owner_intake.py --state /absolute/state claim --request REQUEST-ID --actor INSTANCE --version 1 --context main
+python scripts/owner_intake.py --state /absolute/state close --request REQUEST-ID --outcome done --note "handled" --actor INSTANCE --version 1 --context main
+```
+
+`list` only reads. `forward` gives an identity-checked, idle Herdr Planner a short request-ID hint, never the request text or file path. A busy or blocked pane is not interrupted. A send is attempted once; an uncertain send is not retried and alerts the Owner. The Planner uses `claim` to read the signed request as untrusted data, writes a taskbook and obtains direct Owner authorization in its own session before any dispatch, then uses `close`. Closing intake does not close a workflow task. With no intake config, commands return `INTAKE_DISABLED` without creating files; without the HMAC key they return `INTAKE_KEY_MISSING`. Create `<state>/STOP_INTAKE` to stop an interval loop after its current round. `forward --once` and `--interval` share `<state>/owner_intake.lock`: while one forwarder runs, another returns `FORWARD_BUSY` without sending. If a forwarder was killed, the lock stays behind and the message says that its process has exited; delete the file only after confirming no forwarder is running. A second file with an ID that was already claimed or closed is reported as `duplicate` and does not change the original record. A notification failure is reported on stderr and does not stop intake. Set `notify_config` and `notify_channel` together.
+
+Windows background example (replace the paths and provide the key in the process environment):
+
+```powershell
+Start-Process -FilePath 'python.exe' -ArgumentList @(
+  'C:/skills/agent-workflow-orchestrator/scripts/owner_intake.py',
+  '--state', 'C:/workflow-state', 'forward', '--interval', '30'
+) -WindowStyle Hidden -RedirectStandardOutput 'C:/private/intake.stdout.log' `
+  -RedirectStandardError 'C:/private/intake.stderr.log'
+```
+
 ## Other adapters
 
 Herdr responses use completion_seq when present, otherwise state_change_seq. Missing or invalid counters are errors, not zero. Copy the observed normalized value into baseline_completion_seq before dispatch. state_change_seq records every state change, so its advance is only freshness evidence: idle/done, task/nonce-bound artifacts, and the configured marker are still required. Its delivery grace starts at the first fresh idle/done observation and is not renewed by counter churn, including intervening working states. A true completion_seq retains a new grace period for each completion. Receipts record sequence_source.

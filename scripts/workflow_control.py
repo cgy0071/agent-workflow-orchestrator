@@ -74,6 +74,28 @@ def validate_workflow(value):
     continues = scheduler.get("max_continue_prompts", 2)
     if type(continues) is not int or not 0 <= continues <= 10:
         raise ValueError("scheduler.max_continue_prompts must be an integer from 0 to 10")
+    intake = value.get("owner_intake")
+    if intake is not None:
+        if not isinstance(intake, dict) or set(intake) - {"inbox", "notify_config", "notify_channel", "prompt_controller"}:
+            raise ValueError("owner_intake has unknown settings")
+        project_name = value.get("name")
+        if project_name is not None and (not isinstance(project_name, str) or not project_name.strip()
+                                         or project_name in (".", "..") or "/" in project_name
+                                         or "\\" in project_name or project_name.endswith((" ", "."))
+                                         or any(c in '<>:"|?*' or ord(c) < 32 for c in project_name)):
+            raise ValueError("workflow name must be one safe directory component for owner_intake")
+        if not isinstance(intake.get("inbox"), str) or not Path(intake["inbox"]).is_absolute():
+            raise ValueError("owner_intake.inbox must be an absolute path")
+        if "notify_config" in intake and (not isinstance(intake["notify_config"], str)
+                                           or not Path(intake["notify_config"]).is_absolute()):
+            raise ValueError("owner_intake.notify_config must be an absolute path")
+        if "notify_channel" in intake and (not isinstance(intake["notify_channel"], str)
+                                            or not intake["notify_channel"].strip()):
+            raise ValueError("owner_intake.notify_channel must be a channel name")
+        if ("notify_config" in intake) != ("notify_channel" in intake):
+            raise ValueError("owner_intake.notify_config and owner_intake.notify_channel must be set together")
+        if "prompt_controller" in intake and type(intake["prompt_controller"]) is not bool:
+            raise ValueError("owner_intake.prompt_controller must be boolean")
     return value
 
 
@@ -125,7 +147,7 @@ def initialize(state, config):
 # Operating limits only. Roles, permissions and review transitions stay as initialized, so an edit can
 # never grant an actor new authority or change what a verdict means for recorded reviews.
 EDITABLE_CONFIG = ("goal", "scheduler.max_concurrency", "scheduler.max_continue_prompts",
-                   "scheduler.max_repair_chain", "scheduler.resources")
+                   "scheduler.max_repair_chain", "scheduler.resources", "owner_intake")
 
 
 def config_value(config, key):
@@ -143,6 +165,8 @@ def apply_config_changes(config, changes):
             if not isinstance(value, str) or len(value) > 2000:
                 raise ValueError("goal must be text of at most 2000 characters")
             updated["goal"] = value.strip()
+        elif key == "owner_intake":
+            updated["owner_intake"] = value
         else:
             updated.setdefault("scheduler", {})[key.split(".", 1)[1]] = value
     validate_workflow(updated)
