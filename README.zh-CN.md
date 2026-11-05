@@ -133,7 +133,7 @@ python scripts/workflow_control.py --state /abs/state bind --role planner --spec
 python scripts/workflow_control.py --state /abs/state bind --role executor --spec worker.json --mode worker
 ```
 
-`bind` 会查询实时会话，身份不符时拒绝绑定。请保存它输出的控制者 `instance_id` 和 `version`，后续命令通过 `--actor` 和 `--version` 传入。使用 Herdr 时，绑定的 pane 还会被命名为 `awo:<角色>`，方便分辨哪个窗格是哪个角色；你自己起的名字会保留。`workflow_control.py --state /abs/state roles` 显示每个角色对应的窗格，以及身份是否仍一致。
+`bind` 会查询实时会话，身份不符时拒绝绑定。请保存它输出的控制者 `instance_id` 和 `version`，后续命令通过 `--actor` 和 `--version` 传入。使用 Herdr 时，绑定的 pane 还会被命名为 `awo:<角色>`，方便分辨哪个窗格是哪个角色；你自己起的名字会保留。`workflow_control.py --state /abs/state roles` 显示每个角色对应的窗格，以及身份是否仍一致。同一个 agent 不能同时担任 worker 和控制者或审核者：`bind` 和 `activate` 会拒绝；登记审核时，如果审核者就是该任务的执行者，也会被拒绝。
 
 ### 4. 编写任务及其请求
 
@@ -221,11 +221,13 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 - **完成以审核为准。** 终端空闲、退出码为 0 或 `review_ready` 都不算通过，只有登记的审核结论才算。
 - **不盲目重试。** 每个任务只发送一次。发送或通知结果不确定时，会被记录下来留待检查。对中途停止任务的 `continue` 有次数限制、先记账，且不会重试。
 - **暂停不等于结束。** Worker 提前停止或停在提示上时，监控继续进行；任务未关闭时不能审核暂停事件，审批提示从不自动回答。
+- **不能自审。** 同一个 agent 不能既是任务的执行者又是它的审核者，旧台账里的这类配对同样会被拒绝。
 - **只有一个控制者。** 切换后旧绑定失去权限。旁支对话可以提供建议，但不能确认事件、审核或派发。
 - **停止监控不会停止 Worker。** 取消工作需要单独处理。
 - **上下文标志是受信输入。** `--context main` 由操作者或桥接程序声明，不是身份认证。
 - **不预设真实客户端兼容。** 首次使用某个真实客户端时，需核验其身份、状态和投递接口。无法核验时报告 `ADAPTER_NOT_VERIFIED`，不要猜测。
-- 不要把凭证写入任务、命令参数或仓库。
+- **任务 ID 和 nonce 只用普通字符。** 新登记的任务只接受字母、数字和 `._-`，因为两者都会拼进发给 Worker 和审核者的消息。
+- 不要把凭证写入任务、命令参数或仓库。通知 Owner 用的 Webhook 网址只放在环境变量里。
 
 ## 更多指南
 
@@ -241,7 +243,7 @@ python scripts/workflow_scheduler.py --state /abs/state follow-up --parent-event
 | 任务与审核模板 | [task-and-review.zh-CN.md](references/task-and-review.zh-CN.md) |
 | 带版本的客户端能力证据 | [capabilities.zh-CN.md](references/capabilities.zh-CN.md) |
 
-**不使用 Herdr 时：** 具备经核验的一次性（非交互）命令的客户端，可以通过 `scripts/run_job.py --job job.json` 运行（参见 [examples/job.json](examples/job.json)）。运行器会记录状态、真实退出码和 `output.log`，供 `receipt` 适配器使用。交互式 TUI 则需要经核验的桥接程序。
+**不使用 Herdr 时：** 具备经核验的一次性（非交互）命令的客户端，可以通过 `scripts/run_job.py --job job.json` 运行（参见 [examples/job.json](examples/job.json)）。运行器会记录状态、真实退出码和 `output.log`，供 `receipt` 适配器使用。交互式 TUI 则需要经核验的桥接程序。原生桥的 runner 在记录结局之前死掉时，桥会报告 `exited`，不再一直等待；残留文件用 `native_worker.py release-lock` 或 `release` 显式清理，两者都要写 `--reason`。释放不会终止进程，也不会关闭台账中的任务。详见 [harness-adapters.zh-CN.md](references/harness-adapters.zh-CN.md)。
 
 ## 开发
 
@@ -254,13 +256,18 @@ SKILL.md / SKILL.zh-CN.md          Agent 加载的指令
 README.md / README.zh-CN.md        本指南
 agents/openai.yaml                 Skill 界面元数据
 references/                        详细指南与约定
-examples/                          workflow.json、request.herdr.json、dag.json、job.json
+examples/                          workflow.json、request.herdr.json、dag.json、job.json、notify.json
 docs/images/                       README 配图
-scripts/workflow_control.py        状态、绑定、窗格名称、收件箱、审核关卡、状态查询
-scripts/workflow_scheduler.py      派发、受限继续、DAG、资源占用
-scripts/monitor_task.py            状态轮询、停顿报告与一次性通知
+scripts/workflow_control.py        状态、绑定、窗格名称、收件箱、审核关卡、一步结案、任务时间线
+scripts/workflow_scheduler.py      派发、确认开始、生成后续任务、受限继续、DAG、资源占用
+scripts/monitor_task.py            状态轮询、停顿原因、Worker 结果块、一次性通知
+scripts/workflow_status.py         只读的任务阶段、告警、统计和时间线
+scripts/owner_notify.py            可选的 Owner 推送提醒，使用独立发件箱
 scripts/run_job.py                 带回执的一次性 CLI 作业
+scripts/native_worker.py           原生一次性与会话桥接（Codex、Pi、OMP）
+scripts/process_util.py            跨平台进程存活检查
 scripts/demo_scheduler.py          离线演示
-scripts/dashboard.py               本地台账面板，可选派发、审核和对话
+scripts/dashboard.py               本地台账面板，可选派发、审核、对话和管理
+scripts/dashboard_actions.py       面板管理操作（先预览，再一次性确认）
 dashboard.cmd / dashboard.command  双击启动面板
 ```
