@@ -182,6 +182,8 @@ If the Executor stops early (quota, rate limit, network) or waits on a permissio
 
 When you want Owner-facing push alerts, configure the optional `owner_notify.py` with a private file, webhook, or command channel. It reads the ledger and keeps its own outbox; it never changes task state or contacts agents. See [Notify the Owner](references/monitoring.md#notify-the-owner).
 
+Optionally, an authenticated external channel can deposit signed Owner requests in a project inbox. The Planner receives a short hint only when its Herdr pane is idle, claims the request as untrusted data, and obtains direct approval before dispatch. See [Owner intake](references/monitoring.md#owner-intake) and the [channel adapter contract](references/owner-intake.md).
+
 ### 7. Review and continue
 
 ```sh

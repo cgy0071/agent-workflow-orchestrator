@@ -101,6 +101,30 @@ Start-Process -FilePath 'python.exe' -ArgumentList @(
 
 看板只读显示发件箱的待发数、已放弃数和最近一次发送时间，不自行发送。
 
+## Owner 收件
+
+只有 Owner 明确要求时才启用收件。将[可选配置片段](../examples/owner-intake.workflow-snippet.json)加入项目 workflow，或由控制者对已初始化项目用 `set-config` 添加整节 `owner_intake`。私下设置 `AWO_INTAKE_HMAC_KEY`。通道适配器先在同一目录写临时文件，再重命名为带签名的 schema-1 JSON 请求；详见[通道无关接口](owner-intake.zh-CN.md)。[通知配置示例](../examples/notify-qq.json)在指定通道显式订阅 `intake_update`。
+
+```sh
+python scripts/owner_intake.py --state /absolute/state list
+python scripts/owner_intake.py --state /absolute/state forward --once
+python scripts/owner_intake.py --state /absolute/state forward --interval 30
+python scripts/owner_intake.py --state /absolute/state claim --request REQUEST-ID --actor INSTANCE --version 1 --context main
+python scripts/owner_intake.py --state /absolute/state close --request REQUEST-ID --outcome done --note "handled" --actor INSTANCE --version 1 --context main
+```
+
+`list` 只读。`forward` 仅向身份匹配、空闲的 Herdr Planner 窗口提示请求编号，不发送正文或文件路径；不打断忙碌或受阻窗口。一次请求最多提示一次，发送不确定时不重发，并通知 Owner。Planner 用 `claim` 读取签名请求，把正文当作不可信资料，按常规写任务书，并在自己的会话里取得 Owner 直接授权后才能派发，最后用 `close` 结案。关闭收件不等于关闭工作流任务。未配置时命令返回 `INTAKE_DISABLED` 且不创建文件；缺少 HMAC 密钥时返回 `INTAKE_KEY_MISSING`。循环模式下创建 `<state>/STOP_INTAKE`，可在本轮后停止。
+
+Windows 后台示例（替换路径，并在进程环境中设置密钥）：
+
+```powershell
+Start-Process -FilePath 'python.exe' -ArgumentList @(
+  'C:/skills/agent-workflow-orchestrator/scripts/owner_intake.py',
+  '--state', 'C:/workflow-state', 'forward', '--interval', '30'
+) -WindowStyle Hidden -RedirectStandardOutput 'C:/private/intake.stdout.log' `
+  -RedirectStandardError 'C:/private/intake.stderr.log'
+```
+
 ## 非 Herdr 适配
 
 Herdr 优先读取 completion_seq，缺失时读取 state_change_seq；计数器缺失或类型错误会报错，不再静默返回 0。派工前将实际观测的归一化值写入 baseline_completion_seq。state_change_seq 记录所有状态变化，其递增只证明发生了新活动，仍须满足 idle/done、任务 ID/nonce 绑定文件及 marker 合同。其交付宽限从第一次新活动后的 idle/done 开始，不因计数变化或中间的 working 状态重新计时。真正的 completion_seq 仍为每次完成提供新宽限。回执记录 sequence_source。

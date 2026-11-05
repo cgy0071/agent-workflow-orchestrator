@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Owner intake request",
+  "type": "object",
+  "required": ["schema", "request_id", "channel", "text", "requested_at", "confirmed_at", "source", "hmac"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": 1},
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"},
+    "channel": {"type": "string", "minLength": 1},
+    "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "requested_at": {"type": "string"},
+    "confirmed_at": {"type": "string"},
+    "source": {
+      "type": "object",
+      "required": ["kind", "owner", "message_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "owner": {"const": true},
+        "message_ref": {"type": "string", "pattern": "^[0-9a-f]{16}$"}
+      }
+    },
+    "project": {"type": "string", "minLength": 1},
+    "hmac": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

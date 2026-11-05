@@ -1,0 +1,18 @@
+{
+  "lang": "en",
+  "channels": {
+    "qq": {
+      "type": "command",
+      "argv": ["node", "C:/private/bot/tools/awo-send.mjs", "{text}"],
+      "kinds": [
+        "intake_update",
+        "permission_prompt",
+        "worker_question",
+        "worker_failed",
+        "start_unconfirmed",
+        "review_waiting",
+        "over_concurrency"
+      ]
+    }
+  }
+}

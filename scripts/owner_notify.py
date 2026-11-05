@@ -18,6 +18,7 @@ from workflow_scheduler import _read_database
 
 KINDS = ("permission_prompt", "worker_question", "worker_failed", "start_unconfirmed",
          "review_waiting", "over_concurrency")
+ALLOWED_KINDS = KINDS + ("intake_update",)
 RETRY_MINUTES = (1, 3, 7, 15, 25, 35, 45, 55)
 SCHEMA = """CREATE TABLE IF NOT EXISTS messages (
     channel TEXT NOT NULL, dedupe_key TEXT NOT NULL, kind TEXT NOT NULL,
@@ -65,7 +66,7 @@ def config_of(path, windows=None):
         kinds = channel.get("kinds", KINDS)
         if not isinstance(kinds, list) and kinds is not KINDS:
             raise ValueError("kinds must be an array")
-        if any(kind not in KINDS for kind in kinds):
+        if any(kind not in ALLOWED_KINDS for kind in kinds):
             raise ValueError("unknown notification kind")
         kind = channel.get("type")
         if kind == "file":
@@ -181,6 +182,29 @@ def connection(path, readonly=False):
 def create_outbox(con):
     with con:
         con.execute(SCHEMA)
+
+
+def enqueue_message(state, config, *, kind, key, text, channels=None):
+    """Queue a caller-owned update in the existing retrying outbox."""
+    if kind != "intake_update" or not isinstance(key, str) or not key.strip():
+        raise ValueError("invalid intake notification kind or key")
+    selected = set(config["channels"] if channels is None else channels)
+    if selected - config["channels"].keys():
+        raise ValueError("unknown notification channel")
+    body = redact(text)
+    now = stamp(instant())
+    queued = 0
+    for name, channel in config["channels"].items():
+        if name not in selected or kind not in channel.get("kinds", KINDS):
+            continue
+        with connection(outbox_path(state)) as con:
+            create_outbox(con)
+            row = con.execute("INSERT OR IGNORE INTO messages "
+                "(channel,dedupe_key,kind,task_id,body,status,next_at,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (name, key, kind, "-", body, "pending", now, now))
+            queued += row.rowcount
+    return {"status": "ENQUEUED", "queued": queued}
 
 
 def outbox_summary(state):

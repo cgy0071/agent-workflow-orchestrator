@@ -1,0 +1,9 @@
+{
+  "name": "my-project",
+  "owner_intake": {
+    "inbox": "C:/private/awo-intake/my-project",
+    "notify_config": "C:/private/awo-notify.json",
+    "notify_channel": "qq",
+    "prompt_controller": true
+  }
+}

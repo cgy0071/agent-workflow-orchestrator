@@ -182,6 +182,8 @@ python scripts/monitor_task.py --request /abs/task/confirmed.json --notify
 
 需要把提醒推送给 Owner 时，可选用 `owner_notify.py`，配置私有文件、Webhook 或命令通道。它只读台账，使用独立发件箱，不改变任务状态，也不联系 Agent。用法见[通知 Owner](references/monitoring.zh-CN.md#通知-owner)。
 
+可选的外部通道可将经过身份核实、带签名的 Owner 请求写入项目收件箱。Planner 的 Herdr 窗口空闲时只收到简短提示，领取后把请求当作不可信资料，派发前仍须取得 Owner 直接授权。见[Owner 收件](references/monitoring.zh-CN.md#owner-收件)和[通道适配接口](references/owner-intake.zh-CN.md)。
+
 ### 7. 审核并继续
 
 ```sh
