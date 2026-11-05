@@ -89,6 +89,8 @@ The register-task command records work submitted through an existing controller.
 
 If work was already sent through the legacy path, registration still succeeds when the running-task limit has been reached. It returns `max_concurrency_exceeded` and records an audit warning so an already-running task is not lost from monitoring. New dispatches remain subject to the limit.
 
+New registrations through either CLI path require task IDs (including parent IDs) matching `[A-Za-z0-9._-]{1,64}`, except `.` and `..`, and a nonce matching `[A-Za-z0-9._-]{1,128}`. This keeps line breaks and command-like punctuation out of task-bound prompts. Already registered identical requests still return `ALREADY_REGISTERED`; monitoring of existing tasks retains its original validation rules.
+
 ## 5. Receive, acknowledge, review, and continue
 
 Completion is persisted before notification. A successful send, acknowledgment, and acceptance are three different states. If a prompt lands in a side conversation or the reviewer is offline, the pending event remains recoverable:

@@ -34,7 +34,7 @@ SCRIPTS = Path(__file__).resolve().parent
 DEFAULT_PORT = 8765
 RECENT_FILE = Path.home() / ".agent-workflow-orchestrator" / "dashboard-recent.json"
 RECENT_LIMIT = 10
-TASK_ID = re.compile(r"[A-Za-z0-9._-]{1,64}\Z")
+TASK_ID = control.TASK_ID
 NONCE = re.compile(r"[0-9a-f]{16}\Z")
 EVENT_ID = re.compile(r"[0-9a-f]{64}\Z")
 ARTIFACT_LIMIT = 200000  # bytes of each delivery file shown in the page
@@ -1748,7 +1748,7 @@ def _form(payload, nonce=None):
     if not isinstance(payload, dict):
         raise ValueError("form must be a JSON object")
     task_id = payload.get("task_id")
-    if not isinstance(task_id, str) or not TASK_ID.fullmatch(task_id) or task_id in (".", ".."):
+    if not control.valid_task_id(task_id):
         raise ValueError("invalid task ID")
     nonce = secrets.token_hex(8) if nonce is None else nonce
     if not isinstance(nonce, str) or not NONCE.fullmatch(nonce):
