@@ -31,6 +31,8 @@ When using the example's marker_source=artifact, require HANDOFF.md to contain t
 
 Verify task/worker identity and change scope. Read the raw evidence. Distinguish executed from unexecuted work, models from measurements, and environment or observation faults from implementation faults. Record accept, repair, reject, or missing evidence, whether the baseline changes, and the next gate.
 
+The ledger checks again when a review is recorded: the reviewer binding must identify a different agent from the task's registered worker binding. This also protects older ledgers that predate the binding conflict check.
+
 Comparators must not accept empty files, dropped records, or matching errors on both sides. Negative tests should address the actual risk. Preserve failures and reuse already verified evidence during repairs.
 
 ## Configurable continuation

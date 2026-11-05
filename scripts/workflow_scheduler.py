@@ -112,10 +112,14 @@ def check_claim(con, request, reservation=None):
             raise ValueError("workspace is claimed by task " + task)
     from workflow_evidence import check_paths
     check_paths(con, request)
-    if reservation is None:
-        return
-    resources = reservation["resources"]
     cfg = control.config_of(con).get("scheduler", {})
+    limit = cfg.get("max_concurrency", 1)
+    if type(limit) is not int or limit < 1:
+        raise ValueError("max_concurrency must be a positive integer")
+    if reservation is None:
+        running_count = con.execute("SELECT count(*) FROM tasks WHERE status='running'").fetchone()[0]
+        return ["max_concurrency_exceeded"] if running_count >= limit else []
+    resources = reservation["resources"]
     capacities = cfg.get("resources", {})
     for key, amount in resources.items():
         if key not in capacities or type(capacities[key]) is not int or capacities[key] < 1:
@@ -125,9 +129,6 @@ def check_claim(con, request, reservation=None):
             raise ValueError("resource capacity exhausted: " + key)
     # Include work registered through the old API in both isolation and concurrency checks.
     running = con.execute("SELECT id,data FROM tasks WHERE status='running'").fetchall()
-    limit = cfg.get("max_concurrency", 1)
-    if type(limit) is not int or limit < 1:
-        raise ValueError("max_concurrency must be a positive integer")
     if len(running) >= limit:
         raise ValueError("max_concurrency reached")
     for row in running:
@@ -135,6 +136,7 @@ def check_claim(con, request, reservation=None):
         old_paths = [old["cwd"], old["worker"]["expected_identity"]["launch_cwd"]]
         if any(overlap(first, second) for first in old_paths for second in requested_paths):
             raise ValueError("workspace overlaps a running task: " + row["id"])
+    return []
 
 
 def reserve(con, request, who, value):
@@ -381,6 +383,10 @@ def reconcile(state, task, outcome, evidence, actor, version, context):
         if task not in note or value["nonce"] not in note or ("Outcome: " + outcome) not in note.splitlines():
             raise ValueError("evidence must bind task, nonce, and exact Outcome line")
         if row["status"] in ("not_sent", "terminated"):
+            prior = value.get("reconciliation", {})
+            if prior.get("outcome") == outcome and prior.get("sha256") == hashlib.sha256(raw).hexdigest():
+                task_row = con.execute("SELECT data FROM tasks WHERE id=?", (task,)).fetchone()
+                return {"status": "ALREADY_RECONCILED", "request": json.loads(task_row[0])["request"]}
             raise ValueError("dispatch was already closed")
         if outcome == "not_sent" and row["status"] == "running":
             raise ValueError("a confirmed execution cannot become not_sent")

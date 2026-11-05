@@ -213,6 +213,9 @@ class ManageTests(unittest.TestCase):
                         {"role": "executor", "mode": "worker", "pane": "p2"}):
             with self.subTest(payload=payload):
                 self.assertEqual(self.http("POST", "/api/manage/preview", dict(payload, action="assign"))[0], 400)
+        conflict = self.http("POST", "/api/manage/preview",
+                             {"action": "assign", "role": "executor", "mode": "worker", "pane": "p1", "reason": "x"})
+        self.assertIn("pane p1 is already bound to another role", str(conflict[1]))
         preview, result = self.step("assign", role="executor", mode="worker", pane="p2", reason="use the codex pane")
         self.assertEqual((preview["defer"], result["status"], result["version"]), (False, "BINDING_ACTIVE", 2))
         with control.database(self.state) as con:

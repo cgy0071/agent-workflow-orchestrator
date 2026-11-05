@@ -764,6 +764,11 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       explanation:'The task was sent more than 10 minutes ago and nobody has confirmed that the worker started it. The pane may have been replaced or the prompt lost.',
       next:'Use Auto-check worker or confirm-start to check for a start. If it was not observed, inspect the worker before recording what happened. Do not resend.'
     };
+    if (code === 'over_concurrency') return {
+      label:'Workload over limit', title:'More tasks are running than the configured limit', tone:'check',
+      explanation:'This task was already running when it was added to the ledger. It was recorded so the work remains visible, even though the running-task limit was reached.',
+      next:'Inspect the active tasks before starting more work. Keep monitoring this task; do not send it again.'
+    };
     if (code === 'review_waiting') return {
       label:'Review waiting', title:'Delivered work has waited over an hour', tone:'check',
       explanation:'The worker delivered and is idle until the reviewer records a decision.',

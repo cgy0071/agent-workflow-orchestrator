@@ -204,8 +204,8 @@ or dispatch permission.
 `incomplete` (worker idle without a valid delivery, e.g. after a quota,
 rate-limit or network error), `blocked` (usually a harness permission/approval
 prompt or usage limit) and `adapter_error` (queries keep failing) are pauses,
-not ends. The monitor publishes one event and one notification per stall
-episode, then keeps watching the same attempt; a later delivery still becomes
+not ends. The monitor publishes one event and one notification per distinct
+status in each stall episode, then keeps watching the same attempt; a later delivery still becomes
 `review_ready`. The overall monitor timeout also applies while stalled. When
 the controller closes the attempt (`reconcile --outcome terminated` or
 `release`), the monitor stops without another event.
