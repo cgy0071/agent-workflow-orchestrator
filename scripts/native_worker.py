@@ -90,12 +90,16 @@ def status(directory):
         result.update(status="working", execution_started=bool(receipt.get("pid")), receipt_status=receipt.get("status"),
                       receipt_path=str(job / "receipt" / "status.json"), output_path=str(job / "receipt" / "output.log"),
                       stderr_path=str(job / "receipt" / "stderr.log"))
+        # Check liveness before the outcome: the runner writes outcome.json and then exits, so a runner seen as
+        # exited either left its outcome already or never will. The reverse order misreads a finishing job.
+        runner = active.get("runner_pid")
+        dead = type(runner) is int and runner > 0 and pid_alive(runner) is False
         if (job / "outcome.json").exists():
             outcome = read_json(job / "outcome.json")
             result.update(status="idle" if outcome["status"] == "done" else outcome["status"],
                           completion_seq=active["baseline"] + (1 if outcome["status"] == "done" else 0),
                           native_session_id=outcome.get("native_session_id"))
-        elif type(active.get("runner_pid")) is int and active["runner_pid"] > 0 and pid_alive(active["runner_pid"]) is False:
+        elif dead:
             result.update(status="exited", exit_reason="runner_gone", job_directory=str(job))
     return result
 

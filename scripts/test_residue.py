@@ -118,6 +118,16 @@ class ResidueTests(unittest.TestCase):
         self.assertEqual(native_worker.status(worker)["status"], "idle")
         self.assertFalse((worker / "active.json").exists())
         self.assertEqual(read_json(job / "released.json")["release_reason"], "inspected")
+        # A runner that writes its outcome and exits between the two checks is a finished job, not a lost one.
+        racing = worker / "jobs" / "racing"
+        racing.mkdir()
+        save_json(worker / "active.json", dict(active, directory=str(racing), runner_pid=12345))
+        def finishes(pid):
+            save_json(racing / "outcome.json", {"status": "done", "native_session_id": None})
+            return False
+        with patch.object(native_worker, "pid_alive", side_effect=finishes):
+            self.assertEqual(native_worker.status(worker)["status"], "idle")
+        (worker / "active.json").unlink()
         job2 = worker / "jobs" / "finished"
         job2.mkdir()
         active["directory"] = str(job2)
