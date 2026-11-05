@@ -113,7 +113,7 @@ python scripts/owner_intake.py --state /absolute/state claim --request REQUEST-I
 python scripts/owner_intake.py --state /absolute/state close --request REQUEST-ID --outcome done --note "handled" --actor INSTANCE --version 1 --context main
 ```
 
-`list` 只读。`forward` 仅向身份匹配、空闲的 Herdr Planner 窗口提示请求编号，不发送正文或文件路径；不打断忙碌或受阻窗口。一次请求最多提示一次，发送不确定时不重发，并通知 Owner。Planner 用 `claim` 读取签名请求，把正文当作不可信资料，按常规写任务书，并在自己的会话里取得 Owner 直接授权后才能派发，最后用 `close` 结案。关闭收件不等于关闭工作流任务。未配置时命令返回 `INTAKE_DISABLED` 且不创建文件；缺少 HMAC 密钥时返回 `INTAKE_KEY_MISSING`。循环模式下创建 `<state>/STOP_INTAKE`，可在本轮后停止。
+`list` 只读。`forward` 仅向身份匹配、空闲的 Herdr Planner 窗口提示请求编号，不发送正文或文件路径；不打断忙碌或受阻窗口。一次请求最多提示一次，发送不确定时不重发，并通知 Owner。Planner 用 `claim` 读取签名请求，把正文当作不可信资料，按常规写任务书，并在自己的会话里取得 Owner 直接授权后才能派发，最后用 `close` 结案。关闭收件不等于关闭工作流任务。未配置时命令返回 `INTAKE_DISABLED` 且不创建文件；缺少 HMAC 密钥时返回 `INTAKE_KEY_MISSING`。循环模式下创建 `<state>/STOP_INTAKE`，可在本轮后停止。`forward --once` 和 `--interval` 共用 `<state>/owner_intake.lock`：已有转发进程在运行时，另一个返回 `FORWARD_BUSY`，不发送。转发进程被强行终止时锁文件会留下，提示里会说明该进程已退出；确认没有转发进程在运行后再删除该文件。已认领或已结案的编号再次出现时，新文件报告为 `duplicate`，原记录不变。通知失败只写到 stderr，不影响收件。`notify_config` 和 `notify_channel` 要同时设置。
 
 Windows 后台示例（替换路径，并在进程环境中设置密钥）：
 

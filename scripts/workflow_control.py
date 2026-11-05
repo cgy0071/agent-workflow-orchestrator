@@ -92,6 +92,8 @@ def validate_workflow(value):
         if "notify_channel" in intake and (not isinstance(intake["notify_channel"], str)
                                             or not intake["notify_channel"].strip()):
             raise ValueError("owner_intake.notify_channel must be a channel name")
+        if ("notify_config" in intake) != ("notify_channel" in intake):
+            raise ValueError("owner_intake.notify_config and owner_intake.notify_channel must be set together")
         if "prompt_controller" in intake and type(intake["prompt_controller"]) is not bool:
             raise ValueError("owner_intake.prompt_controller must be boolean")
     return value

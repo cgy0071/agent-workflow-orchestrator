@@ -10,7 +10,7 @@ Write `<inbox>/<request_id>.json` as UTF-8 JSON. Create a temporary file in the 
 
 The [JSON schema](owner-intake.schema.json) describes schema 1. Required fields are `schema: 1`, `request_id` (equal to the filename stem), `channel` (record only), `text`, `requested_at`, `confirmed_at`, `source`, and `hmac`. `project` is optional; include it only when the Owner named a project. It must equal that project's workflow `name`. The `source` object contains an adapter-specific `kind`, `owner: true`, and a 16-character lowercase hex `message_ref` derived from the original message ID. Do not put the original ID in the file.
 
-The `text` is the body after removing the adapter prefix and project name. It must have 1–4000 Unicode code points (Python `len`, JavaScript `[...text].length`). Tabs and newlines are allowed; other control characters are not. Times use ISO 8601 with a numeric offset, whole seconds and no milliseconds, for example `2026-11-05T10:00:30+08:00`. AWO also accepts `Z`.
+The `text` is the body after removing the adapter prefix and project name. It must have 1-4000 Unicode code points (Python `len`, JavaScript `[...text].length`). Tabs and newlines are allowed; other control characters are not. Times use ISO 8601 with a numeric offset, whole seconds and no milliseconds, for example `2026-11-05T10:00:30+08:00`. AWO also accepts `Z`.
 
 Read `AWO_INTAKE_HMAC_KEY` from the environment only. Sign the UTF-8 bytes of `request_id`, `text`, `requested_at`, `confirmed_at`, and `project` (empty when absent), joined in that order with LF. Write lowercase hex HMAC-SHA256. AWO compares it in constant time and refuses unsigned or changed files. Keep the key out of JSON, logs, and repository content.
 

@@ -1,7 +1,9 @@
 """Offline Owner intake regressions; no real Herdr, bot, or network calls."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
 import hashlib
 import hmac
+import io
 import json
 import multiprocessing
 import os
@@ -276,7 +278,8 @@ class IntakeTests(unittest.TestCase):
         path.write_text(json.dumps(self.signed(path.stem)), encoding="utf-8")
         intake.forward(self.state, environ=self.environment())
         self.assertEqual(intake.list_requests(self.state, environ=self.environment())["requests"][0]["status"],
-                         "invalid")
+                         "duplicate")
+        self.assertEqual(self.row(path.stem)["status"], "closed")
 
     def test_shared_inbox_scoped_and_first_claim_wins(self):
         shared = self.enable(inbox=self.root / "shared")
@@ -353,6 +356,152 @@ class IntakeTests(unittest.TestCase):
         (self.state / "STOP_INTAKE").write_text("stop", encoding="ascii")
         self.assertEqual(intake.run_loop(self.state, 10, environ=self.environment())["status"], "INTAKE_STOPPED")
         self.assertFalse(lock.exists())
+
+
+    def row(self, request_id):
+        with intake.inbox_db(self.state, readonly=True) as con:
+            return dict(con.execute("SELECT * FROM requests WHERE request_id=?", (request_id,)).fetchone())
+
+    def test_reappearing_id_keeps_claimed_and_closed_records(self):
+        folder = self.enable(prompt=False)
+        path = self.put(folder, "re-id")
+        original = path.read_bytes()
+        intake.claim_request(self.state, "re-id", *self.actor(), environ=self.environment())
+        for data in (original, original + b" "):  # same bytes, then changed bytes
+            path.write_bytes(data)
+            seen = intake.forward(self.state, environ=self.environment())
+            self.assertEqual(seen["requests"], [{"request_id": "re-id", "status": "duplicate"}])
+            self.assertEqual(self.row("re-id")["status"], "claimed")
+            path.unlink()
+        self.assertEqual(intake.close_request(self.state, "re-id", "done", "handled", *self.actor(),
+                                              environ=self.environment())["status"], "CLOSED")
+        path.write_bytes(original + b"\n")
+        listed = intake.list_requests(self.state, environ=self.environment())["requests"]
+        self.assertEqual([(x["request_id"], x["status"]) for x in listed], [("re-id", "duplicate")])
+        intake.forward(self.state, environ=self.environment())
+        row = self.row("re-id")
+        self.assertEqual((row["status"], row["outcome"]), ("closed", "done"))
+
+    def test_claim_resumes_after_interrupted_move(self):
+        folder = self.enable(prompt=False)
+        self.put(folder, "move-cut")
+        real, calls = intake.now, []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) == 2:  # the claim UPDATE, after the file was moved
+                raise sqlite3.OperationalError("database is locked")
+            return real()
+        with patch.object(intake, "now", flaky):
+            with self.assertRaises(sqlite3.OperationalError):
+                intake.claim_request(self.state, "move-cut", *self.actor(), environ=self.environment())
+        self.assertTrue((folder / "claimed" / "alpha" / "move-cut.json").exists())
+        self.assertNotEqual(self.row("move-cut")["status"], "claimed")
+        self.assertEqual(intake.claim_request(self.state, "move-cut", *self.actor(),
+                                              environ=self.environment())["status"], "CLAIMED")
+        self.assertEqual(intake.close_request(self.state, "move-cut", "done", "handled", *self.actor(),
+                                              environ=self.environment())["status"], "CLOSED")
+
+    def test_forward_once_waits_for_running_forwarder(self):
+        folder = self.enable()
+        fake = self.herdr()
+        self.put(folder, "lock-one")
+        inner, original_send = [], fake.send
+
+        def send(spec, text):
+            inner.append(intake.forward(self.state, environ=self.environment(), transport=fake))
+            return original_send(spec, text)
+        fake.send = send
+        self.assertEqual(intake.forward(self.state, environ=self.environment(), transport=fake)["sent"], 1)
+        self.assertEqual(inner[0]["status"], "FORWARD_BUSY")
+        self.assertEqual(self.row("lock-one")["status"], "prompted")
+        self.assertEqual(self.notices(), [])
+        lock = self.state / "owner_intake.lock"
+        self.assertFalse(lock.exists())
+        lock.write_text("999999999", encoding="ascii")  # a process that is not running
+        busy = intake.forward(self.state, environ=self.environment(), transport=fake)
+        self.assertEqual((busy["status"], busy["sent"]), ("FORWARD_BUSY", 0))
+        self.assertIn("has exited", busy["reason"])
+        self.assertTrue(lock.exists())
+
+    def test_notification_failure_does_not_stop_forward(self):
+        folder = self.enable()
+        fake = self.herdr()
+        (self.root / "notify.json").write_text(json.dumps({"lang": "en", "channels": {"other": {
+            "type": "file", "path": str(self.root / "other.log"), "kinds": ["intake_update"]}}}), encoding="utf-8")
+        (folder / "aaa-bad.json").write_text("{", encoding="utf-8")
+        self.put(folder, "zzz-good")
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            result = intake.forward(self.state, environ=self.environment(), transport=fake)
+        self.assertEqual((result["status"], result["sent"]), ("FORWARD_DONE", 1))
+        self.assertIn("notification skipped", err.getvalue())
+        with self.assertRaisesRegex(ValueError, "set together"):
+            control.update_config(self.state, {"owner_intake": {"inbox": str(folder), "notify_channel": "owner"}},
+                                  *self.actor())
+
+    def test_bad_unicode_and_vanished_file_do_not_stop_listing(self):
+        folder = self.enable(prompt=False)
+        data = self.signed("bad-text")
+        data["text"] = "\ud800"
+        (folder / "bad-text.json").write_text(json.dumps(data), encoding="utf-8")
+        self.put(folder, "good-one")
+        self.put(folder, "gone-one")
+        listed = {x["request_id"]: x["status"] for x in
+                  intake.list_requests(self.state, environ=self.environment())["requests"]}
+        self.assertEqual(listed, {"bad-text": "invalid", "gone-one": "new", "good-one": "new"})
+        real = Path.read_bytes
+
+        def vanish(path):
+            if path.name == "gone-one.json":
+                raise FileNotFoundError(str(path))
+            return real(path)
+        with patch.object(Path, "read_bytes", vanish):
+            listed = intake.list_requests(self.state, environ=self.environment())["requests"]
+            seen = intake.forward(self.state, environ=self.environment())
+        self.assertEqual(sorted(x["request_id"] for x in listed), ["bad-text", "good-one"])
+        self.assertEqual(seen["status"], "FORWARD_DONE")
+        self.assertNotIn("gone-one", [x["request_id"] for x in seen["requests"]])
+    def test_claim_race_and_missing_file_on_close(self):
+        folder = self.enable(prompt=False)
+        self.put(folder, "race-1")
+        real, results = Path.rename, []
+
+        def rename(path, target):
+            moved = real(path, target)
+            if not results:  # a second session claims between the first move and its update
+                try:
+                    results.append(intake.claim_request(self.state, "race-1", *self.actor(),
+                                                        environ=self.environment())["status"])
+                except ValueError as exc:
+                    results.append(str(exc))
+            return moved
+        with patch.object(Path, "rename", rename):
+            try:
+                results.append(intake.claim_request(self.state, "race-1", *self.actor(),
+                                                    environ=self.environment())["status"])
+            except ValueError as exc:
+                results.append(str(exc))
+        self.assertEqual(results.count("CLAIMED"), 1, results)
+        self.assertEqual(self.row("race-1")["status"], "claimed")
+        (folder / "claimed" / "alpha" / "race-1.json").unlink()
+        with self.assertRaisesRegex(ValueError, "claimed request file is missing"):
+            intake.close_request(self.state, "race-1", "done", "note", *self.actor(), environ=self.environment())
+        self.assertEqual(self.row("race-1")["status"], "claimed")
+
+    def test_interval_round_forwards(self):
+        folder = self.enable()
+        fake = self.herdr()
+        self.put(folder, "loop-one")
+        stop = self.state / "STOP_INTAKE"
+        out = io.StringIO()
+        with redirect_stdout(out):
+            result = intake.run_loop(self.state, 10, environ=self.environment(), transport=fake,
+                                     sleep=lambda _: stop.write_text("stop", encoding="ascii"))
+        self.assertEqual(result["status"], "INTAKE_STOPPED")
+        first = json.loads(out.getvalue().splitlines()[0])
+        self.assertEqual((first["status"], first["sent"]), ("FORWARD_DONE", 1))
+        self.assertEqual(self.row("loop-one")["status"], "prompted")
+        self.assertFalse((self.state / "owner_intake.lock").exists())
 
 
 if __name__ == "__main__":

@@ -9,11 +9,13 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 import time
 import unicodedata
 
 from monitor_task import Transport, identity_matches
 import owner_notify
+from process_util import pid_alive
 import workflow_control as control
 from workflow_scheduler import _read_database
 
@@ -97,7 +99,11 @@ def timestamp(value):
 
 
 def verified(path, key, project):
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        # Another project claimed it, or the adapter removed it, after the directory was listed.
+        return None, None, "missing"
     digest = hashlib.sha256(raw).hexdigest()
     try:
         request = json.loads(raw.decode("utf-8"))
@@ -116,7 +122,7 @@ def verified(path, key, project):
         return None, digest, "channel is required"
     text = request.get("text")
     if not isinstance(text, str) or not 1 <= len(text) <= 4000 or any(
-            unicodedata.category(c) == "Cc" and c not in "\n\t" for c in text):
+            (unicodedata.category(c) == "Cc" and c not in "\n\t") or 0xD800 <= ord(c) <= 0xDFFF for c in text):
         return None, digest, "text must have 1-4000 code points and no forbidden control characters"
     if not timestamp(request.get("requested_at")) or not timestamp(request.get("confirmed_at")):
         return None, digest, "requested_at and confirmed_at need ISO 8601 offsets"
@@ -135,51 +141,64 @@ def verified(path, key, project):
         return None, digest, "hmac is missing or malformed"
     message = "\n".join(str(request.get(field, "")) for field in
                         ("request_id", "text", "requested_at", "confirmed_at", "project"))
-    expected = hmac.new(key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
+    try:
+        expected = hmac.new(key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
+    except UnicodeError:
+        return None, digest, "request fields are not valid Unicode"
     if not hmac.compare_digest(supplied, expected):
         return None, digest, "hmac does not match"
     return request, digest, None
 
 
 def notifier(state, ready, request_id, event, text):
+    """Best effort: a broken notification setup must not stop intake or abort a forward round."""
     intake = ready["intake"]
     if not intake.get("notify_config") or not intake.get("notify_channel"):
         return
     if not REQUEST_ID.fullmatch(request_id) or request_id in (".", ".."):
-        safe_id = "invalid-file-" + hashlib.sha256(request_id.encode("utf-8")).hexdigest()[:8]
+        safe_id = "invalid-file-" + hashlib.sha256(request_id.encode("utf-8", "replace")).hexdigest()[:8]
         text = text.replace(request_id, safe_id)
         request_id = safe_id
-    config = owner_notify.config_of(intake["notify_config"])
-    channel = intake["notify_channel"]
-    if channel not in config["channels"]:
-        raise ValueError("owner_intake.notify_channel is absent from notify_config")
-    owner_notify.enqueue_message(state, config, kind="intake_update",
-                                 key="intake:" + request_id + ":" + event, text=text,
-                                 channels=[channel])
-    owner_notify.run_once(state, {"lang": config.get("lang", "en"),
-                                  "channels": {channel: config["channels"][channel]}})
+    try:
+        config = owner_notify.config_of(intake["notify_config"])
+        channel = intake["notify_channel"]
+        if channel not in config["channels"]:
+            raise ValueError("owner_intake.notify_channel is absent from notify_config")
+        owner_notify.enqueue_message(state, config, kind="intake_update",
+                                     key="intake:" + request_id + ":" + event, text=text,
+                                     channels=[channel])
+        owner_notify.run_once(state, {"lang": config.get("lang", "en"),
+                                      "channels": {channel: config["channels"][channel]}})
+    except (OSError, ValueError, sqlite3.Error) as exc:
+        print("owner_intake: notification skipped: " + owner_notify.redact(exc), file=sys.stderr, flush=True)
+
+
+def classify(old, path, digest, problem):
+    """Status of the file at path and whether the stored row may be updated.
+
+    The row of a request that was already claimed or closed is never rewritten: a second file
+    with the same ID is only reported as a duplicate."""
+    if not old:
+        return ("invalid" if problem else "new"), problem, True
+    if old["status"] in ("closed", "claimed") and Path(old["path"]).resolve() != path.resolve():
+        return "duplicate", "request ID was already processed", False
+    if old["sha256"] != digest:
+        return "invalid", "file bytes changed after first observation", True
+    return old["status"], old["reason"], True
 
 
 def inspect_file(con, path, ready, actor="intake"):
     request, digest, problem = verified(path, ready["key"], ready["project"])
-    if problem == "other_project":
+    if problem in ("other_project", "missing"):
         return None
     request_id = path.stem
     old = con.execute("SELECT * FROM requests WHERE request_id=?", (request_id,)).fetchone()
-    status = "invalid" if problem else "new"
-    reason = problem
-    if old:
-        if old["sha256"] != digest:
-            status, reason = "invalid", "file bytes changed after first observation"
-        elif old["status"] in ("closed", "claimed") and Path(old["path"]).resolve() != path.resolve():
-            status, reason = "duplicate", "request ID was already processed"
-        else:
-            status, reason = old["status"], old["reason"]
+    status, reason, persist = classify(old, path, digest, problem)
     at = now()
     if not old:
         con.execute("INSERT OR IGNORE INTO requests (request_id,sha256,status,path,reason,first_seen_at,updated_at,actor) "
                     "VALUES (?,?,?,?,?,?,?,?)", (request_id, digest, status, str(path), reason, at, at, actor))
-    elif status != old["status"]:
+    elif persist and status != old["status"]:
         con.execute("UPDATE requests SET status=?,reason=?,updated_at=?,actor=? WHERE request_id=?",
                     (status, reason, at, actor, request_id))
     con.commit()
@@ -199,17 +218,10 @@ def list_requests(state, *, environ=None):
     with inbox_db(state, readonly=True) as con:
         for path in files(inbox):
             request, digest, reason = verified(path, ready["key"], ready["project"])
-            if reason == "other_project":
+            if reason in ("other_project", "missing"):
                 continue
             row = con.execute("SELECT * FROM requests WHERE request_id=?", (path.stem,)).fetchone() if con else None
-            status = "invalid" if reason else "new"
-            if row:
-                if row["sha256"] != digest:
-                    status, reason = "invalid", "file bytes changed after first observation"
-                elif row["status"] in ("closed", "claimed") and Path(row["path"]).resolve() != path.resolve():
-                    status, reason = "duplicate", "request ID was already processed"
-                else:
-                    status, reason = row["status"], row["reason"]
+            status, reason, _ = classify(row, path, digest, reason)
             result.append({"request_id": path.stem, "status": status, "reason": reason})
         if con:
             for row in con.execute("SELECT request_id,status,reason,path FROM requests WHERE status='claimed'"):
@@ -224,18 +236,54 @@ def controller(state):
     return json.loads(row[0]) if row else None
 
 
-def forward(state, *, environ=None, transport=None):
+class ForwarderBusy(ValueError):
+    pass
+
+
+@contextmanager
+def forward_lock(state):
+    """One forwarder per state, so a 'prompting' row seen at the start of a round is a crash leftover."""
+    lock = Path(state).resolve() / "owner_intake.lock"
+    try:
+        with lock.open("x", encoding="ascii") as stream:
+            stream.write(str(os.getpid()))
+    except FileExistsError:
+        try:
+            pid = int(lock.read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            pid = None
+        detail = "; another forwarder may be running"
+        if pid is not None and pid_alive(pid) is False:
+            detail = "; its process " + str(pid) + " has exited, so delete the file if no forwarder is running"
+        raise ForwarderBusy("owner_intake.lock already exists" + detail) from None
+    try:
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
+
+
+def forward(state, *, environ=None, transport=None, locked=False):
     ready = settings(state, environ)
     if ready["status"] != "READY":
         return ready
+    if locked:
+        return forward_round(state, ready, transport)
+    try:
+        with forward_lock(state):
+            return forward_round(state, ready, transport)
+    except ForwarderBusy as exc:
+        return {"status": "FORWARD_BUSY", "sent": 0, "requests": [], "reason": str(exc)}
+
+
+def forward_round(state, ready, transport):
     ready["state"] = state
     inbox = Path(ready["intake"]["inbox"])
     transport = transport or Transport({})
     sent, seen = 0, []
     with inbox_db(state) as con:
         for row in con.execute("SELECT request_id FROM requests WHERE status='prompting'").fetchall():
-            con.execute("UPDATE requests SET status='prompt_uncertain',updated_at=?,actor='forwarder' WHERE request_id=?",
-                        (now(), row["request_id"]))
+            con.execute("UPDATE requests SET status='prompt_uncertain',updated_at=?,actor='forwarder' "
+                        "WHERE request_id=? AND status='prompting'", (now(), row["request_id"]))
             con.commit()
             notifier(state, ready, row["request_id"], "prompt_uncertain",
                      "Request " + row["request_id"] + " may not have reached Planner; inspect its window.")
@@ -276,18 +324,18 @@ def forward(state, *, environ=None, transport=None):
                 fresh = transport.status(spec)
                 if not identity_matches(fresh.get("identity", {}), spec["expected_identity"]) or \
                         fresh.get("status") != "idle" or not fresh.get("prompt_available", False):
-                    con.execute("UPDATE requests SET status='new',updated_at=?,actor='forwarder' WHERE request_id=?",
-                                (now(), item["request_id"]))
+                    con.execute("UPDATE requests SET status='new',updated_at=?,actor='forwarder' "
+                                "WHERE request_id=? AND status='prompting'", (now(), item["request_id"]))
                     con.commit()
                     continue
                 transport.send(spec, message)
-                con.execute("UPDATE requests SET status='prompted',updated_at=?,actor='forwarder' WHERE request_id=?",
-                            (now(), item["request_id"]))
+                con.execute("UPDATE requests SET status='prompted',updated_at=?,actor='forwarder' "
+                            "WHERE request_id=? AND status='prompting'", (now(), item["request_id"]))
                 con.commit()
                 sent += 1
             except Exception:
-                con.execute("UPDATE requests SET status='prompt_uncertain',updated_at=?,actor='forwarder' WHERE request_id=?",
-                            (now(), item["request_id"]))
+                con.execute("UPDATE requests SET status='prompt_uncertain',updated_at=?,actor='forwarder' "
+                            "WHERE request_id=? AND status='prompting'", (now(), item["request_id"]))
                 con.commit()
                 notifier(state, ready, item["request_id"], "prompt_uncertain",
                          "Request " + item["request_id"] + " may not have reached Planner; inspect its window.")
@@ -308,18 +356,20 @@ def claim_request(state, request_id, actor, version, context, *, environ=None):
         raise ValueError("invalid request ID")
     ready["state"] = state
     inbox = Path(ready["intake"]["inbox"])
+    folder = inbox / "claimed" / ready["claim_directory"]
     path = inbox / (request_id + ".json")
+    if not path.is_file() and (folder / path.name).is_file():
+        path = folder / path.name  # resume a claim interrupted between the move and the database update
     if not path.is_file():
         raise ValueError("request is not in the inbox")
     with inbox_db(state) as con:
         item = inspect_file(con, path, ready, actor=actor)
         if item is None:
-            raise ValueError("request belongs to another project")
+            raise ValueError("request belongs to another project or was just claimed by one")
         if item["status"] not in ("new", "prompted", "prompt_uncertain"):
             raise ValueError("request cannot be claimed from status " + item["status"])
         destination = path
-        if "project" not in item["request"]:
-            folder = inbox / "claimed" / ready["claim_directory"]
+        if "project" not in item["request"] and path.parent != folder:
             folder.mkdir(parents=True, exist_ok=True)
             destination = folder / path.name
             if destination.exists():
@@ -328,9 +378,11 @@ def claim_request(state, request_id, actor, version, context, *, environ=None):
                 path.rename(destination)
             except (FileNotFoundError, FileExistsError):
                 raise ValueError("another project already claimed this request") from None
-        con.execute("UPDATE requests SET status='claimed',path=?,actor=?,updated_at=? WHERE request_id=? "
-                    "AND status IN ('new','prompted','prompt_uncertain')",
-                    (str(destination), actor, now(), request_id))
+        changed = con.execute("UPDATE requests SET status='claimed',path=?,actor=?,updated_at=? WHERE request_id=? "
+                              "AND status IN ('new','prompted','prompt_uncertain')",
+                              (str(destination), actor, now(), request_id))
+        if changed.rowcount != 1:
+            raise ValueError("request was just claimed by another session")
         con.commit()
     request = item["request"]
     return {"status": "CLAIMED", "request_id": request_id,
@@ -352,6 +404,8 @@ def close_request(state, request_id, outcome, note, actor, version, context, *, 
             raise ValueError("request is not claimed or is already closed")
         source = Path(row["path"])
         request, digest, problem = verified(source, ready["key"], ready["project"])
+        if problem == "missing":
+            raise ValueError("claimed request file is missing: " + source.name)
         if problem or digest != row["sha256"]:
             con.execute("UPDATE requests SET status='invalid',reason=?,updated_at=?,actor=? WHERE request_id=?",
                         ("file changed before close", now(), actor, request_id))
@@ -376,23 +430,15 @@ def run_loop(state, interval, *, environ=None, transport=None, sleep=None):
     ready = settings(state, environ)
     if ready["status"] != "READY":
         return ready
-    lock = Path(state).resolve() / "owner_intake.lock"
-    try:
-        with lock.open("x", encoding="ascii") as stream:
-            stream.write(str(os.getpid()))
-    except FileExistsError:
-        raise ValueError("owner_intake.lock already exists; another forward loop may be running") from None
     sleep = sleep or time.sleep
-    stop = lock.parent / "STOP_INTAKE"
-    try:
+    stop = Path(state).resolve() / "STOP_INTAKE"
+    with forward_lock(state):
         while not stop.exists():
-            result = forward(state, environ=environ, transport=transport)
+            result = forward(state, environ=environ, transport=transport, locked=True)
             print(json.dumps(result, ensure_ascii=True), flush=True)
             if stop.exists():
                 break
             sleep(interval)
-    finally:
-        lock.unlink(missing_ok=True)
     return {"status": "INTAKE_STOPPED"}
 
 
