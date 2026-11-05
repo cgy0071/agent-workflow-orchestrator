@@ -68,7 +68,8 @@ class HandoffTests(unittest.TestCase):
         journal = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]["journal"]
         reserved = next(j for j in journal if j["kind"] == "continue_reserved")["data"]
         self.assertEqual((reserved["cause"], reserved["note"]), ("marker_missing", True))
-        self.assertNotIn("8080", json.dumps(reserved))  # The journal keeps the hash, not the note text.
+        # The journal keeps the hash, not the note text. Look for the words: a bare "8080" also matches hex digests.
+        self.assertNotIn("Use port", json.dumps(reserved))
 
     def chain_of_repairs(self, count):
         """A root task followed by count repair reviews in a row, each step a real follow-up."""
