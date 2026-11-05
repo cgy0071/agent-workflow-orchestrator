@@ -49,6 +49,8 @@ SQLite 台账保存配置快照、绑定版本、冻结任务、待审核事件�
 | `exact_thread` | 真实、固定且可观察的 `conversation_id` 和 `branch_id` | 发送前同时核对两个字段。 |
 | `dedicated_window` | 操作者明确声明该窗口专用于控制流程的主对话 | 核对窗口身份后发送；不要在该窗口开侧对话。 |
 
+以上策略只管台账事件。可选的 Owner 收件提示是另一回事：`owner_intake.prompt_controller` 为 `true`（默认）时，即使绑定为 `inbox_only`，`forward` 也会向空闲且身份匹配的 Herdr 控制窗口发送一行请求编号，不含请求正文。如果该窗口完全不能接收提示，把 `prompt_controller` 设为 `false`。
+
 客户端没有暴露对话和分支标识时，无法仅凭 terminal ID 或标题可靠识别侧对话。应使用收件箱，或明确预留专用主窗口。直接使用旧版独立监控时，在 reviewer 中填写 `context_policy`；专用窗口还需 `context_declaration`。使用台账时，通过绑定的 `--policy` 选择策略，专用窗口需在 `--reason` 中明确声明。
 
 台账 bind/switch 会将所选策略保存到适配器配置；dedicated_window 的 context_declaration 缺失时从 --reason 填入。独立监控请求仍需自己的声明。绑定和 preflight 对直接通知的 Herdr 目标执行只读检查，对应 Herdr 原生 prompt 的前提（以 Herdr 0.9.3 为准）：上报的 `agent` 标签须为 Herdr 原生 Agent 类型（如 pi、codex、claude），`launch_pending` 不为 true，`agent_status` 不为 blocked。发送前再次核对身份和这些前提，不发送测试提示。可选的 `agent_session` 字段只是会话元数据，既不是必需条件，也不足以证明可发送。提示到达时 Herdr 还会自行检查该 Agent 是否仍是前台进程，因此通过检查不保证投递成功，超时及不确定投递规则仍适用。
