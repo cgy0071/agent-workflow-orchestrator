@@ -19,6 +19,7 @@ The project has no numbered releases yet. Entries are grouped by the date change
 
 ### Documentation
 
+- The README is now a short introduction and quick start; the manual walkthrough, concepts, configuration files, full safety model and repository layout moved to [references/manual-workflow.md](references/manual-workflow.md).
 - README covers self-review refusal, field rules and bridge residue (#18). Intake docs clarify the `inbox_only` hint and unknown project names (#20).
 
 ## 2026-11-04

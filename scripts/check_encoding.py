@@ -13,11 +13,11 @@ SKIP_DIRS = {".git", "__pycache__", "runtime", ".venv", "venv", "node_modules"}
 DEFAULT_CJK = ["SKILL.zh-CN.md", "README.zh-CN.md", "CHANGELOG.zh-CN.md", "references/roles.zh-CN.md",
                "references/task-and-review.zh-CN.md", "references/harness-adapters.zh-CN.md",
                "references/monitoring.zh-CN.md", "references/setup-and-switching.zh-CN.md",
-               "references/owner-intake.zh-CN.md"]
+               "references/owner-intake.zh-CN.md", "references/manual-workflow.zh-CN.md"]
 DEFAULT_ASCII = ["SKILL.md", "README.md", "CHANGELOG.md", "agents/openai.yaml", "references/roles.md",
                  "references/task-and-review.md", "references/harness-adapters.md",
                  "references/monitoring.md", "references/setup-and-switching.md",
-                 "references/owner-intake.md"]
+                 "references/owner-intake.md", "references/manual-workflow.md"]
 
 
 def check_bytes(data, expect_cjk=False, expect_ascii=False):
