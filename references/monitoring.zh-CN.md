@@ -175,7 +175,32 @@ Android Chrome 首次打开自签证书页面可能显示 **您的连接不是�
 
 `--lan` 在一个私有网卡地址上直接提供 HTTPS；`--public-origin` 则为只监听回环的面板授权一个独立的私有 HTTPS 反向代理；SSH 隧道把本机 HTTP 转发到自己的设备，不需要前两项。按要打开看板的设备选择接入方式。
 
-要从另一台电脑查看，在那台电脑运行 `ssh -L 8765:127.0.0.1:8765 <看板所在主机>`，再打开打印出的 `http://127.0.0.1:8765/#token` 地址。无需 `--public-origin`；如果 8765 已被占用，请使用实际打印的端口。要从同一 tailnet 的手机或其他设备查看，在看板主机运行 `tailscale serve --bg 8765`，启动看板时加 `--public-origin https://<机器名>.<tailnet>.ts.net`，然后在设备上打开额外打印的 HTTPS 地址。看板仍只监听本机，仅接受配置的 HTTPS 代理 Host 和 Origin。代理命令参见 [Tailscale Serve 文档](https://tailscale.com/docs/reference/tailscale-cli/serve)；不要使用会暴露到公网的 Tailscale Funnel。
+要从另一台电脑查看，在那台电脑运行 `ssh -L 8765:127.0.0.1:8765 <看板所在主机>`，再打开打印出的 `http://127.0.0.1:8765/#token` 地址。无需 `--public-origin`；如果 8765 已被占用，请使用实际打印的端口。
+
+### 通过 Tailscale 用手机访问
+
+看板仍然只监听本机；Tailscale Serve 在你的 tailnet 内转发它，并使用 Tailscale 签发的 HTTPS 证书，所以手机上不会出现证书警告。
+
+1. 在看板主机和手机上安装 Tailscale，并登录同一账号。在管理后台开启 MagicDNS 和 HTTPS 证书。
+2. 在看板主机运行 `tailscale serve --bg 8765`；如果看板打印的是别的端口，用实际端口。
+3. 启动看板时带上你自己的 Tailscale 登录名：
+
+   ```sh
+   python -B scripts/dashboard.py --state /absolute/workflow-state --no-browser \
+     --public-origin https://<机器名>.<tailnet>.ts.net --tailscale-user you@example.com
+   ```
+
+4. 在手机上打开打印出的 `Dashboard (remote)` 地址。停止共享用 `tailscale serve --https=443 off` 或 `tailscale serve reset`。
+
+隐私与安全：
+
+- **只用 Serve，不要用 Funnel。** Funnel 会把服务公开到互联网，而且不带身份标头。可用 `tailscale funnel status` 确认它已关闭。
+- **限制可以连接的人。** 加了 `--tailscale-user` 后，经代理来的请求只有在 Tailscale Serve 报告的 `Tailscale-User-Login` 属于所列登录名时才会放行。Serve 会删除客户端自己带的同名标头，对带标签的设备也不设置该标头；因此即使拿到令牌地址，带标签的设备或 tailnet 中的其他成员也会被拒绝。令牌仍然必需。允许多个登录名时重复这个选项。在看板主机本机发起的请求不经代理，不做这项检查。
+- **先用只读模式。** 只有确实需要在手机上操作时才加 `--allow-manage`、`--allow-chat` 或 `--allow-dispatch`；加了以后，令牌地址就具有这些操作权限。
+- **把地址当作密码。** 令牌只在看板启动时打印，只放在地址的 `#` 片段里（不会发给服务器，也不会被记录），保存在该标签页的会话存储中，每次重启都会变化。不要把它发到聊天里或截图。页面带有 `Cache-Control: no-store` 和 `Referrer-Policy: no-referrer`。
+- **选一个不暴露身份的机器名。** HTTPS 证书会公开记录在证书透明度日志中，日志里能看到 `<机器名>.<tailnet>.ts.net`。如果机器名能认出你，先在管理后台改名，再开启 HTTPS。
+- **限制 tailnet。** 如果 tailnet 里有其他人或共享设备，添加访问规则，只允许你自己的设备访问这台机器的 443 端口。开启密钥过期；手机丢失时把它从 tailnet 移除。
+- Tailscale 的协调服务能看到设备元数据，看不到页面内容；你的设备之间的流量是端到端加密的。参见 [Tailscale Serve 文档](https://tailscale.com/kb/1312/serve) 和 [命令参考](https://tailscale.com/kb/1242/tailscale-serve)。
 
 令牌地址等同于操作权限：开启 `--allow-chat` 或 `--allow-dispatch` 时，持有地址的人可以向 agent 发指令。重启看板会生成新令牌，使旧地址失效。只向可信设备开放代理；不要启用明文 HTTP 局域网监听。看板不会安装或配置 SSH、Tailscale。
 

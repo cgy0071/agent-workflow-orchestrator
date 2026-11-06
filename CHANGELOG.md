@@ -4,6 +4,12 @@ English | [Chinese](CHANGELOG.zh-CN.md)
 
 The project has no numbered releases yet. Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
 
+## 2026-11-06
+
+### Added
+
+- **Tailscale identity check for the dashboard.** With `--public-origin` behind `tailscale serve`, `--tailscale-user LOGIN` admits only requests whose `Tailscale-User-Login` (set by Serve, which strips client copies) is a listed login. The token is still required; loopback requests are unaffected. Responses now carry `Referrer-Policy: no-referrer`. The monitoring guide has a phone-over-Tailscale section with privacy notes.
+
 ## 2026-11-05
 
 ### Added

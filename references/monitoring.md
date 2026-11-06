@@ -175,7 +175,32 @@ On Android Chrome, the self-signed certificate may show **Your connection is not
 
 `--lan` directly serves HTTPS on one private adapter address. `--public-origin` authorizes a separate, private HTTPS reverse proxy while the dashboard stays on loopback. An SSH tunnel forwards the loopback HTTP service to your own device and needs neither option. Choose one access path for the device that will open the dashboard.
 
-To view the dashboard from another computer, run `ssh -L 8765:127.0.0.1:8765 <dashboard-host>` there, then open the printed `http://127.0.0.1:8765/#token` URL. This needs no `--public-origin`; use the actual printed port if 8765 was unavailable. For a phone or other device on the same tailnet, run `tailscale serve --bg 8765` on the dashboard host and start the dashboard with `--public-origin https://<machine>.<tailnet>.ts.net`. Open the additional HTTPS URL printed by the dashboard on that device. The dashboard still binds to loopback and only accepts the configured HTTPS proxy Host and Origin. See the [Tailscale Serve documentation](https://tailscale.com/docs/reference/tailscale-cli/serve) for the proxy command; do not use Tailscale Funnel, which exposes the service publicly.
+To view the dashboard from another computer, run `ssh -L 8765:127.0.0.1:8765 <dashboard-host>` there, then open the printed `http://127.0.0.1:8765/#token` URL. This needs no `--public-origin`; use the actual printed port if 8765 was unavailable.
+
+### Phone access through Tailscale
+
+The dashboard keeps listening on loopback only; Tailscale Serve forwards it inside your tailnet with a Tailscale-issued HTTPS certificate, so the phone shows no certificate warning.
+
+1. Install Tailscale on the dashboard host and the phone and sign in to the same account. In the admin console, enable MagicDNS and HTTPS certificates.
+2. On the dashboard host, run `tailscale serve --bg 8765`. Use the dashboard's actual port if it printed another one.
+3. Start the dashboard with your own Tailscale login:
+
+   ```sh
+   python -B scripts/dashboard.py --state /absolute/workflow-state --no-browser \
+     --public-origin https://<machine>.<tailnet>.ts.net --tailscale-user you@example.com
+   ```
+
+4. Open the printed `Dashboard (remote)` URL on the phone. Stop sharing with `tailscale serve --https=443 off`, or `tailscale serve reset`.
+
+Privacy and safety:
+
+- **Use Serve, never Funnel.** Funnel publishes the service on the internet and carries no identity headers. Run `tailscale funnel status` to confirm it is off.
+- **Limit who may connect.** With `--tailscale-user`, a request through the proxy is refused unless Tailscale Serve reports one of the listed logins in `Tailscale-User-Login`. Serve removes any copy a client sends, and does not set it for tagged devices, so a tagged device or another tailnet member is refused even with the token URL. The token is still required. Repeat the option for each allowed login. Requests made on the dashboard host itself are not proxied and are not checked.
+- **Start read-only.** Add `--allow-manage`, `--allow-chat` or `--allow-dispatch` only when you need them from the phone; the token URL then grants those actions.
+- **Treat the URL as a password.** It is printed when the dashboard starts, travels only in the URL fragment (never sent to the server or logged), is kept in the tab's session storage, and changes on every restart. Do not paste it into chats or screenshots. Pages are sent with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+- **Choose a neutral machine name.** HTTPS certificates are published in public Certificate Transparency logs, which reveal the `<machine>.<tailnet>.ts.net` name. Rename the machine in the admin console before enabling HTTPS if its name identifies you.
+- **Restrict the tailnet.** If other people or shared devices are in the tailnet, add an access rule that lets only your own devices reach this machine on port 443. Enable key expiry, and remove the phone from the tailnet if it is lost.
+- Tailscale's coordination service sees device metadata, not page contents; traffic between your devices is end-to-end encrypted. See the [Tailscale Serve documentation](https://tailscale.com/kb/1312/serve) and the [command reference](https://tailscale.com/kb/1242/tailscale-serve).
 
 Treat the token URL as operating authority: with `--allow-chat` or `--allow-dispatch`, its holder can direct agents. Restarting the dashboard creates a new token and revokes the old URL. Keep the proxy private to trusted devices; do not expose a plain HTTP LAN listener. The dashboard does not install or configure SSH or Tailscale.
 

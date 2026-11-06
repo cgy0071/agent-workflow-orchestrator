@@ -69,13 +69,13 @@ class DashboardTests(unittest.TestCase):
             self.thread.join(timeout=5)
         test_scheduler.SchedulerTests.tearDown(self)
 
-    def start_server(self, allow_dispatch=False, state="default", recent_file=None, public_origins=()):
+    def start_server(self, allow_dispatch=False, state="default", recent_file=None, public_origins=(), remote_users=()):
         if self.server:
             self.server.shutdown()
             self.server.server_close()
             self.thread.join(timeout=5)
         options = {"allow_dispatch": allow_dispatch, "transport_factory": lambda _request: self.fake,
-                   "recent_file": recent_file, "public_origins": public_origins}
+                   "recent_file": recent_file, "public_origins": public_origins, "remote_users": remote_users}
         if allow_dispatch:
             options.update(actor=self.controller["instance_id"], version=self.controller["version"],
                            context="main", tasks_root=self.tasks_root)
@@ -84,7 +84,7 @@ class DashboardTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.02}, daemon=True)
         self.thread.start()
 
-    def http(self, method, path, payload=None, *, token=True, host=None, origin=None):
+    def http(self, method, path, payload=None, *, token=True, host=None, origin=None, extra=None):
         port = self.server.server_port
         host = host or "127.0.0.1:" + str(port)
         headers = {"Host": host}
@@ -93,6 +93,7 @@ class DashboardTests(unittest.TestCase):
         if method == "POST":
             headers["Origin"] = "http://" + host if origin is None else origin
             headers["Content-Type"] = "application/json"
+        headers.update(extra or {})
         body = json.dumps(payload or {}) if method == "POST" else None
         con = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         try:
@@ -355,6 +356,31 @@ class DashboardTests(unittest.TestCase):
                                    origin="http://demo.tailnet.ts.net")[0], 403)
         self.assertEqual(self.http("GET", "/api/status", host="unknown.example")[0], 403)
         self.assertEqual(self.http("GET", "/api/status")[0], 200)
+
+    def test_tailscale_user_limits_the_proxy_and_not_loopback(self):
+        for value in ("", "nobody", "a b@example.com", "x@", "@example.com", "x@" + "a" * 191):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                dashboard.DashboardServer(("127.0.0.1", 0), self.state, public_origins=["https://demo.tailnet.ts.net"],
+                                          remote_users=[value])
+        with self.assertRaisesRegex(ValueError, "needs --public-origin"):
+            dashboard.DashboardServer(("127.0.0.1", 0), self.state, remote_users=["owner@example.com"])
+        self.start_server(public_origins=["https://demo.tailnet.ts.net"], remote_users=["Owner@Example.com"])
+        proxy = "demo.tailnet.ts.net"
+
+        def call(method, path, login=None, **more):
+            extra = {"Tailscale-User-Login": login} if login is not None else None
+            origin = "https://" + proxy if method == "POST" else None
+            return self.http(method, path, host=proxy, origin=origin, extra=extra, **more)
+        self.assertEqual(call("GET", "/")[0], 403)  # Even the page needs an allowed user through the proxy.
+        self.assertEqual(call("GET", "/api/status")[0], 403)
+        self.assertEqual(call("GET", "/api/status", login="other@example.com")[0], 403)
+        self.assertEqual(call("POST", "/api/probe", login="other@example.com")[0], 403)
+        self.assertEqual(call("GET", "/", login="owner@example.com")[0], 200)
+        status, _, headers = call("GET", "/api/status", login="owner@example.com")
+        self.assertEqual((status, headers["Referrer-Policy"]), (200, "no-referrer"))
+        self.assertEqual(call("POST", "/api/probe", login="owner@example.com")[0], 200)
+        self.assertEqual(call("GET", "/api/status", login="owner@example.com", token=False)[0], 403)  # Token still required.
+        self.assertEqual(self.http("GET", "/api/status")[0], 200)  # Loopback is not proxied and needs no login.
 
     def test_page_embeds_inert_chinese_dictionary(self):
         status, html, _ = self.http("GET", "/")
