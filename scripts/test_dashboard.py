@@ -398,6 +398,20 @@ class DashboardTests(unittest.TestCase):
         for element in ('id="inbox-toggle"', 'id="inbox-history"', 'id="task-range"', 'id="dispatch-panel"'):
             self.assertIn(element, html)  # Handled updates and old tasks are folded, not dropped.
 
+    def test_live_check_is_shown_on_role_cards(self):
+        _, html, _ = self.http("GET", "/")
+        # One place for an agent: the live check sits on its role card next to its open tasks.
+        self.assertNotIn('id="probe-panel"', html)
+        self.assertNotIn('id="probe-result"', html)
+        for element in ('id="people-panel"', 'id="probe-time"', 'id="probe-actions"', "role-live"):
+            self.assertIn(element, html)
+        # A working agent with no ledger task is explained, not left as a contradiction.
+        self.assertIn("Busy with work outside this workflow", html)
+        data = json.loads(html.split('<script type="application/json" id="i18n-zh">', 1)[1].split("</script>", 1)[0])
+        self.assertIn("Busy with work outside this workflow, such as a direct conversation.", data["exact"])
+        live = "Live check at 10:20:30. Open tasks come from the workflow ledger; the live status is what each agent window is doing now."
+        self.assertTrue(any(re.fullmatch(source, live) for source, _ in data["patterns"]))
+
     def test_task_summary_prefers_human_text_and_never_raises(self):
         import workflow_status
         cwd = self.root / "SUM-1"

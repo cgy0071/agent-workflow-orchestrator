@@ -6,6 +6,10 @@ The project has no numbered releases yet. Entries are grouped by the date change
 
 ## 2026-11-06
 
+### Changed
+
+- **Dashboard: one place per agent.** **Check agents now** shows each agent's live status on its role card, next to its open tasks, instead of in a separate panel far down the page that repeated the role list. A working agent with no ledger task is labelled as busy outside the workflow, and an idle agent with an open task points to the task stage.
+
 ### Added
 
 - **Remote command line from a phone** (optional, Windows; [references/remote-access.md](references/remote-access.md)). `contrib/windows-remote/setup-ssh-tailscale.ps1` sets up Windows OpenSSH reachable only through Tailscale: key login only, listening on the Tailscale address, a firewall rule limited to `100.64.0.0/10`, cmd or PowerShell as the default shell, and a startup task that waits for Tailscale. `hd.cmd`/`hd.ps1` list, read and type into Herdr panes over SSH, where Herdr's full-screen UI does not render well.

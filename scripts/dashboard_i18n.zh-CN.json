@@ -63,11 +63,6 @@
     "Given up": "已放弃",
     "Last sent": "最近成功发送",
     "Never": "尚无",
-    "Current agent check": "Agent 实时检查",
-    "On demand only": "仅按需执行",
-    "The page refresh reads saved records. Use Check agents now to contact active agents.": "页面刷新只读取已保存的记录。要检查在线 Agent，请使用“立即检查 Agent”。",
-    "Back to top": "回到顶部",
-    "Clear": "清除",
     "Start a task": "发起任务",
     "One send attempt after your confirmation": "确认后只发送一次",
     "Who should do the work?": "由谁执行？",
@@ -229,8 +224,6 @@
     "Context policy": "上下文策略",
     "Instance": "实例",
     "Herdr pane": "Herdr 窗格",
-    "Pane name": "窗格名称",
-    "Name source": "名称来源",
     "AWO name": "AWO 名称",
     "Custom name": "自定义名称",
     "No name": "无名称",
@@ -303,10 +296,7 @@
     "Failed": "失败",
     "Exited": "已退出",
     "Status unknown": "状态未知",
-    "Check details": "检查详情",
     "Status": "状态",
-    "Completion sequence": "完成序号",
-    "Identity matches": "身份一致",
     "idle": "空闲",
     "working": "工作中",
     "blocked": "受阻",
@@ -414,7 +404,11 @@
     "Repairs in a row before the Owner decides (0 = no limit)": "连续返修多少次后交给 Owner 决定（0 表示不限制）",
     "The worker stopped to ask a question": "Worker 停下来提了一个问题",
     "The worker says it is done, but the final marker line is missing": "Worker 说已完成，但缺少最后一行完成标记",
-    "partly done": "部分完成"
+    "partly done": "部分完成",
+    "Clear live check": "清除实时检查",
+    "Busy with work outside this workflow, such as a direct conversation.": "正在处理本工作流之外的事情，例如直接对话。",
+    "Not running right now; see the task stage below.": "目前没有在运行；请看下方任务的阶段。",
+    "Live": "实时"
   },
   "patterns": [
     [
@@ -574,10 +568,6 @@
       "#1：$2"
     ],
     [
-      "^Checked at (.+?)\\. Shows live agent status; tasks appear above only when dispatched through this workflow ledger\\.$",
-      "检查于 $1。这里只显示 Agent 的实时状态；只有通过本工作流台账派发的任务才会出现在上方。"
-    ],
-    [
       "^Acknowledge the update for (.+)\\.$",
       "确认收到 $1 的更新。"
     ],
@@ -668,6 +658,10 @@
     [
       "^Confirm records (.+?), then closes the delivered attempt and checks the next step\\. Review file: (.+) \\(sha256 (\\w+)\\)\\.$",
       "确认登记 #1，然后关闭已交付的执行并检查下一步。审核文件：$2（sha256 $3）。"
+    ],
+    [
+      "^Live check at (.+?)\\. Open tasks come from the workflow ledger; the live status is what each agent window is doing now\\.$",
+      "实时检查于 $1。进行中的任务来自工作流台账；实时状态是各 Agent 窗口此刻在做的事。"
     ]
   ]
 }
