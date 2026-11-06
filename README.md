@@ -78,6 +78,7 @@ Tasks A and B run in parallel on two fake workers; JOIN starts only after both a
 | Dispatch, parallel task plans, continuation | [scheduling.md](references/scheduling.md) |
 | Client adapters (Herdr, command, receipt) | [harness-adapters.md](references/harness-adapters.md) |
 | Roles, task and review templates, task states | [roles.md](references/roles.md), [task-and-review.md](references/task-and-review.md), [task-state-machine.md](references/task-state-machine.md) |
+| Optional remote command line from a phone (Windows, SSH over Tailscale) | [remote-access.md](references/remote-access.md) |
 | Channel contract for Owner requests | [owner-intake.md](references/owner-intake.md) |
 | What changed and when | [CHANGELOG.md](CHANGELOG.md) |
 

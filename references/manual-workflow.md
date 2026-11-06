@@ -247,4 +247,5 @@ scripts/demo_scheduler.py          Offline demo
 scripts/dashboard.py               Local ledger dashboard with optional dispatch, review, chat, management
 scripts/dashboard_actions.py       Dashboard management actions (preview, then confirm once)
 dashboard.cmd / dashboard.command  Double-click launchers for the dashboard
+contrib/windows-remote/            Optional: SSH over Tailscale setup and a Herdr helper for phones
 ```

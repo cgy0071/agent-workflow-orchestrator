@@ -8,6 +8,7 @@
 
 ### 新增
 
+- **用手机远程使用命令行**（可选，Windows；[references/remote-access.zh-CN.md](references/remote-access.zh-CN.md)）。`contrib/windows-remote/setup-ssh-tailscale.ps1` 把 Windows OpenSSH 配置为只能经 Tailscale 连接：只认密钥、只监听 Tailscale 地址、防火墙只放行 `100.64.0.0/10`、默认 shell 可选 cmd 或 PowerShell，并用开机任务等 Tailscale 就绪后再启动。`hd.cmd`/`hd.ps1` 在 SSH 里列出、读取 Herdr 窗口并向其输入；Herdr 的全屏界面在这种方式下显示不正常。
 - **看板的 Tailscale 身份检查。** 在 `tailscale serve` 后面使用 `--public-origin` 时，`--tailscale-user LOGIN` 只放行 `Tailscale-User-Login` 属于所列登录名的请求（该标头由 Serve 设置，并会删除客户端自带的副本）。令牌仍然必需；本机回环请求不受影响。响应新增 `Referrer-Policy: no-referrer`。监控文档增加了通过 Tailscale 用手机访问的步骤和隐私说明。
 
 ## 2026-11-05
