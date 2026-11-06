@@ -246,5 +246,6 @@ scripts/process_util.py            跨平台进程存活检查
 scripts/demo_scheduler.py          离线演示
 scripts/dashboard.py               本地台账面板，可选派发、审核、对话和管理
 scripts/dashboard_actions.py       面板管理操作（先预览，再一次性确认）
+contrib/windows-remote/            可选：经 Tailscale 的 SSH 配置脚本和手机用的 Herdr 小工具
 dashboard.cmd / dashboard.command  双击启动面板
 ```

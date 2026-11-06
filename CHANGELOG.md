@@ -8,6 +8,7 @@ The project has no numbered releases yet. Entries are grouped by the date change
 
 ### Added
 
+- **Remote command line from a phone** (optional, Windows; [references/remote-access.md](references/remote-access.md)). `contrib/windows-remote/setup-ssh-tailscale.ps1` sets up Windows OpenSSH reachable only through Tailscale: key login only, listening on the Tailscale address, a firewall rule limited to `100.64.0.0/10`, cmd or PowerShell as the default shell, and a startup task that waits for Tailscale. `hd.cmd`/`hd.ps1` list, read and type into Herdr panes over SSH, where Herdr's full-screen UI does not render well.
 - **Tailscale identity check for the dashboard.** With `--public-origin` behind `tailscale serve`, `--tailscale-user LOGIN` admits only requests whose `Tailscale-User-Login` (set by Serve, which strips client copies) is a listed login. The token is still required; loopback requests are unaffected. Responses now carry `Referrer-Policy: no-referrer`. The monitoring guide has a phone-over-Tailscale section with privacy notes.
 
 ## 2026-11-05
