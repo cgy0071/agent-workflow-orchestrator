@@ -6,6 +6,10 @@
 
 ## 2026-11-06
 
+### 改动
+
+- **看板：每个 Agent 只在一处显示。** **立即检查 Agent** 把实时状态显示在各角色卡片上、紧挨着它的进行中任务，不再放在页面下方一个重复列出角色的独立面板里。“工作中”但台账里没有任务时，注明它在处理工作流之外的事情；空闲但有进行中任务时，提示去看任务阶段。
+
 ### 新增
 
 - **用手机远程使用命令行**（可选，Windows；[references/remote-access.zh-CN.md](references/remote-access.zh-CN.md)）。`contrib/windows-remote/setup-ssh-tailscale.ps1` 把 Windows OpenSSH 配置为只能经 Tailscale 连接：只认密钥、只监听 Tailscale 地址、防火墙只放行 `100.64.0.0/10`、默认 shell 可选 cmd 或 PowerShell，并用开机任务等 Tailscale 就绪后再启动。`hd.cmd`/`hd.ps1` 在 SSH 里列出、读取 Herdr 窗口并向其输入；Herdr 的全屏界面在这种方式下显示不正常。

@@ -298,6 +298,11 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
 .role-tasks { margin:10px 0 0; font-size:12px; color:var(--muted); overflow-wrap:anywhere }
 .role-pane { margin:6px 0 0; font:600 12px ui-monospace,SFMono-Regular,Consolas,monospace; color:var(--accent) }
 .role-summary { margin:5px 0; font-size:12px; color:var(--muted) }
+.role-live { margin:8px 0 0; font-size:12px } .role-live strong { font-weight:800 }
+.role-live.idle strong { color:var(--accent) } .role-live.working strong { color:#285c96 }
+.role-live.blocked strong,.role-live.failed strong,.role-live.error strong { color:var(--danger) }
+.role-live .muted { display:block; margin-top:2px }
+@media (prefers-color-scheme:dark) { .role-live.working strong { color:#a9ceff } }
 .technical { margin-top:9px; font-size:12px; color:var(--muted) }
 .technical summary { cursor:pointer; font-weight:700; color:var(--accent) }
 .technical p { margin:5px 0; overflow-wrap:anywhere }
@@ -455,8 +460,10 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       <p id="chat-status" role="status"></p>
       <div id="chat-log" class="list"></div>
       <pre id="chat-output" class="hidden"></pre></section>
-    <section class="panel wide"><div class="panel-head"><h2>People and agents</h2>
-      <span class="panel-caption">Who can work on these tasks</span></div><div id="roles" class="cards"></div></section>
+    <section class="panel wide" id="people-panel"><div class="panel-head"><h2>People and agents</h2>
+      <span class="panel-caption">Who can work on these tasks</span></div>
+      <p id="probe-time" class="muted hidden"></p><div id="roles" class="cards"></div>
+      <div class="small-actions hidden" id="probe-actions"><button id="probe-clear" type="button">Clear live check</button></div></section>
     <section class="panel wide"><div class="panel-head"><h2>Tasks</h2>
       <div class="panel-tools"><label class="range-label"><span>Show</span><select id="task-range">
         <option value="1">Open tasks and the last 24 hours</option><option value="7">Open tasks and the last 7 days</option>
@@ -475,11 +482,6 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       <p id="owner-notify-summary" class="muted hidden"></p><div id="alerts" class="list"></div></section>
     <section class="panel"><div class="panel-head"><h2>Resource limits</h2>
       <span class="panel-caption">Reserved capacity for active tasks</span></div><div id="resources"></div></section>
-    <section class="panel" id="probe-panel"><div class="panel-head"><h2>Current agent check</h2>
-      <span class="panel-caption">On demand only</span></div><p class="muted">The page refresh reads saved records. Use Check agents now to contact active agents.</p>
-      <p id="probe-time" class="muted"></p><div id="probe-result" class="list"></div>
-      <div class="small-actions"><button id="probe-top" type="button">Back to top</button>
-        <button id="probe-clear" type="button">Clear</button></div></section>
     <section class="panel wide" id="dispatch-panel"><div class="panel-head"><h2>Start a task</h2>
       <span class="panel-caption">One send attempt after your confirmation</span></div>
       <p class="muted" id="dispatch-note"></p>
@@ -573,6 +575,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   let lastData = null;
   const chatSessions = new Map();
   const checkedNames = new Map();
+  const liveChecks = new Map();
   let checkedState = null;
   const paneKey = (role, binding) => role + ':' + binding.instance_id;
   const sourceName = source => ({awo:'AWO name', custom:'Custom name', none:'No name',
@@ -822,6 +825,21 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       add(card, 'p', 'role-tasks', role.tasks.length ?
         role.tasks.length + ' open task' + (role.tasks.length === 1 ? '' : 's') + ': ' +
           role.tasks.map(t => taskName(data, t.task_id)).join('; ') : 'No open tasks');
+      const live = current && liveChecks.get(paneKey(role.role, current));
+      if (live) {
+        const state = live.error ? 'error' : live.identity_matches === false ? 'blocked' : (live.status || 'unknown');
+        const line = add(card, 'p', 'role-live ' + state);
+        add(line, 'span', '', 'Live'); add(line, 'span', '', ': ');
+        add(line, 'strong', '', live.error ? 'Could not check agent' :
+          live.identity_matches === false ? 'Agent identity changed; inspect before acting' :
+          named(live.status, {idle:'Available', working:'Working', blocked:'Needs help',
+            failed:'Failed', exited:'Exited', unknown:'Status unknown'}));
+        if (live.error) add(line, 'span', 'muted', live.error);
+        else if (live.status === 'working' && !role.tasks.length)
+          add(line, 'span', 'muted', 'Busy with work outside this workflow, such as a direct conversation.');
+        else if (live.status === 'idle' && role.tasks.length)
+          add(line, 'span', 'muted', 'Not running right now; see the task stage below.');
+      }
       if (current && current.pane) {
         const checked = checkedNames.get(paneKey(role.role, current));
         const line = add(card, 'p', 'role-pane');
@@ -1283,7 +1301,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   }
   async function refresh() {
     try { const data = await api('/api/status'); lastData = data; id('error').textContent = '';
-      if (checkedState !== data.state) { checkedNames.clear(); checkedState = data.state; }
+      if (checkedState !== data.state) { clearLive(); checkedState = data.state; }
       picker(data, picking || data.state === null);
       if (data.state === null) { id('state').textContent = 'No workflow open'; id('goal').textContent = '';
         id('updated').textContent = 'Choose a workflow data folder to begin'; return; }
@@ -1642,33 +1660,30 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   }
   id('metrics-load').addEventListener('click', loadMetrics);
   id('metrics-days').addEventListener('change', () => { if (metricsData) loadMetrics(); });
+  function clearLive() {
+    liveChecks.clear(); checkedNames.clear(); id('probe-time').textContent = '';
+    show('probe-time', false); show('probe-actions', false);
+  }
   id('probe').addEventListener('click', async () => {
-    id('probe').disabled = true; const root = id('probe-result'); empty(root, 'Checking active agents...');
-    id('probe-time').textContent = ''; id('probe-panel').scrollIntoView({behavior:'smooth', block:'start'});
-    try { const data = await api('/api/probe', {}); root.replaceChildren();
-      id('probe-time').textContent = 'Checked at ' + new Date().toLocaleTimeString() +
-        '. Shows live agent status; tasks appear above only when dispatched through this workflow ledger.';
-      if (!data.agents.length) empty(root, 'No active agents to check');
+    id('probe').disabled = true; const note = id('probe-time');
+    note.className = 'muted'; note.textContent = 'Checking active agents...'; show('probe-time', true);
+    id('people-panel').scrollIntoView({behavior:'smooth', block:'start'});
+    try { const data = await api('/api/probe', {}); liveChecks.clear();
       for (const w of data.agents) {
-        if (w.instance_id && w.pane && !w.error) checkedNames.set(w.role + ':' + w.instance_id.slice(0, 8),
+        // The status view shortens instance IDs to 8 characters; key live results the same way.
+        const key = w.role + ':' + String(w.instance_id || '').slice(0, 8);
+        liveChecks.set(key, w);
+        if (w.instance_id && w.pane && !w.error) checkedNames.set(key,
           {name:w.name, label_source:w.label_source});
-        const item = add(root, 'div', 'list-item');
-        add(item, 'strong', '', w.role + ': ' + (w.error ? 'Could not check agent' :
-          w.identity_matches === false ? 'Agent identity changed; inspect before acting' :
-          named(w.status, {idle:'Available', working:'Working', blocked:'Needs help',
-            failed:'Failed', exited:'Exited', unknown:'Status unknown'})));
-        if (w.error) add(item, 'p', 'error', w.error);
-        const extra = technical(item, 'Check details');
-        detailLine(extra, 'Status', w.status); detailLine(extra, 'Completion sequence', w.completion_seq);
-        detailLine(extra, 'Identity matches', w.identity_matches);
-        detailLine(extra, 'Mode', w.mode); detailLine(extra, 'Herdr pane', w.pane);
-        if (w.pane) { detailLine(extra, 'Pane name', w.name || '(unnamed)');
-          detailLine(extra, 'Name source', sourceName(w.label_source)); }
       }
+      note.textContent = data.agents.length ? 'Live check at ' + new Date().toLocaleTimeString() +
+        '. Open tasks come from the workflow ledger; the live status is what each agent window is doing now.' :
+        'No active agents to check';
+      show('probe-actions', data.agents.length > 0);
       if (lastData) roles(lastData);
-    } catch (error) { empty(root, error.message); } finally { id('probe').disabled = false; }
+    } catch (error) { note.className = 'error'; note.textContent = error.message; }
+    finally { id('probe').disabled = false; }
   });
-  id('probe-top').addEventListener('click', () => window.scrollTo({top:0, behavior:'smooth'}));
   async function chatRead(role = chatRole()) {
     if (!role) return; id('chat-read').disabled = true;
     try { const data = await api('/api/chat/output', {role});
@@ -1715,7 +1730,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); chatSend(); } });
   id('chat-open').addEventListener('click', () => { id('chat-panel').scrollIntoView({behavior:'smooth', block:'start'});
     id('chat-input').focus(); });
-  id('probe-clear').addEventListener('click', () => { id('probe-result').replaceChildren(); id('probe-time').textContent = ''; checkedNames.clear(); if (lastData) roles(lastData); });
+  id('probe-clear').addEventListener('click', () => { clearLive(); if (lastData) roles(lastData); });
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
     await navigator.clipboard.writeText(id(button.dataset.copy).textContent); button.textContent = 'Copied';
   }));
