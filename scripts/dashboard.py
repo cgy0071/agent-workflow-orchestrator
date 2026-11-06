@@ -43,6 +43,8 @@ CHAT_MESSAGE_LIMIT = 20000  # characters in one chat message
 CHAT_OUTPUT_LIMIT = 60000  # characters of recent role output shown in the page
 PUBLIC_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\Z")
 PUBLIC_NETLOC = re.compile(r"[A-Za-z0-9.-]+(?::[0-9]{1,5})?\Z")
+# A Tailscale login name as Tailscale Serve reports it, e.g. you@example.com or you@github.
+REMOTE_USER = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\Z")
 TLS_DIR = Path.home() / ".agent-workflow-orchestrator" / "tls"
 
 
@@ -188,6 +190,12 @@ def _lan_certificate(address, directory=TLS_DIR):
 def _certificate_fingerprint(cert):
     pem = Path(cert).read_text(encoding="ascii")
     return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
+
+
+def _remote_user(value):
+    if not isinstance(value, str) or not REMOTE_USER.fullmatch(value):
+        raise ValueError("tailscale user must be a login name such as you@example.com")
+    return value.lower()
 
 
 def _public_origin(value):
@@ -1839,7 +1847,7 @@ class DashboardServer(ThreadingHTTPServer):
 
     def __init__(self, address, state=None, *, allow_dispatch=False, allow_chat=False, allow_manage=False,
                  actor=None, version=None, context=None, tasks_root=None, transport_factory=Transport,
-                 recent_file=None, public_origins=(), lan_tls=None, popen=subprocess.Popen):
+                 recent_file=None, public_origins=(), remote_users=(), lan_tls=None, popen=subprocess.Popen):
         host, port = address
         if lan_tls is None and host not in ("127.0.0.1", "localhost"):
             raise ValueError("dashboard host must be loopback: 127.0.0.1 or localhost")
@@ -1861,6 +1869,10 @@ class DashboardServer(ThreadingHTTPServer):
         self.manager = None
         self.public_origins = tuple(dict.fromkeys(_public_origin(value) for value in public_origins))
         self.public_hosts = {urlsplit(value).netloc for value in self.public_origins}
+        # When users are listed, a request through the proxy must also carry an allowed Tailscale Serve identity.
+        self.remote_users = frozenset(_remote_user(value) for value in remote_users)
+        if self.remote_users and not self.public_origins:
+            raise ValueError("--tailscale-user needs --public-origin")
         self.lan_tls = lan_tls is not None
         self.actor, self.version, self.context = actor, version, context
         self.tasks_root = None
@@ -2334,6 +2346,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'nonce-" +
                          self.server.csp_nonce + "'; style-src 'nonce-" + self.server.csp_nonce +
                          "'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'")
@@ -2355,6 +2368,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                        "localhost:" + str(self.server.server_port)}
             allowed.update(self.server.public_hosts)
         return self.headers.get("Host", "").lower() in allowed
+
+    def _remote_user_ok(self):
+        """A request through the proxy must come from an allowed Tailscale user. Loopback requests are not proxied.
+
+        Tailscale Serve sets Tailscale-User-Login on requests it forwards from a tailnet user and drops a
+        client-supplied copy; a local process could forge it but would still need the token."""
+        if not self.server.remote_users or self.headers.get("Host", "").lower() not in self.server.public_hosts:
+            return True
+        return self.headers.get("Tailscale-User-Login", "").strip().lower() in self.server.remote_users
 
     def _token(self):
         supplied = self.headers.get("X-Dashboard-Token", "")
@@ -2401,6 +2423,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if not self._host():
             self._error(403, "invalid Host")
             return
+        if not self._remote_user_ok():
+            self._error(403, "this Tailscale user is not allowed")
+            return
         path = urlsplit(self.path).path
         if path == "/":
             body = HTML.replace("__CSP_NONCE__", self.server.csp_nonce).replace("__I18N_ZH__", I18N_ZH).encode("utf-8")
@@ -2440,6 +2465,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         raw = self._read_raw()
         if not self._host():
             self._error(403, "invalid Host")
+            return
+        if not self._remote_user_ok():
+            self._error(403, "this Tailscale user is not allowed")
             return
         if not self._origin():
             self._error(403, "invalid Origin")
@@ -2519,6 +2547,8 @@ def main(argv=None):
     parser.add_argument("--no-browser", action="store_true", help="print the URL without opening a browser")
     parser.add_argument("--public-origin", action="append", default=[], metavar="URL",
                         help="authorized HTTPS reverse-proxy origin; repeat for more than one")
+    parser.add_argument("--tailscale-user", action="append", default=[], metavar="LOGIN",
+                        help="behind tailscale serve: only this Tailscale login may use --public-origin; repeat for more")
     parser.add_argument("--allow-dispatch", action="store_true")
     parser.add_argument("--allow-chat", action="store_true",
                         help="let the bound controller chat with any active role")
@@ -2547,7 +2577,7 @@ def main(argv=None):
                              allow_chat=args.allow_chat, allow_manage=args.allow_manage,
                              actor=args.actor, version=args.version, context=args.context,
                              tasks_root=args.tasks_root, recent_file=RECENT_FILE,
-                             public_origins=args.public_origin, lan_tls=lan_tls)
+                             public_origins=args.public_origin, remote_users=args.tailscale_user, lan_tls=lan_tls)
     except (ValueError, OSError, ssl.SSLError) as exc:
         parser.exit(2, "dashboard: " + str(exc) + "\n")
     with server:
@@ -2557,6 +2587,9 @@ def main(argv=None):
             print("Certificate SHA-256: " + _certificate_fingerprint(lan_tls[0]), flush=True)
         for public in server.public_origins:
             print("Dashboard (remote): " + public + "/#" + server.token, flush=True)
+        if server.public_origins and not server.remote_users:
+            print("Warning: any device that reaches the proxy and has the token URL can use this page; "
+                  "behind tailscale serve, add --tailscale-user YOUR-LOGIN.", flush=True)
         print("State: " + (str(server.state) if server.state else "choose in the page"), flush=True)
         print("Press Ctrl+C to stop.", flush=True)
         if not args.no_browser:

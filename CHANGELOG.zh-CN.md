@@ -4,6 +4,12 @@
 
 项目还没有编号版本。下面按改动合并到 `main` 的日期分组，括号里是对应的 PR 编号。所有改动都遵守同一套安全规则：每个任务只发送一次，不自动回答授权提示，独立审核记录在案才算完成，配置不等于授权。
 
+## 2026-11-06
+
+### 新增
+
+- **看板的 Tailscale 身份检查。** 在 `tailscale serve` 后面使用 `--public-origin` 时，`--tailscale-user LOGIN` 只放行 `Tailscale-User-Login` 属于所列登录名的请求（该标头由 Serve 设置，并会删除客户端自带的副本）。令牌仍然必需；本机回环请求不受影响。响应新增 `Referrer-Policy: no-referrer`。监控文档增加了通过 Tailscale 用手机访问的步骤和隐私说明。
+
 ## 2026-11-05
 
 ### 新增
