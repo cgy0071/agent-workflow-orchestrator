@@ -41,6 +41,27 @@ def has_schema(con):
     return bool(con.execute("SELECT 1 FROM sqlite_master WHERE name='dispatches'").fetchone())
 
 
+def continued_episode(state, task, generation, episode):
+    """True only when the journal records a continuation reserved for this monitor stall episode.
+
+    Read-only and conservative: a missing ledger, missing scheduler schema or
+    unreadable row reports False, so the monitor keeps the current episode open.
+    """
+    try:
+        with _read_database(state) as con:
+            if not has_schema(con):
+                return False
+            rows = con.execute("SELECT data FROM task_journal WHERE task=? AND generation=? "
+                               "AND kind='continue_reserved'", (task, generation)).fetchall()
+        for row in rows:
+            if json.loads(row[0]).get("stall_episode") == episode:
+                return True
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return False
+    return False
+
+
+
 @contextmanager
 def _read_database(state):
     path = Path(state).resolve() / "workflow.sqlite3"

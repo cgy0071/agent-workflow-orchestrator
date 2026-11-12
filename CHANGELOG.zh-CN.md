@@ -14,6 +14,11 @@
 - **其他 V2 组件（未发布）。** 以下可选模块扩展同一个台账，不新增权威：优先级调度器（排队顺序、协作槽位、准入闸门）、Assignment 工作区（隔离根目录、Git worktree、冻结源）、持久化 Agent 消息、本地知识、应用网关、协作运行时、合并队列、本地监督与配对外部草稿，以及只读运行视图和隔离审计回执。每个可写模块仍由服务 enable 开关控制，并各自有 `references/awo-*.md` 指南；只读运行视图只要 V2 schema 存在就提供经认证的快照。这些组件的独立验收另行跟踪，本条目不声称已验收。
 - **Git worktree 代码闭环（未发布）。** `scripts/validate_v2_worktree_code.py` 验证可选的 V2 路径：从真实 Git worktree 执行、独立审核、本地 Merge Queue，一直到下游物化。它在一个一次性夹具上产生五次真实的已认证 Codex 轮次，创建 Task A 和依赖它的 Task B，落地 Task A，并让 Task B 保持 accepted 但未 landed。费用仍为未知；已测试范围是 Windows 加 Codex CLI。它不是任意项目的启动器。此改动尚未提交，也未进入 `main` 或 GitHub。见 [references/worktree-code-loop.zh-CN.md](references/worktree-code-loop.zh-CN.md)。
 
+### 修复
+
+- **后台进展只算一次事故范围。** `working`/`settling` 观测，或没有有效交付的新完成序号，不再结束监控的停顿事件范围；因此 Worker 反复回到空闲、而所属后台进程仍在继续时，只报告一次事件，而不是重复序列。事件范围现在只在有效任务绑定交付，或为该任务、generation 和该次停顿记入日志的继续之后关闭；继续之后再次停顿属于新的范围，会单独发布事件并通知。输出文字、进程号、心跳和看似存活证明的文件都不会关闭范围；过期、不匹配或伪造的存活记录也不能压下真实停顿。见 [references/monitoring.zh-CN.md](references/monitoring.zh-CN.md) 和 [references/scheduling.zh-CN.md](references/scheduling.zh-CN.md)。
+- **崩溃测试的效应发布（仅测试）。** 协作运行时崩溃测试改为在同目录写临时文件并原子替换来发布效应进程号，并按确切 PID 有界清理。读取方不会再看到空的最终文件；测试用注入的写入暂停证明这一点。产品行为不变。
+
 ## 2026-11-06
 
 ### 改动

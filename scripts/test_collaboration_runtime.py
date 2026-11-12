@@ -30,6 +30,57 @@ import workflow_control as control
 import workflow_scheduler as legacy
 
 
+# Fixture verifier: publish the PID atomically so an observer can only see the
+# final path absent or complete. AWO_EFFECT_PAUSE_FILE is a test-only seam that
+# pauses the writer between the temporary write and the replace.
+ATOMIC_EFFECT_CODE = "\n".join([
+    "from pathlib import Path",
+    "import os, time",
+    "p = Path('effect.txt'); q = Path('effect.txt.part')",
+    "q.write_text(str(os.getpid()))",
+    "gate = os.environ.get('AWO_EFFECT_PAUSE_FILE')",
+    "while gate and not Path(gate).exists():",
+    "    time.sleep(0.01)",
+    "os.replace(q, p)",
+    "time.sleep(20)",
+])
+
+
+def owned_alive(pid):
+    """Whether this fixture's actual PID is still running, without name matching."""
+    if os.name == "nt":
+        import ctypes
+        synchronize = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+        if not handle:
+            return False
+        try:
+            return ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == 0x102
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def terminate_owned(pid, timeout=5.0):
+    """Bounded SIGTERM and wait for the exact PID emitted by this fixture."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not owned_alive(pid):
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def race_child(path, project, principal, operation, payload):
     """Independent process, actual SQLite lock/transaction, no mock transport."""
     con = sqlite3.connect(path, timeout=15)
@@ -619,8 +670,7 @@ class CollaborationTests(unittest.TestCase):
         self.assert_code('verification_pending', self.command, 'collaboration_verify', assignment_id=a['assignment_id'], event_id=event)
 
     def test_actual_runner_crash_after_effect_does_not_blindly_rerun(self):
-        self.configure(code='from pathlib import Path; import os,time; Path("effect.txt").write_text(str(os.getpid())); time.sleep(20)',
-                       timeout_seconds=30)
+        self.configure(code=ATOMIC_EFFECT_CODE, timeout_seconds=30)
         a, event = self.ready()
         intent = self.command('collaboration_verify', assignment_id=a['assignment_id'], event_id=event)
         code = ('import json,sqlite3,sys; import collaboration_runtime as c; '
@@ -650,10 +700,37 @@ class CollaborationTests(unittest.TestCase):
                 child.wait(timeout=10)
             if owned_verifier:
                 # Only the actual local child PID emitted by this fixture.
-                try:
-                    os.kill(owned_verifier, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+                self.assertTrue(terminate_owned(owned_verifier),
+                                "owned verifier did not exit after a bounded SIGTERM")
+
+    def test_atomic_effect_publication_never_exposes_partial_pid(self):
+        work = self.root / "effect-proof"
+        work.mkdir()
+        gate = work / "release"
+        env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent),
+                   AWO_EFFECT_PAUSE_FILE=str(gate))
+        child = subprocess.Popen([sys.executable, "-B", "-c", ATOMIC_EFFECT_CODE], cwd=work, env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        path, part = work / "effect.txt", work / "effect.txt.part"
+        try:
+            deadline = time.monotonic() + 10
+            while not part.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(part.exists(), "writer did not reach the injected pause")
+            self.assertEqual(part.read_text().strip(), str(child.pid))
+            for _ in range(50):
+                self.assertFalse(path.exists(), "final effect PID appeared before the atomic replace")
+                time.sleep(0.01)
+            gate.write_text("go", encoding="utf-8")
+            deadline = time.monotonic() + 10
+            while not path.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(path.exists(), "final effect PID did not appear after the replace")
+            self.assertEqual(path.read_text().strip(), str(child.pid))
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=10)
 
     def test_verifier_epoch_change_and_unknown_retry_fail_closed(self):
         self.configure()

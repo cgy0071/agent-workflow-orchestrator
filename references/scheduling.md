@@ -206,7 +206,11 @@ rate-limit or network error), `blocked` (usually a harness permission/approval
 prompt or usage limit) and `adapter_error` (queries keep failing) are pauses,
 not ends. The monitor publishes one event and one notification per distinct
 status in each stall episode, then keeps watching the same attempt; a later delivery still becomes
-`review_ready`. The overall monitor timeout also applies while stalled. When
+`review_ready`. An episode is an incident scope for the same attempt: a
+`working` or `settling` observation, a fresh completion sequence without valid
+artifacts, or a forged/expired liveness file does not end it. Only a valid
+task-bound delivery or a `continue_reserved` journal entry for that episode
+does. The overall monitor timeout also applies while stalled. When
 the controller closes the attempt (`reconcile --outcome terminated` or
 `release`), the monitor stops without another event.
 
@@ -229,7 +233,10 @@ the Owner answers permission prompts in the worker's own harness, and the
 monitor resumes when the worker does. If the harness denied a permission, a
 continuation cannot help; change the harness permissions or close the attempt.
 Dispatch to a worker that shows a permission prompt is refused before anything
-is sent, with that reason.
+is sent, with that reason. When the monitor sees the journaled continuation it
+closes the current episode and starts a fresh delivery grace window; if the same
+task stalls again after that continuation, it is a new episode with its own
+event and notification.
 
 ## Follow-up tasks and observed starts
 
