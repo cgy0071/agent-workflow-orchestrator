@@ -4,7 +4,21 @@
 
 项目还没有编号版本。下面按改动合并到 `main` 的日期分组，括号里是对应的 PR 编号。所有改动都遵守同一套安全规则：每个任务只发送一次，不自动回答授权提示，独立审核记录在案才算完成，配置不等于授权。
 
+## Unreleased
+
+### 新增
+
+- **可选的 V2 服务边界。** `scripts/awo_service.py` 增加增量 `v2_*` 表、默认只读的 dry-run 与由 controller 执行的保守迁移、带持久幂等的命令信封，以及针对 legacy register/dispatch 与 continuation 最终发送的 freeze/epoch 门禁。V2 默认关闭；下面列出的其他 V2 组件都是独立的可选模块。迁移复用现有 acceptance 门禁，绝不把缺失或变更的证据升级。此改动尚未提交，也未进入 `main` 或 GitHub。见 [references/awo-service.zh-CN.md](references/awo-service.zh-CN.md)。
+- **最小 Agent 注册表。** controller 发放单次 enrollment grant、pending self-registration、能力证据级别、认证心跳与撤销。secret 只写入独占本地文件；supported 能力要求上下文匹配并重核本地证据哈希。不增加 scheduler/MCP/消息权限。见 [references/awo-registry.zh-CN.md](references/awo-registry.zh-CN.md)。
+- **预算账本。** 从 Assignment/Task/项目推导 run/task/workflow scope，原子分 scope 预留，delta/累计 sample，per-run 暴露，authoritative close 对账，按维度 unknown，以及 controller limit/action 命令。不增加调度器启用或供应商硬上限声明。见 [references/awo-budget.zh-CN.md](references/awo-budget.zh-CN.md)。
+- **其他 V2 组件（未发布）。** 以下可选模块扩展同一个台账，不新增权威：优先级调度器（排队顺序、协作槽位、准入闸门）、Assignment 工作区（隔离根目录、Git worktree、冻结源）、持久化 Agent 消息、本地知识、应用网关、协作运行时、合并队列、本地监督与配对外部草稿，以及只读运行视图和隔离审计回执。每个可写模块仍由服务 enable 开关控制，并各自有 `references/awo-*.md` 指南；只读运行视图只要 V2 schema 存在就提供经认证的快照。这些组件的独立验收另行跟踪，本条目不声称已验收。
+- **Git worktree 代码闭环（未发布）。** `scripts/validate_v2_worktree_code.py` 验证可选的 V2 路径：从真实 Git worktree 执行、独立审核、本地 Merge Queue，一直到下游物化。它在一个一次性夹具上产生五次真实的已认证 Codex 轮次，创建 Task A 和依赖它的 Task B，落地 Task A，并让 Task B 保持 accepted 但未 landed。费用仍为未知；已测试范围是 Windows 加 Codex CLI。它不是任意项目的启动器。此改动尚未提交，也未进入 `main` 或 GitHub。见 [references/worktree-code-loop.zh-CN.md](references/worktree-code-loop.zh-CN.md)。
+
 ## 2026-11-06
+
+### 改动
+
+- **看板：每个 Agent 只在一处显示。** **立即检查 Agent** 把实时状态显示在各角色卡片上、紧挨着它的进行中任务，不再放在页面下方一个重复列出角色的独立面板里。“工作中”但台账里没有任务时，注明它在处理工作流之外的事情；空闲但有进行中任务时，提示去看任务阶段。
 
 ### 新增
 

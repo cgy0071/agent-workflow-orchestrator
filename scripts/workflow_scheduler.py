@@ -221,6 +221,8 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
         # retire this controller between the final check and the external call.
         with control.database(state) as con:
             control.guard(con, actor, version, context, "dispatch")
+            from awo_service import legacy_dispatch_guard
+            legacy_dispatch_guard(con, actor, version, context)
             if run:
                 assert_ready(con, run, node, request)
             current = control.active(con, spec["role"])
@@ -746,6 +748,8 @@ def continue_task(state, task, actor, version, context, *, transport=None, note=
     try:
         with control.database(state) as con:
             control.guard(con, actor, version, context, "dispatch")
+            from awo_service import legacy_dispatch_guard
+            legacy_dispatch_guard(con, actor, version, context)
             live = transport.status(spec)
             if not identity_matches(live.get("identity", {}), spec["expected_identity"]) or not _resumable(request, live):
                 raise ValueError("worker identity or availability changed before send")
