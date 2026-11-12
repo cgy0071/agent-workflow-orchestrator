@@ -4,6 +4,16 @@ English | [Chinese](CHANGELOG.zh-CN.md)
 
 The project has no numbered releases yet. Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
 
+## Unreleased
+
+### Added
+
+- **Opt-in V2 service boundary.** `scripts/awo_service.py` adds additive `v2_*` tables, a read-only dry-run and controller-applied conservative migration, a command envelope with durable idempotency, and freeze/epoch guards for legacy register/dispatch and the final send of continuations. V2 stays disabled by default; the later V2 components listed below are separate opt-in modules. Migration reuses the existing acceptance gate and never upgrades missing or changed evidence. This work is uncommitted and not on `main` or GitHub. See [references/awo-service.md](references/awo-service.md).
+- **Minimal Agent registry.** Controller-issued single-use enrollment grants, pending self-registration, capability evidence levels, authenticated heartbeat, and revocation. Secrets are written only to exclusive local files; capability support requires matching context plus a rechecked local evidence hash. No scheduler/MCP/messaging authority is added. See [references/awo-registry.md](references/awo-registry.md).
+- **Budget ledger.** Run/task/workflow scopes derived from the Assignment/Task/project, atomic scoped reservations, delta/cumulative samples, per-run exposure, authoritative close reconciliation, dimension-specific unknown handling, and controller limit/action commands. No scheduler activation or provider hard-cap claim is added. See [references/awo-budget.md](references/awo-budget.md).
+- **Additional V2 components (unreleased).** Opt-in modules extend the same ledger without adding another authority: the priority scheduler (queue order, collaboration slots, admission gates), assignment workspaces (isolated roots, Git worktrees, frozen source), durable agent messaging, local knowledge, the application gateway, the collaboration runtime, the merge queue, local supervision with paired external drafts, and read-only runtime views with isolated audit receipts. Each write-capable module stays gated by the service enable switch and has its own guide under `references/awo-*.md`; the read-only runtime views serve an authenticated snapshot whenever the V2 schema is present. Independent acceptance of these components is tracked separately and is not claimed by this entry.
+- **Git worktree code loop (unreleased).** `scripts/validate_v2_worktree_code.py` exercises the opt-in V2 path from real Git worktree execution through independent review and the local Merge Queue to downstream materialization. It makes five real authenticated Codex turns on a disposable fixture, creates Task A and dependent Task B, lands Task A, and leaves Task B accepted but not landed. Monetary cost remains unknown; Windows with the Codex CLI is the tested scope. It is not a launcher for an arbitrary project. This work is uncommitted and not on `main` or GitHub. See [references/worktree-code-loop.md](references/worktree-code-loop.md).
+
 ## 2026-11-06
 
 ### Changed
