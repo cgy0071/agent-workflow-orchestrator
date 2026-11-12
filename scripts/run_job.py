@@ -52,10 +52,19 @@ def run(job):
         number(timeout, "timeout_seconds", maximum=3600)
         if not isinstance(job["authorization"], dict) or job["authorization"].get("terminate_on_timeout") is not True:
             raise ValueError("bounded jobs require explicit terminate_on_timeout authorization")
+    execution_cwd = job.get("execution_cwd")
+    if execution_cwd is None:
+        execution_cwd = job["cwd"]
+    if not isinstance(execution_cwd, str) or not Path(execution_cwd).is_absolute():
+        raise ValueError("execution_cwd must be an absolute path")
+    execution_cwd = Path(execution_cwd).resolve()
+    if not execution_cwd.is_dir():
+        raise ValueError("execution_cwd must be an existing directory")
     directory = Path(job["output_dir"]).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     state = {"task_id": job["task_id"], "nonce": job["nonce"], "identity": job["identity"],
              "status": "working", "completion_seq": 0, "argv": argv, "cwd": job["cwd"],
+             "execution_cwd": str(execution_cwd),
              "runner_pid": os.getpid(),
              "started_at": datetime.now(timezone.utc).isoformat(),
              "harness_version": job.get("harness_version"),
@@ -64,7 +73,7 @@ def run(job):
     proc = None
     try:
         with (directory / "output.log").open("wb") as log, (directory / "stderr.log").open("wb") as err:
-            proc = subprocess.Popen(argv, cwd=job["cwd"], stdout=log, stderr=err, shell=False,
+            proc = subprocess.Popen(argv, cwd=str(execution_cwd), stdout=log, stderr=err, shell=False,
                                     stdin=subprocess.DEVNULL,
                                     start_new_session=os.name != "nt",
                                     creationflags=0x08000000 if os.name == "nt" else 0)

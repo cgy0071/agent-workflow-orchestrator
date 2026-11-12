@@ -59,6 +59,9 @@
     "Alerts & guidance": "提醒与指引",
     "Meaning and next step": "含义与下一步",
     "Owner notifications": "Owner 通知",
+    "Not configured for this workflow. This page sends nothing.": "此工作流未配置。本页面不会发送任何通知。",
+    "The outbox exists but could not be read, so delivery status is unknown.": "发件箱存在但无法读取，因此投递状态未知。",
+    " Some notifications were abandoned; check the delivery channel, then resend or acknowledge them.": " 部分通知已放弃发送；请检查投递通道，然后重发或确认。",
     "Pending": "待发",
     "Given up": "已放弃",
     "Last sent": "最近成功发送",
@@ -208,13 +211,19 @@
     "Inspect the task details or ledger before taking action.": "采取行动前请检查任务详情或台账。",
     "For reference": "仅供参考",
     "Check needed": "需要检查",
+    "Needs your check": "需要你检查",
     "Runs assigned tasks": "执行分配的任务",
     "Coordinates tasks and next steps": "协调任务和下一步",
     "Checks delivered work": "审核交付的工作",
-    "Assigned": "已分配",
+    "Assigned": "已配置",
     "Setup pending": "设置待完成",
+    "Not configured": "未配置",
     "Assigned workflow role": "已分配的工作流角色",
     "No active agent connection": "没有在线的 agent 连接",
+    "No agent is configured for this role yet.": "这个角色还没有配置 Agent。",
+    "Assigned in configuration; live check not run. Use Check agents now to verify this window.": "配置中已分配；尚未进行实际检查。点击“立即检查 Agent”核验这个窗口。",
+    "The check did not complete; open the detail for the message.": "检查没有完成；请打开详情查看消息。",
+    "Last live check detail": "最近一次实际检查详情",
     "No open tasks": "没有进行中的任务",
     "Connection details": "连接详情",
     "Mode": "模式",
@@ -270,9 +279,10 @@
     "Report status": "报告状态",
     "Nothing needs attention right now.": "目前没有需要处理的事项。",
     "Task could not start": "任务无法开始",
-    "The scheduler has paused this task before dispatch.": "调度器在派发前暂停了这个任务。",
-    "Read the scheduler detail and resolve the condition before the next scheduling pass.": "请阅读调度详情，并在下一轮调度前解决该条件。",
+    "A scheduling condition stopped this task before it was sent. This is not a worker failure and not a review result.": "某个调度条件在任务发出前阻止了它。这不是 Worker 失败，也不是审核结论。",
+    "Open the technical detail, correct the condition, then let the next scheduling pass run.": "打开技术详情，修正该条件，然后让下一轮调度运行。",
     "No reason recorded": "未记录原因",
+    "Blocking reason": "阻止原因",
     "No named resource limits are set for this workflow.": "此工作流没有设置命名资源限制。",
     "No active task reservations": "没有进行中的任务预留",
     "Cancel": "取消",
@@ -296,6 +306,12 @@
     "Failed": "失败",
     "Exited": "已退出",
     "Status unknown": "状态未知",
+    "unknown agent": "未知 Agent",
+    "status unknown": "状态未知",
+    "running": "运行中",
+    "stopping": "正在停止",
+    "finished": "已结束",
+    "Tasks sent and reviewed per day": "每日派发与审核任务数",
     "Status": "状态",
     "idle": "空闲",
     "working": "工作中",
@@ -314,6 +330,16 @@
     "Show as table": "以表格显示",
     "Day": "日期",
     "Review outcomes and stops": "审核结果与停顿",
+    "Runtime views": "运行视图",
+    "Read-only. This page never dispatches or reviews from here": "只读。本页面不会在此派发或审核",
+    "Loaded on request from the same ledger. Tasks are grouped by what needs attention. Missing transcripts or diffs are shown as unavailable rather than guessed.": "按需从同一台账读取。任务按需要关注的程度分组。缺失的会话记录或差异会明确标为不可用，而不是猜测。",
+    "Load runtime views": "加载运行视图",
+    "Runtime views are not available for this workflow yet: ": "此工作流暂时没有运行视图：",
+    "Runtime views are unavailable. Not set up yet: this workflow has no V2 service state to read, so these opt-in views have nothing to show. Your current tasks are unaffected.": "运行视图不可用。尚未设置：此工作流没有可读取的 V2 服务状态，因此这些可选视图没有内容可显示。当前任务不受影响。",
+    "Runtime views are unavailable. The V2 service state record is missing, so these views cannot be read. Check the V2 ledger before relying on them; your current tasks are unaffected.": "运行视图不可用。V2 服务状态记录缺失，无法读取这些视图。依赖它们之前请检查 V2 台账；当前任务不受影响。",
+    "Runtime views are unavailable. The source for these views could not be read, so no result can be shown. Nothing here describes your current tasks.": "运行视图不可用。无法读取这些视图的来源，因此不能显示结果。这里的内容不描述你的当前任务。",
+    "Technical detail": "技术详情",
+    "Read-only projection of the same ledger. Pages that lack transcripts, diffs or milestones are marked unavailable or partial.": "同一台账的只读投影。缺少会话记录、差异或里程碑的页面会标为不可用或不完整。",
     "Workflow settings": "工作流设置",
     "Operating limits; roles, permissions and verdicts stay as initialized": "运行限制；角色、权限和审核结论保持初始化时的设置",
     "Goal": "目标",
@@ -384,6 +410,7 @@
     "Delivery to review": "交付到审核",
     "Repair share": "返修比例",
     "No reviews recorded yet": "尚无审核记录",
+    "No repair-share data in this ledger": "此台账没有返工比例数据",
     "Continuations sent": "已发送的继续提示",
     "No data": "无数据",
     "Sent task has not started": "已发送的任务尚未开始",
@@ -480,6 +507,26 @@
       "共配置 $1 个"
     ],
     [
+      "^assigned, of (\\d+) configured$",
+      "已配置 $1 个，其中已分配"
+    ],
+    [
+      "^(\\d+) of (\\d+) reserved$",
+      "已预留 $1，共 $2"
+    ],
+    [
+      "^reserved amount unknown; (\\d+) of (\\d+) recorded$",
+      "预留量未知；已记录 $1，共 $2"
+    ],
+    [
+      "^(\\d+) active task reservation$",
+      "$1 个进行中的任务预留"
+    ],
+    [
+      "^(\\d+) active task reservations$",
+      "$1 个进行中的任务预留"
+    ],
+    [
       "^(\\d+) waiting for review$",
       "$1 个待审核"
     ],
@@ -538,6 +585,22 @@
     [
       "^waiting, of (\\d+) updates$",
       "条待审核，共 $1 条"
+    ],
+    [
+      "^waiting for review or acknowledgement, of (\\d+) updates$",
+      "等待审核或确认，共 $1 条更新"
+    ],
+    [
+      "^Reason code: (.+)$",
+      "原因代码：$1"
+    ],
+    [
+      "^Blocking reason: (.+)$",
+      "阻止原因：$1"
+    ],
+    [
+      "^Error: (.+)$",
+      "错误：$1"
     ],
     [
       "^Show (\\d+) handled updates$",

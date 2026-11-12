@@ -311,12 +311,21 @@ label { display:block; font-weight:650; font-size:13px } label span { display:bl
   letter-spacing:.015em; background:var(--accent-soft); color:var(--accent) }
 .badge.accepted,.badge.submitted { background:#e3f3e9; color:#246a47 }
 .badge.executing,.badge.running { background:#e5efff; color:#285c96 }
-.badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review { background:#fff0d5; color:#855a19 }
-.badge.failed,.badge.review_blocked,.badge.needs_inspection { background:#fce9e5; color:#a43e37 }
+.badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review,
+.badge.check,.badge.setup_pending,.badge.pending,.badge.ready,.badge.waiting,
+.badge.blocked_dependency,.badge.under_review,.badge.reserved,.badge.uncertain,
+.badge.not_sent,.badge.followed_up { background:#fff0d5; color:#855a19 }
+.badge.failed,.badge.review_blocked,.badge.needs_inspection,
+.badge.blocked,.badge.terminated { background:#fce9e5; color:#a43e37 }
+.badge.not_configured,.badge.closed,.badge.folded { background:var(--bg); color:var(--muted) }
 @media (prefers-color-scheme:dark) { .badge.accepted,.badge.submitted { background:#234735;color:#a4e5b9 }
   .badge.executing,.badge.running { background:#243f5c;color:#a9ceff }
-  .badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review { background:#513d1d;color:#f5d99e }
-  .badge.failed,.badge.review_blocked,.badge.needs_inspection { background:#50322f;color:#f6aaa1 } }
+  .badge.execution_unconfirmed,.badge.scheduling_blocked,.badge.awaiting_review,
+  .badge.check,.badge.setup_pending,.badge.pending,.badge.ready,.badge.waiting,
+  .badge.blocked_dependency,.badge.under_review,.badge.reserved,.badge.uncertain,
+  .badge.not_sent,.badge.followed_up { background:#513d1d;color:#f5d99e }
+  .badge.failed,.badge.review_blocked,.badge.needs_inspection,
+  .badge.blocked,.badge.terminated { background:#50322f;color:#f6aaa1 } }
 .table-scroll { max-width:100%; overflow-x:auto } table { width:100%; border-collapse:collapse; font-size:12px }
 th { text-align:left; color:var(--muted); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
   border-bottom:1px solid var(--line); white-space:nowrap }
@@ -423,6 +432,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     <p class="sub" id="goal"></p></div>
     <div class="toolbar"><label class="inline-label"><input id="auto" type="checkbox" checked>Update page every 5s</label>
       <button id="refresh" type="button">Refresh page</button><button id="probe" type="button">Check agents now</button>
+      <button id="views-open" type="button">Runtime views</button>
       <button id="chat-open" type="button" class="hidden">Chat</button>
       <button id="lang" type="button" translate="no" aria-label="Language">&#x4e2d;&#x6587;</button>
       <button id="switch" type="button" class="hidden">Choose workflow</button></div></header>
@@ -537,6 +547,14 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
           <details class="technical"><summary>Show as table</summary><div class="table-scroll"><table>
             <thead><tr><th>Day</th><th>Sent</th><th>Reviewed</th></tr></thead><tbody id="daily-table"></tbody></table></div></details></div>
         <div><h3>Review outcomes and stops</h3><div id="metric-outcomes" class="list"></div></div></div></div></section>
+    <section class="panel wide hidden" id="v2-views-panel"><div class="panel-head"><h2>Runtime views</h2>
+      <span class="panel-caption">Read-only. This page never dispatches or reviews from here</span></div>
+      <p class="muted" id="v2-views-note">Loaded on request from the same ledger. Tasks are grouped by what needs attention. Missing transcripts or diffs are shown as unavailable rather than guessed.</p>
+      <div class="actions"><button id="v2-views-load" type="button">Load runtime views</button></div>
+      <p id="v2-views-error" class="error" role="alert"></p>
+      <details class="technical hidden" id="v2-views-technical"><summary>Technical detail</summary>
+        <p id="v2-views-reason"></p></details>
+      <div id="v2-views"></div></section>
     <section class="panel wide hidden" id="manage-settings"><div class="panel-head"><h2>Workflow settings</h2>
       <span class="panel-caption">Operating limits; roles, permissions and verdicts stay as initialized</span></div>
       <div class="form-grid">
@@ -672,15 +690,15 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   function metrics(data) {
     const active = data.roles.filter(r => r.bindings.some(b => b.status === 'active'));
     const accepted = data.tasks.filter(t => t.phase === 'accepted').length;
-    const pending = data.inbox.filter(e => e.status === 'pending').length;
+    const pending = data.inbox.filter(e => ['pending', 'acknowledged'].includes(e.status)).length;
     id('metric-tasks').textContent = data.tasks.length;
     id('metric-tasks-note').textContent = accepted + ' accepted';
     id('metric-roles').textContent = active.length;
-    id('metric-roles-note').textContent = 'of ' + data.roles.length + ' configured';
+    id('metric-roles-note').textContent = 'assigned, of ' + data.roles.length + ' configured';
     id('metric-dags').textContent = Object.keys(data.dags).length + chainsOf(data).length;
     id('metric-dags-note').textContent = 'Task plans and follow-up chains';
     id('metric-inbox').textContent = pending;
-    id('metric-inbox-note').textContent = 'waiting, of ' + data.inbox.length + ' updates';
+    id('metric-inbox-note').textContent = 'waiting for review or acknowledgement, of ' + data.inbox.length + ' updates';
   }
   const stageNames = {
     accepted:'Accepted', evidence_changed:'Accepted review; evidence changed', review_blocked:'Review needs follow-up',
@@ -800,7 +818,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     const card = add(root, 'article', 'alert-item ' + info.tone);
     const head = add(card, 'div', 'alert-head');
     add(head, 'strong', taskIds.length === 1 ? 'raw' : '', taskIds.length === 1 ? taskName(lastData, taskIds[0]) : taskIds.length + ' tasks');
-    add(head, 'span', 'badge', info.tone === 'info' ? 'For reference' : 'Check needed');
+    add(head, 'span', 'badge ' + (info.tone === 'info' ? '' : 'check'), info.tone === 'info' ? 'For reference' : 'Needs your check');
     add(card, 'h3', '', info.title);
     if (taskIds.length > 1) {
       const names = taskIds.slice(0, 5).map(x => taskName(lastData, x)).join('; ');
@@ -818,14 +836,17 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       const current = role.bindings.find(b => b.status === 'active') || role.bindings[0];
       const purpose = {worker:'Runs assigned tasks', controller:'Coordinates tasks and next steps',
         reviewer:'Checks delivered work'};
-      if (current) add(top, 'span', 'badge ' + current.status,
+      if (current) add(top, 'span', 'badge ' + (current.status === 'active' ? '' : 'setup_pending'),
         current.status === 'active' ? 'Assigned' : 'Setup pending');
+      else add(top, 'span', 'badge not_configured', 'Not configured');
       add(card, 'p', 'role-summary', current ?
-        (purpose[current.mode] || 'Assigned workflow role') : 'No active agent connection');
+        (purpose[current.mode] || 'Assigned workflow role') : 'No agent is configured for this role yet.');
       add(card, 'p', 'role-tasks', role.tasks.length ?
         role.tasks.length + ' open task' + (role.tasks.length === 1 ? '' : 's') + ': ' +
           role.tasks.map(t => taskName(data, t.task_id)).join('; ') : 'No open tasks');
       const live = current && liveChecks.get(paneKey(role.role, current));
+      if (current && current.status === 'active' && !live)
+        add(card, 'p', 'role-summary muted', 'Assigned in configuration; live check not run. Use Check agents now to verify this window.');
       if (live) {
         const state = live.error ? 'error' : live.identity_matches === false ? 'blocked' : (live.status || 'unknown');
         const line = add(card, 'p', 'role-live ' + state);
@@ -834,11 +855,15 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
           live.identity_matches === false ? 'Agent identity changed; inspect before acting' :
           named(live.status, {idle:'Available', working:'Working', blocked:'Needs help',
             failed:'Failed', exited:'Exited', unknown:'Status unknown'}));
-        if (live.error) add(line, 'span', 'muted', live.error);
+        if (live.error) add(line, 'span', 'muted', 'The check did not complete; open the detail for the message.');
         else if (live.status === 'working' && !role.tasks.length)
           add(line, 'span', 'muted', 'Busy with work outside this workflow, such as a direct conversation.');
         else if (live.status === 'idle' && role.tasks.length)
           add(line, 'span', 'muted', 'Not running right now; see the task stage below.');
+        if (live.error) {
+          const detail = technical(card, 'Last live check detail', 'live:' + role.role);
+          detailLine(detail, 'Error', live.error);
+        }
       }
       if (current && current.pane) {
         const checked = checkedNames.get(paneKey(role.role, current));
@@ -927,7 +952,6 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       const detail = add(td, 'div', 'detail');
       if (t.dependencies?.length) detailLine(detail, 'Starts after', t.dependencies.map(d =>
         taskName(data, data.dags[t.run]?.tasks?.[d]?.task_id || d)).join('; '));
-      if (t.blocking_reason) detailLine(detail, 'Why it could not start', t.blocking_reason);
       for (const code of t.warnings) {
         const note = warningInfo(code, t), box = add(detail, 'div', 'detail-note');
         add(box, 'strong', '', note.title);
@@ -948,6 +972,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       });
       const extra = technical(detail, 'Technical record', 'record:' + t.task_id);
       detailLine(extra, 'Task ID', t.task_id);
+      if (t.blocking_reason) detailLine(extra, 'Blocking reason', t.blocking_reason);
       detailLine(extra, 'Phase', t.phase); detailLine(extra, 'Harness / adapter', t.harness + ' / ' + t.adapter);
       detailLine(extra, 'Dispatch', t.dispatch); detailLine(extra, 'Resource reservation', t.claim_held ? 'held' : 'none');
       detailLine(extra, 'Review verdicts', t.review_verdicts.join(', ') || 'none');
@@ -1185,9 +1210,13 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       if (done.length > 20) add(history, 'p', 'muted', 'Showing the latest 20 of ' + done.length + ' handled updates.');
     }
     const owner = id('owner-notify-summary'); owner.replaceChildren();
-    show('owner-notify-summary', !!data.owner_notify);
-    if (data.owner_notify) {
-      add(owner, 'strong', '', 'Owner notifications'); owner.append(' | ');
+    show('owner-notify-summary', true);
+    add(owner, 'strong', '', 'Owner notifications'); owner.append(' | ');
+    if (!data.owner_notify) {
+      add(owner, 'span', 'muted', 'Not configured for this workflow. This page sends nothing.');
+    } else if (data.owner_notify.state === 'unreadable') {
+      add(owner, 'span', 'error', 'The outbox exists but could not be read, so delivery status is unknown.');
+    } else {
       add(owner, 'span', '', 'Pending'); owner.append(': ');
       add(owner, 'span', 'raw', data.owner_notify.pending); owner.append(' | ');
       add(owner, 'span', '', 'Given up'); owner.append(': ');
@@ -1195,6 +1224,8 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       add(owner, 'span', '', 'Last sent'); owner.append(': ');
       add(owner, 'span', data.owner_notify.last_sent ? 'raw' : '', data.owner_notify.last_sent ?
         when(data.owner_notify.last_sent) : 'Never');
+      if (data.owner_notify.given_up > 0)
+        add(owner, 'span', 'alert-technical', ' Some notifications were abandoned; check the delivery channel, then resend or acknowledge them.');
     }
     const alerts = id('alerts'); alerts.replaceChildren();
     const tasks = new Map(data.tasks.map(task => [task.task_id, task]));
@@ -1210,18 +1241,21 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
     for (const group of groups.values()) alertCard(alerts, group.ids, group.info);
     for (const [task, block] of Object.entries(data.scheduling_blocks))
       alertCard(alerts, [task], {tone:'check', title:'Task could not start',
-        explanation:'The scheduler has paused this task before dispatch.',
-        next:'Read the scheduler detail and resolve the condition before the next scheduling pass.',
+        explanation:'A scheduling condition stopped this task before it was sent. This is not a worker failure and not a review result.',
+        next:'Open the technical detail, correct the condition, then let the next scheduling pass run.',
         technical:block.reason || 'No reason recorded'});
     if (!alerts.children.length) empty(alerts, 'Nothing needs attention right now.');
     const resources = id('resources'); resources.replaceChildren();
     const caps = data.resource_capacities;
     if (!Object.keys(caps).length) add(resources, 'p', 'muted', 'No named resource limits are set for this workflow.');
     for (const [name, cap] of Object.entries(caps)) {
-      const used = data.claims.reduce((sum,c) => sum + (c.resources[name] || 0), 0);
+      const amounts = data.claims.map(c => c.resources[name]);
+      const unknown = amounts.some(v => v === null || v === undefined);
+      const used = amounts.reduce((sum, v) => sum + (typeof v === 'number' ? v : 0), 0);
       const row = add(resources, 'div', 'meter'); const bar = add(row, 'div'); add(bar, 'strong', '', name);
       const meter = add(bar, 'progress'); meter.max = cap; meter.value = used;
-      add(row, 'strong', '', used + ' of ' + cap + ' reserved');
+      if (unknown) { meter.removeAttribute('value'); add(row, 'strong', '', 'reserved amount unknown; ' + used + ' of ' + cap + ' recorded'); }
+      else add(row, 'strong', '', used + ' of ' + cap + ' reserved');
     }
     add(resources, 'p', 'muted', data.claims.length ?
       data.claims.length + ' active task reservation' + (data.claims.length === 1 ? '' : 's') :
@@ -1606,14 +1640,14 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
         minutes(s.p90).replace(' min', '') + ' min - ' + s.count + ' tasks' : 'No data');
     }
     const repair = add(tiles, 'div', 'metric'); add(repair, 'span', 'metric-label', 'Repair share');
-    add(repair, 'strong', 'metric-value', m.repair_share === null ? '--' : Math.round(m.repair_share * 100) + '%');
-    add(repair, 'span', 'metric-note', m.repair_share === null ? 'No reviews recorded yet' :
+    add(repair, 'strong', 'metric-value', m.repair_share == null ? 'Not recorded' : Math.round(m.repair_share * 100) + '%');
+    add(repair, 'span', 'metric-note', m.repair_share == null ? 'No repair-share data in this ledger' :
       Object.values(m.reviews).reduce((a, b) => a + b, 0) + ' reviews');
     const outcomes = id('metric-outcomes'); outcomes.replaceChildren();
     const row = (label, value) => { const r = add(outcomes, 'div', 'outcome'); add(r, 'span', '', label); add(r, 'strong', '', value); };
     for (const [verdict, count] of Object.entries(m.reviews)) row(named(verdict, reviewNames), count);
     for (const [kind, count] of Object.entries(m.stalls)) row(named(kind, reportNames), count);
-    row('Continuations sent', m.continuations);
+    row('Continuations sent', m.continuations == null ? 'Not recorded' : m.continuations);
     const legend = id('daily-legend'); legend.replaceChildren();
     add(legend, 'span', 'series-1', 'Sent'); add(legend, 'span', 'series-2', 'Reviewed');
     const table = id('daily-table'); table.replaceChildren();
@@ -1660,6 +1694,34 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
   }
   id('metrics-load').addEventListener('click', loadMetrics);
   id('metrics-days').addEventListener('change', () => { if (metricsData) loadMetrics(); });
+  async function loadV2Views() {
+    const button = id('v2-views-load'), error = id('v2-views-error'), target = id('v2-views');
+    button.disabled = true; error.textContent = ''; show('v2-views-technical', false);
+    try {
+      const data = await api('/api/v2/views');
+      if (data.available === false) {
+        // Explicit unavailable state: plain meaning first, raw reason only in the detail.
+        const why = {
+          v2_ledger_not_initialized: 'Not set up yet: this workflow has no V2 service state to read, so these opt-in views have nothing to show. Your current tasks are unaffected.',
+          v2_service_state_missing: 'The V2 service state record is missing, so these views cannot be read. Check the V2 ledger before relying on them; your current tasks are unaffected.'
+        }[data.reason] || 'The source for these views could not be read, so no result can be shown. Nothing here describes your current tasks.';
+        target.replaceChildren(); error.className = 'muted'; error.textContent = 'Runtime views are unavailable. ' + why;
+        id('v2-views-reason').textContent = 'Reason code: ' + (data.reason || 'not recorded');
+        show('v2-views-technical', true);
+      } else {
+        // Parse the server-rendered, escaped fragment without assigning raw HTML.
+        target.replaceChildren(...document.createRange().createContextualFragment(data.html || '').childNodes);
+        id('v2-views-note').textContent = 'Read-only projection of the same ledger. Pages that lack transcripts, diffs or milestones are marked unavailable or partial.';
+        error.className = 'error';
+      }
+    } catch (failure) { error.className = 'error'; error.textContent = failure.message; }
+    finally { button.disabled = false; }
+  }
+  id('v2-views-load').addEventListener('click', loadV2Views);
+  id('views-open').addEventListener('click', () => {
+    show('v2-views-panel', true); loadV2Views();
+    id('v2-views-panel').scrollIntoView({behavior:'smooth', block:'start'});
+  });
   function clearLive() {
     liveChecks.clear(); checkedNames.clear(); id('probe-time').textContent = '';
     show('probe-time', false); show('probe-actions', false);
@@ -2061,8 +2123,13 @@ class DashboardServer(ThreadingHTTPServer):
             # File checks only: whether a monitor lock or summary exists in each open task's folder.
             base["monitors"] = {row["task_id"]: self.manager.monitor_info(row["task_id"])["state"]
                                 for row in summary["tasks"] if row["phase"] not in ("accepted", "closed")}
-        return dict(summary, **details, **base, state=str(state),
-                    owner_notify=owner_notify.outbox_summary(state))
+        notify = owner_notify.outbox_summary(state)
+        if notify is None and owner_notify.outbox_path(state).is_file():
+            # The outbox exists but cannot be read: say so instead of showing no notifications.
+            notify = {"state": "unreadable", "pending": None, "given_up": None, "last_sent": None}
+        elif notify is not None:
+            notify["state"] = "ok"
+        return dict(summary, **details, **base, state=str(state), owner_notify=notify)
 
     def metrics(self, days):
         if self.state is None:
@@ -2072,6 +2139,29 @@ class DashboardServer(ThreadingHTTPServer):
         except (TypeError, ValueError) as exc:
             raise ValueError("days must be an integer") from exc
         return workflow_status.workflow_metrics(self.state, days)
+
+    def v2_views(self, limit="200"):
+        """Read-only V2 projection for this page. Uses the page token only; never writes."""
+        if self.state is None:
+            raise ValueError("open a workflow state first")
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("limit must be an integer") from exc
+        if not 1 <= limit <= 1000:
+            raise ValueError("limit must be from 1 through 1000")
+        import runtime_views
+        with scheduler._read_database(self.state) as con:
+            if not con.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                               "AND name='v2_service_state'").fetchone():
+                return {"available": False, "reason": "v2_ledger_not_initialized", "can_write": False}
+            row = con.execute("SELECT project_id FROM v2_service_state WHERE id=1").fetchone()
+            if not row:
+                return {"available": False, "reason": "v2_service_state_missing", "can_write": False}
+            snapshot = runtime_views.build_runtime_views(con, row[0], limit=limit)
+            snapshot["html"] = runtime_views.render_html(snapshot)
+            snapshot["can_write"] = False
+            return snapshot
 
     def select_state(self, payload):
         # Viewing only: dispatch mode is bound to the controller checked at startup.
@@ -2467,6 +2557,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self._error(400, str(exc)[:300])
             except Exception:
                 self._error(500, "metrics read failed")
+            return
+        if path == "/api/v2/views":
+            try:
+                limit = parse_qs(urlsplit(self.path).query).get("limit", ["200"])[0]
+                self._json(200, self.server.v2_views(limit))
+            except ValueError as exc:
+                self._error(400, str(exc)[:300])
+            except Exception:
+                self._error(500, "runtime views read failed")
             return
         if path != "/api/status":
             self._error(404, "not found")

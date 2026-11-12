@@ -525,6 +525,8 @@ def register_task(state, request, actor, version, context, *, reservation=None):
             raise ValueError("follow-up parent review differs from the ledger")
     with database(state) as con:
         who = guard(con, actor, version, context, "dispatch")
+        from awo_service import legacy_dispatch_guard
+        legacy_dispatch_guard(con, actor, version, context)
         worker_role = request["worker"].get("role")
         worker = active(con, worker_role)
         if worker["mode"] != "worker":

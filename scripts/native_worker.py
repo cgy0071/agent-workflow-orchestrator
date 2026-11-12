@@ -54,7 +54,8 @@ def omp_version(executable):
     return checked.stdout.strip()
 
 
-def initialize(directory, harness, executable, mode="one-shot", timeout=45, provider=None, model=None):
+def initialize(directory, harness, executable, mode="one-shot", timeout=45, provider=None, model=None,
+               launch_cwd=None):
     if harness not in ("codex", "pi", "omp") or mode not in ("one-shot", "session") or (harness == "omp" and mode != "one-shot"):
         raise ValueError("unsupported native harness or execution mode")
     from monitor_task import number
@@ -62,8 +63,17 @@ def initialize(directory, harness, executable, mode="one-shot", timeout=45, prov
     requested = selection(harness, provider, model)
     version = omp_version(executable) if harness == "omp" else None
     root = Path(directory).resolve()
+    if launch_cwd is None:
+        declared = str(root)
+    else:
+        # A Git source workspace is provisioned after the queue freezes this
+        # identity, so the declared execution directory must be allowed to be
+        # absent here while the bridge's own state root remains separate.
+        if not isinstance(launch_cwd, str) or not Path(launch_cwd).is_absolute():
+            raise ValueError("launch_cwd must be an absolute path")
+        declared = str(Path(launch_cwd).resolve())
     root.mkdir(parents=True, exist_ok=False)
-    identity = {"kind": harness, "terminal": "native-bridge-" + uuid.uuid4().hex, "launch_cwd": str(root)}
+    identity = {"kind": harness, "terminal": "native-bridge-" + uuid.uuid4().hex, "launch_cwd": declared}
     config = {"harness": harness, "executable": str(Path(executable).resolve()), "mode": mode,
               "timeout_seconds": timeout, "identity": identity, "native_session_id": None,
               "harness_version": version, **requested}
@@ -117,9 +127,14 @@ def argv_for(config, payload, root):
             if value is not None: argv += ["--" + key, value]
         return argv + [payload["prompt"]]
     if config["harness"] == "codex":
+        sandbox = payload.get("sandbox", "read-only")
+        if sandbox not in ("read-only", "workspace-write"):
+            raise ValueError("Codex sandbox must be read-only or workspace-write")
+        if sandbox == "workspace-write" and config["mode"] == "session":
+            raise ValueError("Codex workspace-write execution requires one-shot mode")
         if config["mode"] == "session" and config.get("native_session_id"):
             return executable + ["exec", "resume", config["native_session_id"], "--json", "--skip-git-repo-check", payload["prompt"]]
-        argv = executable + ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check"]
+        argv = executable + ["exec", "--json", "--sandbox", sandbox, "--skip-git-repo-check"]
         if config["mode"] == "one-shot": argv.append("--ephemeral")
         return argv + [payload["prompt"]]
     argv = executable + ["--print", "--mode", "json", "--no-tools", "--no-extensions", "--no-mcp",
@@ -150,6 +165,17 @@ def send(directory, payload):
         if not isinstance(payload.get(key), str) or not payload[key].strip(): raise ValueError("missing " + key)
     if payload.get("authorization", {}).get("source") is None:
         raise ValueError("native job needs explicit authorization source")
+    execution = payload.get("execution_cwd")
+    if execution is not None:
+        if not isinstance(execution, str) or not Path(execution).is_absolute():
+            raise ValueError("execution_cwd must be an absolute path")
+        if not Path(execution).resolve().is_dir():
+            raise ValueError("execution_cwd must be an existing directory")
+    sandbox = payload.get("sandbox")
+    if sandbox is not None and sandbox not in ("read-only", "workspace-write"):
+        raise ValueError("sandbox must be read-only or workspace-write")
+    if sandbox == "workspace-write" and execution is None:
+        raise ValueError("workspace-write execution requires an explicit execution_cwd")
     lock = root / "send.lock"
     try:
         with lock.open("x", encoding="ascii") as stream:
@@ -164,6 +190,8 @@ def send(directory, payload):
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
         config = read_json(root / "config.json")
+        if payload.get("sandbox") == "workspace-write" and config["harness"] != "codex":
+            raise ValueError("workspace-write execution is only defined for the Codex bridge")
         if config["harness"] == "omp" and omp_version(config["executable"]) != config.get("harness_version"):
             raise ValueError("OMP version changed since worker initialization")
         argv = argv_for(config, payload, root)
@@ -268,7 +296,8 @@ def run(directory, job_path):
             config["native_session_id"] = session
             save_json(root / "config.json", config)
         outcome = {"status": "done", "native_session_id": session, "execution_semantics": config["mode"],
-                   "turn_status": turn["status"], "process_status": receipt["process_status"]}
+                   "turn_status": turn["status"], "process_status": receipt["process_status"],
+                   "execution_cwd": receipt.get("execution_cwd")}
     except Exception as exc:
         receipt_file = target / "receipt" / "status.json"
         saved = read_json(receipt_file) if receipt_file.exists() else {}
