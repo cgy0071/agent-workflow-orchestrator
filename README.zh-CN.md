@@ -105,6 +105,7 @@ python -B scripts/workflow_control.py --state runtime/first-run/state status --s
 | 协作运行时：Fanout、Ensemble、共享预算、有界返工 | [awo-collaboration.zh-CN.md](references/awo-collaboration.zh-CN.md) |
 | 合并队列：已接受基线、物化闸门、按 ticket 绑定的 intent | [awo-merge.zh-CN.md](references/awo-merge.zh-CN.md) |
 | 端到端 Git worktree 代码闭环：真实 worktree 执行、独立审核、本地 Merge Queue、物化 | [worktree-code-loop.zh-CN.md](references/worktree-code-loop.zh-CN.md) |
+| 面向已有仓库的项目入口：准备、执行、独立审核、本地落地、恢复 | [project-entry.zh-CN.md](references/project-entry.zh-CN.md) |
 | 本地监督与配对外部草稿（本地标签协议，非认证 A2A） | [awo-supervision.zh-CN.md](references/awo-supervision.zh-CN.md) |
 | 只读运行视图与隔离审计回执 | [awo-observability.zh-CN.md](references/awo-observability.zh-CN.md) |
 | 各版本改了什么 | [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md) |
