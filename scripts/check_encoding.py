@@ -14,12 +14,14 @@ DEFAULT_CJK = ["SKILL.zh-CN.md", "README.zh-CN.md", "CHANGELOG.zh-CN.md", "refer
                "references/task-and-review.zh-CN.md", "references/harness-adapters.zh-CN.md",
                "references/monitoring.zh-CN.md", "references/setup-and-switching.zh-CN.md",
                "references/owner-intake.zh-CN.md", "references/manual-workflow.zh-CN.md",
-               "references/remote-access.zh-CN.md", "references/first-real-run.zh-CN.md"]
+               "references/remote-access.zh-CN.md", "references/first-real-run.zh-CN.md",
+               "references/project-entry.zh-CN.md"]
 DEFAULT_ASCII = ["SKILL.md", "README.md", "CHANGELOG.md", "agents/openai.yaml", "references/roles.md",
                  "references/task-and-review.md", "references/harness-adapters.md",
                  "references/monitoring.md", "references/setup-and-switching.md",
                  "references/owner-intake.md", "references/manual-workflow.md",
-                 "references/remote-access.md", "references/first-real-run.md"]
+                 "references/remote-access.md", "references/first-real-run.md",
+                 "references/project-entry.md"]
 
 
 def check_bytes(data, expect_cjk=False, expect_ascii=False):

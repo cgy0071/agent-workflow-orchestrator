@@ -13,6 +13,7 @@
 - **预算账本。** 从 Assignment/Task/项目推导 run/task/workflow scope，原子分 scope 预留，delta/累计 sample，per-run 暴露，authoritative close 对账，按维度 unknown，以及 controller limit/action 命令。不增加调度器启用或供应商硬上限声明。见 [references/awo-budget.zh-CN.md](references/awo-budget.zh-CN.md)。
 - **其他 V2 组件（未发布）。** 以下可选模块扩展同一个台账，不新增权威：优先级调度器（排队顺序、协作槽位、准入闸门）、Assignment 工作区（隔离根目录、Git worktree、冻结源）、持久化 Agent 消息、本地知识、应用网关、协作运行时、合并队列、本地监督与配对外部草稿，以及只读运行视图和隔离审计回执。每个可写模块仍由服务 enable 开关控制，并各自有 `references/awo-*.md` 指南；只读运行视图只要 V2 schema 存在就提供经认证的快照。这些组件的独立验收另行跟踪，本条目不声称已验收。
 - **Git worktree 代码闭环（未发布）。** `scripts/validate_v2_worktree_code.py` 验证可选的 V2 路径：从真实 Git worktree 执行、独立审核、本地 Merge Queue，一直到下游物化。它在一个一次性夹具上产生五次真实的已认证 Codex 轮次，创建 Task A 和依赖它的 Task B，落地 Task A，并让 Task B 保持 accepted 但未 landed。费用仍为未知；已测试范围是 Windows 加 Codex CLI。它不是任意项目的启动器。此改动尚未提交，也未进入 `main` 或 GitHub。见 [references/worktree-code-loop.zh-CN.md](references/worktree-code-loop.zh-CN.md)。
+- **面向已有仓库的项目入口（未发布）。** `scripts/project_entry.py` 为任意本地 Git 仓库准备一份哈希封存的计划；在显式执行时，向受管 worktree 发送一次有界 Codex worker 回合，强制冻结的允许路径与验收 argv，封存 worker 证据，取得独立代码审核和集成审核，通过本地 Merge Queue 落地，并支持只读状态查询和恢复，且绝不重发已尝试的 Assignment。它复用既有账本、调度器、原生桥接、worktree、审核封存和合并队列，不新增状态权威。accepted 与 landed 保持区分，准备阶段从不启动模型或移动目标 ref。已在 Windows + Codex 上测试；金额费用未知。见 [references/project-entry.zh-CN.md](references/project-entry.zh-CN.md)。
 
 ### 修复
 

@@ -105,6 +105,7 @@ A pass certifies only what it ran. Directory-artifact validation does not certif
 | Collaboration runtime: fanout, ensemble, shared budget, bounded repair | [awo-collaboration.md](references/awo-collaboration.md) |
 | Merge queue: accepted bases, materialization gate, ticket-bound intents | [awo-merge.md](references/awo-merge.md) |
 | End-to-end Git worktree code loop: real worktree execution, independent review, local Merge Queue, materialization | [worktree-code-loop.md](references/worktree-code-loop.md) |
+| Project entry for an existing repository: prepare, run, independent review, local landing, recovery | [project-entry.md](references/project-entry.md) |
 | Local supervision and paired external drafts (local label protocol, not certified A2A) | [awo-supervision.md](references/awo-supervision.md) |
 | Read-only runtime views and isolated audit receipts | [awo-observability.md](references/awo-observability.md) |
 | What changed and when | [CHANGELOG.md](CHANGELOG.md) |
