@@ -2,6 +2,12 @@
 
 [English](README.md) | 中文
 
+**[下载 Windows 64 位便携预览版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-preview.1/AWO-Windows-x64-preview.1-portable.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-preview.1)
+
+1. 下载 ZIP，右键选择 **全部提取**。
+2. 打开解压后的文件夹，双击 **开始.cmd**。离线示例自带 Python，无需账号或 API Key。
+3. 看到 **A、B、JOIN 三项已验收** 就成功了。关掉窗口，再次双击可查看上次结果。
+
 让一个 AI Agent 负责规划和审核，另一个负责执行。你只需给出目标、说明允许做什么；Agent 之间通过本地台账交接任务，未经审核的都不算完成。
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)
