@@ -12,6 +12,10 @@
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)
 
+## v1.0.0-preview.1 (2026-11-20)
+
+Windows 编排工具源码预览。原生框架 CLI 为单独验收的离线候选包。 [MIT](LICENSE) | [Status](docs/framework-status.zh-CN.md)
+
 ## 怎么运作
 
 1. **Planner** 写好任务，向 **Executor** 只发送一次。
