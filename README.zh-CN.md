@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-**[下载 Windows 64 位便携预览版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-preview.1/AWO-Windows-x64-preview.1-portable.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-preview.1)
+**[下载 Windows 64 位便携候选版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
 
 1. 下载 ZIP，右键选择 **全部提取**。
 2. 打开解压后的文件夹，双击 **开始.cmd**。离线示例自带 Python，无需账号或 API Key。

@@ -2,7 +2,7 @@
 
 English | [Chinese](README.zh-CN.md)
 
-**[Download AWO for Windows x64 (portable preview)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-preview.1/AWO-Windows-x64-preview.1-portable.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-preview.1)
+**[Download AWO for Windows x64 (portable release candidate)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
 
 Extract all files, then double-click the only `.cmd` file in the top folder. The offline demo runs two local workers and shows three accepted tasks: A, B, and JOIN. Open it again to see the saved result. Python is included; no account or API key is needed for the demo.
 
