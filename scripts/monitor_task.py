@@ -11,6 +11,7 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+import tempfile
 from datetime import datetime, timezone
 
 
@@ -100,11 +101,13 @@ def read_json(path):
 
 def save_json(path, data):
     path = Path(path)
-    tmp = path.with_name(path.name + "." + str(os.getpid()) + "." + uuid.uuid4().hex + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    # Windows readers may briefly hold a handle without FILE_SHARE_DELETE.
-    # Replacing our own unchanged temporary file is idempotent; sending a task is not.
+    # Keep the temporary basename short even when the receipt directory is deep.
+    fd, name = tempfile.mkstemp(prefix="w", suffix=".tmp", dir=path.parent)
+    tmp = Path(name)
     try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        # Windows readers may briefly hold a handle without FILE_SHARE_DELETE.
         for attempt in range(10):
             try:
                 os.replace(tmp, path)

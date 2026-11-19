@@ -6,6 +6,10 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 ![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
+## v1.0.0-preview.1 (2026-11-20)
+
+Windows orchestration tool source preview. The native framework CLI is a separate offline candidate. [MIT](LICENSE) | [Status](docs/framework-status.md)
+
 ## How it works
 
 1. The **Planner** writes a task and sends it once to the **Executor**.
