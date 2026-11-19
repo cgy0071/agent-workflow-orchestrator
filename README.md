@@ -2,6 +2,8 @@
 
 English | [Chinese](README.zh-CN.md)
 
+## Try it on Windows (no Git required)
+
 **[Download AWO for Windows x64 (portable release candidate)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
 
 Extract all files, then double-click the only `.cmd` file in the top folder. The offline demo runs two local workers and shows three accepted tasks: A, B, and JOIN. Open it again to see the saved result. Python is included; no account or API key is needed for the demo.
@@ -19,7 +21,7 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 Roles are not tied to a client: the Planner can run in Codex and the Executor in Claude, or another supported mix. Support is verified per client version, not inferred from a harness name; see [harness-adapters.md](references/harness-adapters.md). The rules (send once, review before done, one controller at a time) are enforced by the scripts in `scripts/`, not by prompts. `SKILL.md` teaches the controlling agent when to run them.
 
-## Get started
+## Optional: install as an agent skill from source
 
 1. **Install.** Clone the repository into your client's Skill folder:
 

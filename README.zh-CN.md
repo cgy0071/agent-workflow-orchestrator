@@ -2,6 +2,8 @@
 
 [English](README.md) | 中文
 
+## 第一次用 Windows 版？从这里下载，无需 Git
+
 **[下载 Windows 64 位便携候选版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
 
 1. 下载 ZIP，右键选择 **全部提取**。
@@ -21,7 +23,7 @@
 
 角色与客户端无关：Planner 可以在 Codex 里，Executor 可以在 Claude 里，也可以使用其他受支持的组合。兼容性按客户端版本核验，不能从 harness 名称推断；见[适配器说明](references/harness-adapters.zh-CN.md)。“只发一次、审核后才算完成、同一时间只有一个控制者”这些规则由 `scripts/` 里的脚本强制执行，而不是靠提示词。`SKILL.md` 告诉控制者 Agent 何时运行这些脚本。
 
-## 开始使用
+## 可选：从源码安装为 Agent 技能
 
 1. **安装。** 把仓库克隆到客户端的 Skill 目录：
 
