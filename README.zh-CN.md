@@ -10,6 +10,15 @@
 2. 打开解压后的文件夹，双击 **开始.cmd**。离线示例自带 Python，无需账号或 API Key。
 3. 看到 **A、B、JOIN 三项已验收** 就成功了。关掉窗口，再次双击可查看上次结果。
 
+## 和以前的版本有什么区别？
+
+| 如果你用过…… | 换到 v1.0.0-rc.1 后的区别 |
+| --- | --- |
+| 以前按源码说明使用的版本 | 现在可以下载自带 Python 的 Windows ZIP，解压后双击运行示例，不必克隆仓库或配置解释器。较深目录下写入任务回执的修复从 preview.1 起就已包含。 |
+| v1.0.0-preview.1 便携版 | 双击、离线运行、重开查看还是同一套体验。RC1 把便携包构建脚本纳入源码，可从同一提交和固定的 Python 包重建相同 ZIP；同时补测了 OMP 超时后无法确认进程已终止的情况。 |
+
+如果 preview.1 已经能运行你的工作流，无需为了新功能立即升级。这个候选版交付的是 **Windows 编排工具**；任务派发、审核、A/B/JOIN 示例原来就有。完整 Native Agent Framework 不在这个 ZIP 中。[查看两个标签之间的实际改动](https://github.com/cgy0071/agent-workflow-orchestrator/compare/v1.0.0-preview.1...v1.0.0-rc.1)。
+
 让一个 AI Agent 负责规划和审核，另一个负责执行。你只需给出目标、说明允许做什么；Agent 之间通过本地台账交接任务，未经审核的都不算完成。
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)

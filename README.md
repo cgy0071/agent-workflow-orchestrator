@@ -8,6 +8,15 @@ English | [Chinese](README.zh-CN.md)
 
 Extract all files, then double-click the only `.cmd` file in the top folder. The offline demo runs two local workers and shows three accepted tasks: A, B, and JOIN. Open it again to see the saved result. Python is included; no account or API key is needed for the demo.
 
+## What changed in v1.0.0-rc.1?
+
+| If you used... | What changes for you |
+| --- | --- |
+| An earlier source checkout | The Windows ZIP includes Python. Extract it and double-click to run the demo without cloning the repo or setting up an interpreter. The fix for writing task receipts under deep Windows paths has been included since preview.1. |
+| The v1.0.0-preview.1 portable ZIP | Launch, offline execution, and reopening saved results work as before. RC1 adds the portable build scripts to source control so the same commit and pinned Python archive can reproduce the ZIP. It also tests the case where OMP times out and Windows cannot confirm process cleanup. |
+
+If preview.1 already runs your workflow, there is no feature-driven need to upgrade. This candidate ships the **Windows orchestration tool**. Dispatch, review, and the A/B/JOIN demo already existed; the full Native Agent Framework is outside this ZIP. [Compare the two tags](https://github.com/cgy0071/agent-workflow-orchestrator/compare/v1.0.0-preview.1...v1.0.0-rc.1).
+
 Let one AI agent plan and review while another does the work. You set the goal and say what is allowed; the agents hand tasks to each other through a local ledger, and nothing counts as done until it is reviewed.
 
 ![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
