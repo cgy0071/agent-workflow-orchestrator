@@ -2,7 +2,13 @@
 
 English | [Chinese](CHANGELOG.zh-CN.md)
 
-The project has no numbered releases yet. Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
+Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
+
+## v1.0.0-preview.1 (2026-11-20)
+
+Windows orchestration tool source preview. The native framework CLI is a separate offline candidate. [MIT](LICENSE) | [Status](docs/framework-status.md)
+
+Fix atomic receipt writes in deeply nested Windows workspaces.
 
 ## Unreleased
 
