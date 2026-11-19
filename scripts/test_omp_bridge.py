@@ -1,5 +1,7 @@
 """OMP JSONL and OS-child regressions; these fixtures are not real OMP acceptance."""
 import json
+import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -70,10 +72,38 @@ class OmpBridgeTests(unittest.TestCase):
         self.assertEqual(inspect_turn("omp", raw)["status"], "incomplete")
 
     def test_timeout_keeps_native_text_but_cannot_complete(self):
-        result = run_job.run(self.job(stream(), "timed", delay=5))
-        self.assertEqual((result["status"], result["completion_seq"]), ("failed", 0))
+        cleanup_codes = []
+        run_command = subprocess.run
+
+        def observe(argv, **kwargs):
+            stopped = run_command(argv, **kwargs)
+            if argv[0] == "taskkill.exe":
+                cleanup_codes.append(stopped.returncode)
+            return stopped
+
+        with patch.object(run_job.subprocess, "run", side_effect=observe):
+            result = run_job.run(self.job(stream(), "timed", delay=5))
+        if os.name == "nt":
+            self.assertEqual(len(cleanup_codes), 1)
+        uncertain = bool(cleanup_codes and cleanup_codes[0] != 0)
+        expected = ("blocked", "termination_uncertain") if uncertain else ("failed", "terminated_on_timeout")
+        self.assertEqual((result["status"], result["process_status"]), expected)
+        self.assertEqual(result["completion_seq"], 0)
         self.assertTrue(result["timed_out"])
         self.assertEqual(result["native_turn"]["text"], "323")
+
+    @unittest.skipUnless(os.name == "nt", "Windows process tree cleanup")
+    def test_unconfirmed_tree_cleanup_blocks_completion(self):
+        job = self.job(stream(), "uncertain", delay=5)
+        # The fixture has only a direct child; run_job still stops that real child.
+        with patch.object(run_job.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)):
+            result = run_job.run(job)
+        receipt = read_json(self.root / "uncertain/status.json")
+        for state in (result, receipt):
+            self.assertEqual((state["status"], state["completion_seq"]), ("blocked", 0))
+            self.assertEqual(state["process_status"], "termination_uncertain")
+            self.assertTrue(state["timed_out"])
+            self.assertEqual(state["native_turn"]["text"], "323")
 
     def test_omp_cli_args_are_one_shot_and_session_is_rejected(self):
         config = {"harness": "omp", "mode": "one-shot", "argv_prefix": ["omp"],
