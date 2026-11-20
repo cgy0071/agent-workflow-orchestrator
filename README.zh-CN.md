@@ -25,7 +25,7 @@
 
 ## 支持的功能
 
-Windows 便携版可直接运行离线示例。接入真实客户端需单独配置账号和权限；V2 扩展按项目启用。
+Windows 便携版可直接运行离线示例。接入真实客户端需单独配置账号和权限。要使用项目知识库等可选功能，请在需要它的项目中按对应指南启用。
 
 | 功能 | 可以做什么 | 使用方式 |
 | --- | --- | --- |
@@ -36,13 +36,13 @@ Windows 便携版可直接运行离线示例。接入真实客户端需单独配
 | 运行面板与通知 | 查看进度和异常；启用管理模式可预览并确认操作；授权后发送文件或 Webhook 提醒。 | [配置指南](references/monitoring.zh-CN.md) |
 | 外部请求与远程操作 | 接收签名请求供 Planner 审查；可配置远程终端从手机查看工作。 | [配置指南](references/owner-intake.zh-CN.md) · [补充指南](references/remote-access.zh-CN.md) |
 | 项目与代码交付 | 在已有仓库准备任务，用隔离的 Git worktree 执行，独立审核后通过本地合并队列落地或恢复。 | [配置指南](references/project-entry.zh-CN.md) · [补充指南](references/worktree-code-loop.zh-CN.md) |
-| 服务与身份 | 迁移前预演、冻结或恢复写入；登记 Agent，核验能力与心跳，撤销身份。 | [V2 扩展](references/awo-service.zh-CN.md) · [补充指南](references/awo-registry.zh-CN.md) |
-| 预算与资源 | 按任务或项目预留并核对用量；按优先级、协作槽位和资源占用决定是否接纳任务。 | [V2 扩展](references/awo-budget.zh-CN.md) · [补充指南](references/awo-scheduler.zh-CN.md) |
-| 工作区与合并队列 | 为任务分配隔离目录或 worktree，固定基线，将已审核变更按票据落地。 | [V2 扩展](references/awo-workspaces.zh-CN.md) · [补充指南](references/awo-merge.zh-CN.md) |
-| 消息与多 Agent 协作 | 按任务收发消息、回复和确认；将任务分给多个执行者，汇总结果，限制预算和返工次数。 | [V2 扩展](references/awo-messaging.zh-CN.md) · [补充指南](references/awo-collaboration.zh-CN.md) |
-| 项目知识与文档 | 按权限列出条目，按 ID 读取正文、来源、版本和审核历史；使用前检查可用状态。 | [V2 扩展](references/awo-knowledge.zh-CN.md) |
-| 应用接入 | 通过 MCP 标准输入输出、HTTP 或 WebSocket 调用已启用的服务工具。 | [V2 扩展](references/awo-gateway.zh-CN.md) |
-| 监督与审计 | 查看本地监督建议、接收配对草稿，按项目查看运行记录并导出审计回执。 | [V2 扩展](references/awo-supervision.zh-CN.md) · [补充指南](references/awo-observability.zh-CN.md) |
+| 服务与身份 | 迁移前预演、冻结或恢复写入；登记 Agent，核验能力与心跳，撤销身份。 | [需在项目中启用](references/awo-service.zh-CN.md) · [补充指南](references/awo-registry.zh-CN.md) |
+| 预算与资源 | 按任务或项目预留并核对用量；按优先级、协作槽位和资源占用决定是否接纳任务。 | [需在项目中启用](references/awo-budget.zh-CN.md) · [补充指南](references/awo-scheduler.zh-CN.md) |
+| 工作区与合并队列 | 为任务分配隔离目录或 worktree，固定基线，将已审核变更按票据落地。 | [需在项目中启用](references/awo-workspaces.zh-CN.md) · [补充指南](references/awo-merge.zh-CN.md) |
+| 消息与多 Agent 协作 | 按任务收发消息、回复和确认；将任务分给多个执行者，汇总结果，限制预算和返工次数。 | [需在项目中启用](references/awo-messaging.zh-CN.md) · [补充指南](references/awo-collaboration.zh-CN.md) |
+| 项目知识与文档 | 按权限列出条目，按 ID 读取正文、来源、版本和审核历史；使用前检查可用状态。 | [需在项目中启用](references/awo-knowledge.zh-CN.md) |
+| 应用接入 | 通过 MCP 标准输入输出、HTTP 或 WebSocket 调用已启用的服务工具。 | [需在项目中启用](references/awo-gateway.zh-CN.md) |
+| 监督与审计 | 查看本地监督建议、接收配对草稿，按项目查看运行记录并导出审计回执。 | [需在项目中启用](references/awo-supervision.zh-CN.md) · [补充指南](references/awo-observability.zh-CN.md) |
 
 ## 怎么运作
 

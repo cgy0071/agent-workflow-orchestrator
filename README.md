@@ -23,7 +23,7 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 ## Supported features
 
-The Windows ZIP runs the offline demo immediately. Real clients need configuration and authorization; enable V2 extensions per project.
+The Windows ZIP runs the offline demo immediately. Real clients need configuration and authorization. To use an optional feature such as project knowledge, follow its setup guide for the project that needs it.
 
 | Feature | What you can do | Access |
 | --- | --- | --- |
@@ -34,13 +34,13 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 | Dashboard and alerts | Inspect progress and stalls, preview management actions, and send authorized notifications. | [Setup](references/monitoring.md) |
 | External requests and remote access | Receive signed requests for review; optionally use a remote terminal from a phone. | [Setup](references/owner-intake.md) / [Details](references/remote-access.md) |
 | Repository work | Prepare tasks in an existing repository, execute in isolated worktrees, review and land changes locally. | [Setup](references/project-entry.md) / [Details](references/worktree-code-loop.md) |
-| Service and identity | Preview migrations, freeze writes, enroll agents, inspect capabilities and heartbeats, and revoke access. | [V2 extension](references/awo-service.md) / [Details](references/awo-registry.md) |
-| Budget and capacity | Reserve and reconcile usage; admit queued work by priority, available slots and resources. | [V2 extension](references/awo-budget.md) / [Details](references/awo-scheduler.md) |
-| Workspaces and merge queue | Assign an isolated directory or worktree, pin the baseline and land reviewed changes by ticket. | [V2 extension](references/awo-workspaces.md) / [Details](references/awo-merge.md) |
-| Messaging and collaboration | Send, reply to and acknowledge task messages; coordinate multiple workers with shared budgets and bounded repair. | [V2 extension](references/awo-messaging.md) / [Details](references/awo-collaboration.md) |
-| Project knowledge and documents | List authorized entries and read content, sources, revisions and review history by ID; check usability before reuse. | [V2 extension](references/awo-knowledge.md) |
-| Application integrations | Call enabled service tools over MCP stdio, HTTP or WebSocket. | [V2 extension](references/awo-gateway.md) |
-| Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [V2 extension](references/awo-supervision.md) / [Details](references/awo-observability.md) |
+| Service and identity | Preview migrations, freeze writes, enroll agents, inspect capabilities and heartbeats, and revoke access. | [Enable for this project](references/awo-service.md) / [Details](references/awo-registry.md) |
+| Budget and capacity | Reserve and reconcile usage; admit queued work by priority, available slots and resources. | [Enable for this project](references/awo-budget.md) / [Details](references/awo-scheduler.md) |
+| Workspaces and merge queue | Assign an isolated directory or worktree, pin the baseline and land reviewed changes by ticket. | [Enable for this project](references/awo-workspaces.md) / [Details](references/awo-merge.md) |
+| Messaging and collaboration | Send, reply to and acknowledge task messages; coordinate multiple workers with shared budgets and bounded repair. | [Enable for this project](references/awo-messaging.md) / [Details](references/awo-collaboration.md) |
+| Project knowledge and documents | List authorized entries and read content, sources, revisions and review history by ID; check usability before reuse. | [Enable for this project](references/awo-knowledge.md) |
+| Application integrations | Call enabled service tools over MCP stdio, HTTP or WebSocket. | [Enable for this project](references/awo-gateway.md) |
+| Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [Enable for this project](references/awo-supervision.md) / [Details](references/awo-observability.md) |
 
 ## How it works
 
