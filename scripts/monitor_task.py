@@ -701,6 +701,9 @@ def main():
         stalled = checkpoint.get("stalled", False)
         escalated = checkpoint.get("escalated")
         config = request.get("monitor", {})
+        check_continuation = None
+        if request.get("workflow_state"):
+            from workflow_scheduler import continued_episode as check_continuation
 
         def save_checkpoint():
             save_json(checkpoint_path, {"request_sha256": object_hash(request), "started_at": started,
@@ -714,6 +717,12 @@ def main():
                 elif attempt_closed(request):
                     status, detail, receipt = "monitoring_stopped", "Attempt closed in the ledger; worker not cancelled.", None
                 else:
+                    # A journaled continuation of this episode is a new incident
+                    # scope: close the episode and give the continuation its full
+                    # grace window. Mere working/settling observations never do.
+                    if stalled and check_continuation is not None and check_continuation(
+                            request["workflow_state"], request["task_id"], request.get("generation", 1), episode):
+                        stalled, idle_since = False, None
                     last_live[0] = None
                     status, detail, idle_since, receipt = inspect_once(request, recording, idle_since, now=time.time())
                 errors = 0
@@ -726,8 +735,9 @@ def main():
                 status, detail, receipt = "adapter_error", str(exc)[:500], None
             if status in STALLED and not stalled:
                 episode, stalled = episode + 1, True
-            elif status in ("working", "settling"):
-                stalled = False  # A transient query error inside a stall does not end it.
+            # working/settling never closes a stall episode. A repeated stall
+            # stays in the same incident scope unless the journal records a
+            # continuation of this episode (checked before inspection above).
             report = {"task_id": request["task_id"], "nonce": request["nonce"],
                       "status": status, "anomaly_summary": detail, "observed_at": utc_now(),
                       "consecutive_errors": errors, "elapsed_seconds": max(0, time.time() - started)}

@@ -19,8 +19,6 @@ Herdr 用户通过本机已安装版本的只读发现和身份查询，记录�
 3. 核对实际运行配置，通过已验证的适配器读取会话身份及 cwd；Herdr 还需记录 pane、terminal 标识。
 4. 保存角色适配器配置，继续第 2 节的绑定流程；派工前再记录实际序列基线。
 
-已核验的交互会话绑定后可以监控、通知和执行已授权的后续流程。
-
 核验后，将填写后的 `request.json` 中 `worker`、`reviewer` 对象分别保存为 `worker.json`、`planner.json`。`worker.json` 删除 `baseline_completion_seq`，该字段保留在每份任务请求中；其余适配器字段保持一致。Paper Lead 可以使用另一份 reviewer 配置。昵称、模型名和窗口标题都不能代替真实身份。
 
 ## 2. 初始化并绑定角色

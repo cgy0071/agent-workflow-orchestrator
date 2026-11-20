@@ -157,6 +157,13 @@ def summarize(state, task=None, stale_after=900, now=None):
             phase, role, action = "needs_inspection", controller, "continue_or_close"
         elif observation.get("status") in ("adapter_error", "monitor_timeout", "blocked", "identity_changed", "unknown_status", "monitoring_stopped"):
             phase, role, action = "needs_inspection", controller, "inspect_monitor_and_worker"
+        elif observation.get("status") == "review_ready":
+            # A receipt was observed but no inbox event exists yet; do not call this healthy execution.
+            phase, role, action = "awaiting_review", reviewer, "acknowledge_and_review"
+        elif observation.get("status") and observation.get("status") not in (
+                "working", "settling", "transient_error"):
+            # An unrecognized status is unknown, not healthy. Keep the raw value in the record.
+            phase, role, action = "needs_inspection", controller, "inspect_monitor_and_worker"
         else:
             phase, role, action = "executing", worker, "await_delivery"
         # A send that never starts, or a delivery nobody reviews, used to stay silent for hours.

@@ -187,6 +187,36 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(status.summarize(self.state)["tasks"][0]["phase"], "accepted")
         self.assertIn("accepted", status.format_text(status.summarize(self.state)))
 
+    def test_unrecognized_observation_is_inspection_not_healthy(self):
+        # An unknown status is neither success nor failure: route it to inspection
+        # and keep the raw value in the ledger snapshot for diagnosis.
+        req = self.one_node("unknown")
+        scheduler.tick(self.state, "unknown", *self.actor(), transport=self.fake)
+        confirmed = self.confirm(req)
+        scheduler.record_observation(
+            self.state, confirmed,
+            {"status": "zombie", "observed_at": datetime.now(timezone.utc).isoformat()})
+        row = status.summarize(self.state)["tasks"][0]
+        self.assertEqual((row["phase"], row["next_role"], row["next_action"]),
+                         ("needs_inspection", "planner", "inspect_monitor_and_worker"))
+        observed = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]["last_observation"]
+        self.assertEqual(observed["status"], "zombie")
+        self.finish(req)
+        self.assertEqual(status.summarize(self.state)["tasks"][0]["phase"], "accepted")
+
+    def test_review_ready_observation_without_inbox_event_awaits_review(self):
+        # A receipt seen by the monitor but not yet recorded as an inbox event is
+        # awaiting review, not healthy execution.
+        req = self.one_node("receipt")
+        scheduler.tick(self.state, "receipt", *self.actor(), transport=self.fake)
+        confirmed = self.confirm(req)
+        scheduler.record_observation(
+            self.state, confirmed,
+            {"status": "review_ready", "observed_at": datetime.now(timezone.utc).isoformat()})
+        row = status.summarize(self.state)["tasks"][0]
+        self.assertEqual((row["phase"], row["next_role"], row["next_action"]),
+                         ("awaiting_review", "planner", "acknowledge_and_review"))
+
     def test_text_summary_shows_dependencies_dispatch_claims_and_reviews(self):
         req = self.one_node("text", resources={"gpu": 1})
         text = status.format_text(status.summarize(self.state))

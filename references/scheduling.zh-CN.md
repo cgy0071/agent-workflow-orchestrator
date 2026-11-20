@@ -160,7 +160,9 @@ retry_max_seconds 默认 60 秒；此策略不重试发送操作。
 `incomplete`（Worker 空闲但没有有效交付，常见于额度、限流或网络中断后）、`blocked`
 （通常是 harness 权限/审批提示或用量上限）和 `adapter_error`（查询持续失败）属于暂停，
 不是结束。监控在每次停顿中对每种不同状态各发布一个事件、发送一次通知，然后继续观察同一次尝试；之后
-完成的交付仍会变成 `review_ready`。停顿期间同样受整体监控超时限制。控制者关闭本次尝试
+完成的交付仍会变成 `review_ready`。一次停顿是同一尝试内的一次事故范围：`working`/`settling`
+观测、没有有效交付的新完成序号，或伪造/过期的存活文件都不会结束它；只有有效的任务绑定交付，
+或该次停顿对应的 `continue_reserved` 日志记录才会结束。停顿期间同样受整体监控超时限制。控制者关闭本次尝试
 （`reconcile --outcome terminated` 或 `release`）后，监控停止，不再产生事件。
 
 尝试未关闭时，停顿事件不能登记审核，避免对暂停的结论盖过真正的交付。对 `incomplete`，
@@ -176,7 +178,9 @@ python scripts/workflow_scheduler.py --state STATE continue --task TASK-ID --act
 （`continue_reserved`）；发送不确定也计入次数，且不重试。`blocked` 和 `adapter_error`
 不会被继续：权限提示由 Owner 在 Worker 自己的 harness 中处理，Worker 继续后监控自动接上。
 如果是 harness 拒绝了权限，继续消息无济于事，应修改 harness 权限或关闭本次尝试。
-Worker 显示权限提示时派发会在发送前被拒绝，并给出这一原因。
+Worker 显示权限提示时派发会在发送前被拒绝，并给出这一原因。监控看到日志中的继续记录后，
+会关闭当前事件范围并重新开始交付宽限；如果同一任务在继续之后再次停顿，那是一次新的事件范围，
+会单独发布事件并通知。
 
 ## 后续任务与观察确认开始
 

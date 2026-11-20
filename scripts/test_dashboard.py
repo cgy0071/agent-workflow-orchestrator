@@ -19,9 +19,12 @@ from unittest.mock import patch
 import dashboard
 import demo_scheduler
 import monitor_task as monitor
+import owner_notify
+import runtime_views
 import workflow_control as control
 import workflow_scheduler as scheduler
 from test_scheduler import FakeTransport
+import test_priority_scheduler
 import test_scheduler
 
 
@@ -121,6 +124,62 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
         self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
         self.assertEqual(self.fake.status_calls, 0)
+
+    def test_v2_views_http_is_token_gated_and_explicitly_unavailable_on_legacy_state(self):
+        self.assertEqual(self.http("GET", "/api/v2/views", token=False)[0], 403)
+        status, body, headers = self.http("GET", "/api/v2/views")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, {"available": False, "reason": "v2_ledger_not_initialized",
+                                "can_write": False})
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        # The views page is read-only: POST has no route, and a bad limit is rejected.
+        self.assertEqual(self.http("POST", "/api/v2/views")[0], 404)
+        self.assertEqual(self.http("GET", "/api/v2/views?limit=0")[0], 400)
+
+    def test_status_distinguishes_absent_unreadable_and_readable_owner_outbox(self):
+        # Absent, unreadable and readable are three different states; none may
+        # read as "no notifications".
+        _, body, _ = self.http("GET", "/api/status")
+        self.assertIsNone(body["owner_notify"])
+        outbox = self.state / "owner_notify.sqlite3"
+        outbox.write_bytes(b"not a database")
+        _, body, _ = self.http("GET", "/api/status")
+        self.assertEqual(body["owner_notify"]["state"], "unreadable")
+        self.assertIsNone(body["owner_notify"]["pending"])
+        self.assertIsNone(body["owner_notify"]["given_up"])
+        outbox.unlink()
+        with owner_notify.connection(outbox) as con:
+            owner_notify.create_outbox(con)
+        _, body, _ = self.http("GET", "/api/status")
+        self.assertEqual(body["owner_notify"],
+                         {"state": "ok", "pending": 0, "given_up": 0, "last_sent": None})
+
+    def test_page_declares_plain_language_states_and_technical_detail(self):
+        status, html, _ = self.http("GET", "/")
+        self.assertEqual(status, 200)
+        for marker in ('id="v2-views-technical"', 'id="v2-views-reason"',
+                       "Not configured for this workflow. This page sends nothing.",
+                       "The outbox exists but could not be read, so delivery status is unknown.",
+                       "Assigned in configuration; live check not run. Use Check agents now to verify this window.",
+                       "A scheduling condition stopped this task before it was sent. This is not a worker failure and not a review result.",
+                       "No repair-share data in this ledger",
+                       "'Reason code: ' + (data.reason || 'not recorded')"):
+            self.assertIn(marker, html)
+        data = json.loads(html.split('<script type="application/json" id="i18n-zh">', 1)[1].split("</script>", 1)[0])
+        exact = data["exact"]
+        for phrase in ("Needs your check", "Not configured", "Blocking reason", "Technical detail",
+                       "Assigned in configuration; live check not run. Use Check agents now to verify this window.",
+                       "The outbox exists but could not be read, so delivery status is unknown.",
+                       "Runtime views are unavailable. Not set up yet: this workflow has no V2 service state to read, "
+                       "so these opt-in views have nothing to show. Your current tasks are unaffected.",
+                       "No repair-share data in this ledger"):
+            self.assertIn(phrase, exact)
+        patterns = dict(data["patterns"])
+        self.assertEqual(patterns["^assigned, of (\\d+) configured$"], "已配置 $1 个，其中已分配")
+        self.assertEqual(patterns["^reserved amount unknown; (\\d+) of (\\d+) recorded$"],
+                         "预留量未知；已记录 $1，共 $2")
+        self.assertEqual(patterns["^Reason code: (.+)$"], "原因代码：$1")
+        self.assertEqual(patterns["^Error: (.+)$"], "错误：$1")
 
     def test_status_never_writes_or_queries_adapters(self):
         database = self.state / "workflow.sqlite3"
@@ -397,6 +456,20 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("'Show as graph'", html)  # Chain cards can switch to boxes and arrows.
         for element in ('id="inbox-toggle"', 'id="inbox-history"', 'id="task-range"', 'id="dispatch-panel"'):
             self.assertIn(element, html)  # Handled updates and old tasks are folded, not dropped.
+
+    def test_live_check_is_shown_on_role_cards(self):
+        _, html, _ = self.http("GET", "/")
+        # One place for an agent: the live check sits on its role card next to its open tasks.
+        self.assertNotIn('id="probe-panel"', html)
+        self.assertNotIn('id="probe-result"', html)
+        for element in ('id="people-panel"', 'id="probe-time"', 'id="probe-actions"', "role-live"):
+            self.assertIn(element, html)
+        # A working agent with no ledger task is explained, not left as a contradiction.
+        self.assertIn("Busy with work outside this workflow", html)
+        data = json.loads(html.split('<script type="application/json" id="i18n-zh">', 1)[1].split("</script>", 1)[0])
+        self.assertIn("Busy with work outside this workflow, such as a direct conversation.", data["exact"])
+        live = "Live check at 10:20:30. Open tasks come from the workflow ledger; the live status is what each agent window is doing now."
+        self.assertTrue(any(re.fullmatch(source, live) for source, _ in data["patterns"]))
 
     def test_task_summary_prefers_human_text_and_never_raises(self):
         import workflow_status
@@ -737,6 +810,53 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("TASK_DONE DASH-DEMO 1234567890abcdef", (output / "HANDOFF.md").read_text())
         with self.assertRaises(ValueError), redirect_stdout(io.StringIO()):
             demo_scheduler.worker(folder, message)
+
+
+class V2ViewsHTTPTests(unittest.TestCase):
+    """Serve the read-only V2 projection over real HTTP from a migrated ledger."""
+
+    def setUp(self):
+        self.f = test_priority_scheduler.PrioritySchedulerTests()
+        self.f.setUp()
+        self.addCleanup(self.f.doCleanups)
+        self.server = dashboard.DashboardServer(("127.0.0.1", 0), self.f.state)
+        self.thread = threading.Thread(target=self.server.serve_forever,
+                                       kwargs={"poll_interval": 0.02}, daemon=True)
+        self.addCleanup(self.stop)
+        self.thread.start()
+
+    def stop(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+
+    def get(self, path, token=True):
+        port = self.server.server_port
+        headers = {"Host": "127.0.0.1:" + str(port)}
+        if token:
+            headers["X-Dashboard-Token"] = self.server.token
+        con = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        try:
+            con.request("GET", path, headers=headers)
+            response = con.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            con.close()
+
+    def test_views_http_projects_thirteen_views_without_write_authority(self):
+        database = self.f.state / "workflow.sqlite3"
+        before = database.read_bytes()
+        self.assertEqual(self.get("/api/v2/views", token=False)[0], 403)
+        status, body = self.get("/api/v2/views?limit=25")
+        self.assertEqual(status, 200)
+        self.assertFalse(body["can_write"])
+        self.assertEqual(set(body["views"]), set(runtime_views.VIEW_NAMES))
+        self.assertEqual(set(body["buckets"]), set(runtime_views.BUCKETS))
+        self.assertEqual(body["project_id"], self.f.project)
+        self.assertIn("<", body["html"])
+        self.assertNotIn(self.server.token, body["html"])
+        self.assertEqual(database.read_bytes(), before)
+        self.assertEqual(self.get("/api/v2/views?limit=0")[0], 400)
 
 
 class LanHttpsTests(unittest.TestCase):

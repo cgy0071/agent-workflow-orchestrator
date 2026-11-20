@@ -210,6 +210,65 @@ class CompletionTests(unittest.TestCase):
         second = json.loads((self.root / "second.argv").read_text(encoding="utf-8"))
         self.assertEqual(second[:3], ["exec", "resume", "fixture-thread"])
 
+    def test_declared_execution_directory_is_frozen_before_provisioning(self):
+        planned = self.root / "future-worktree"
+        worker = self.root / "bridge-state"
+        native_worker.initialize(worker, "codex", sys.executable, launch_cwd=str(planned))
+        self.assertFalse(planned.exists())
+        self.assertEqual(native_worker.status(worker)["identity"]["launch_cwd"], str(planned.resolve()))
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            native_worker.initialize(self.root / "bad-bridge", "codex", sys.executable, launch_cwd="relative")
+        self.assertFalse((self.root / "bad-bridge").exists())
+
+    def test_codex_sandbox_follows_the_frozen_payload_only(self):
+        worker = self.root / "codex-sandbox"
+        native_worker.initialize(worker, "codex", sys.executable)
+        config = read_json(worker / "config.json")
+        default = native_worker.argv_for(config, {"prompt": "p"}, worker)
+        self.assertEqual(default[default.index("--sandbox") + 1], "read-only")
+        argv = native_worker.argv_for(config, {"prompt": "p", "sandbox": "workspace-write",
+                                               "execution_cwd": str(self.root)}, worker)
+        self.assertEqual(argv[argv.index("--sandbox") + 1], "workspace-write")
+        with self.assertRaisesRegex(ValueError, "sandbox"):
+            native_worker.argv_for(config, {"prompt": "p", "sandbox": "danger-full-access"}, worker)
+        session = self.root / "codex-write-session"
+        native_worker.initialize(session, "codex", sys.executable, mode="session")
+        with self.assertRaisesRegex(ValueError, "one-shot"):
+            native_worker.argv_for(read_json(session / "config.json"),
+                                   {"prompt": "p", "sandbox": "workspace-write",
+                                    "execution_cwd": str(self.root)}, session)
+
+    def test_execution_cwd_is_separate_from_delivery_receipts(self):
+        delivery, execution = self.root / "delivery", self.root / "worktree"
+        delivery.mkdir()
+        execution.mkdir()
+        job = self.job([], name="cwd-job")
+        job.update(cwd=str(delivery), execution_cwd=str(execution), completion_contract=None,
+                   argv=[sys.executable, "-c", "import os; print(os.getcwd())"])
+        receipt = run_job.run(job)
+        self.assertEqual(receipt["status"], "done")
+        self.assertEqual(receipt["cwd"], str(delivery))
+        self.assertEqual(Path(receipt["execution_cwd"]), execution.resolve())
+        self.assertEqual((self.root / "cwd-job" / "output.log").read_text(encoding="utf-8").strip(),
+                         str(execution.resolve()))
+        bad = self.job([], name="bad-cwd")
+        bad.update(cwd=str(delivery), execution_cwd="relative", completion_contract=None)
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            run_job.run(bad)
+        self.assertFalse((self.root / "bad-cwd").exists())
+
+    def test_send_rejects_unbound_write_execution_before_creating_a_job(self):
+        worker = self.root / "native-send-guard"
+        native_worker.initialize(worker, "codex", sys.executable)
+        payload = {"task_id": "T", "nonce": "n", "cwd": str(self.root), "prompt": "p",
+                   "authorization": {"source": "offline fixture"}}
+        with self.assertRaisesRegex(ValueError, "execution_cwd"):
+            native_worker.send(worker, dict(payload, sandbox="workspace-write"))
+        with self.assertRaisesRegex(ValueError, "existing directory"):
+            native_worker.send(worker, dict(payload, sandbox="workspace-write",
+                                            execution_cwd=str(self.root / "missing")))
+        self.assertFalse((worker / "jobs").exists())
+
     def test_unresolvable_pi_session_rejects_send_without_job_directory(self):
         worker = self.root / "pi-missing"
         native_worker.initialize(worker, "pi", sys.executable, mode="session")

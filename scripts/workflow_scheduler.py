@@ -41,6 +41,27 @@ def has_schema(con):
     return bool(con.execute("SELECT 1 FROM sqlite_master WHERE name='dispatches'").fetchone())
 
 
+def continued_episode(state, task, generation, episode):
+    """True only when the journal records a continuation reserved for this monitor stall episode.
+
+    Read-only and conservative: a missing ledger, missing scheduler schema or
+    unreadable row reports False, so the monitor keeps the current episode open.
+    """
+    try:
+        with _read_database(state) as con:
+            if not has_schema(con):
+                return False
+            rows = con.execute("SELECT data FROM task_journal WHERE task=? AND generation=? "
+                               "AND kind='continue_reserved'", (task, generation)).fetchall()
+        for row in rows:
+            if json.loads(row[0]).get("stall_episode") == episode:
+                return True
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return False
+    return False
+
+
+
 @contextmanager
 def _read_database(state):
     path = Path(state).resolve() / "workflow.sqlite3"
@@ -221,6 +242,8 @@ def dispatch(state, request, message, actor, version, context, *, resources=None
         # retire this controller between the final check and the external call.
         with control.database(state) as con:
             control.guard(con, actor, version, context, "dispatch")
+            from awo_service import legacy_dispatch_guard
+            legacy_dispatch_guard(con, actor, version, context)
             if run:
                 assert_ready(con, run, node, request)
             current = control.active(con, spec["role"])
@@ -746,6 +769,8 @@ def continue_task(state, task, actor, version, context, *, transport=None, note=
     try:
         with control.database(state) as con:
             control.guard(con, actor, version, context, "dispatch")
+            from awo_service import legacy_dispatch_guard
+            legacy_dispatch_guard(con, actor, version, context)
             live = transport.status(spec)
             if not identity_matches(live.get("identity", {}), spec["expected_identity"]) or not _resumable(request, live):
                 raise ValueError("worker identity or availability changed before send")

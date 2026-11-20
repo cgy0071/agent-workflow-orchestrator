@@ -1,5 +1,5 @@
 """Offline dispatch crash, concurrency, isolation, and reviewed DAG regression tests."""
-from contextlib import redirect_stdout
+from contextlib import nullcontext, redirect_stdout
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
@@ -787,6 +787,122 @@ class SchedulerTests(unittest.TestCase):
         outage = [e["data"]["report"] for e in view["events"] if e["data"]["report"]["status"] == "adapter_error"]
         self.assertEqual([r["consecutive_errors"] for r in outage], [3])
         self.assertTrue(view["claim_held"])
+
+
+    def background_fixture(self, grace=0):
+        """A confirmed task whose monitor uses the requested settle grace."""
+        req = self.request()
+        req["monitor"] = {"settle_grace_seconds": grace, "interval_seconds": 1}
+        self.send(req)
+        req = self.confirm(req)
+        reqfile = Path(req["cwd"]) / "request.json"
+        reqfile.write_text(json.dumps(req), encoding="utf-8")
+        return req, reqfile
+
+    def replay_monitor(self, req, reqfile, steps, resume=False, on_wait=None, clock=False):
+        class Replay:
+            def __init__(inner, request=None):
+                inner.left = list(steps)
+                inner.current = steps[-1]
+            def status(inner, spec):
+                if inner.left:
+                    inner.current = inner.left.pop(0)
+                if not inner.left:
+                    (Path(req["cwd"]) / "STOP_MONITOR").write_text("stop", encoding="utf-8")
+                status, seq = inner.current
+                return {"identity": spec["expected_identity"], "status": status, "completion_seq": seq}
+            def output(inner, spec):
+                return "worker says it is running; 429 quota; 503 unavailable"
+        argv = ["monitor", "--request", str(reqfile)] + (["--resume"] if resume else [])
+        out = io.StringIO()
+        ticks = iter(range(1000, 100000, 200))
+        clock_patch = patch.object(monitor.time, "time", side_effect=lambda: next(ticks)) if clock else nullcontext()
+        with patch.object(sys, "argv", argv), patch.object(monitor, "Transport", Replay), \
+                patch.object(monitor, "wait_for_change", side_effect=on_wait or (lambda *a, **k: "interval")), \
+                clock_patch, redirect_stdout(out):
+            monitor.main()
+        return [json.loads(line) for line in out.getvalue().splitlines()]
+
+    def event_reports(self, req):
+        view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
+        return [e["data"]["report"] for e in view["events"]]
+
+    def test_incident_oscillation_reports_one_incomplete_scope(self):
+        # Replay of the captured AWO-WORKTREE-CODE-LOOP-20261112 shape: fresh
+        # sequences, settling and working between missing-artifact idles.
+        req, reqfile = self.background_fixture(grace=120)
+        (Path(req["cwd"]) / "liveness.json").write_text(json.dumps(
+            {"pid": 999999, "status": "running", "expires_at": "2000-01-01T00:00:00Z"}), encoding="utf-8")
+        (Path(req["cwd"]) / "child-heartbeat").write_text("running", encoding="utf-8")
+        steps = [("idle", 10), ("idle", 10), ("working", 11), ("idle", 11), ("idle", 11),
+                 ("working", 12), ("idle", 12), ("idle", 12)]
+        reports = self.replay_monitor(req, reqfile, steps, clock=True)
+        statuses = [r["status"] for r in reports]
+        self.assertEqual(statuses.count("working"), 2)
+        self.assertIn("settling", statuses)
+        incomplete = [r for r in reports if r["status"] == "incomplete"]
+        self.assertGreaterEqual(len(incomplete), 3)
+        self.assertEqual({r["stall_episode"] for r in incomplete}, {1})
+        events = [r for r in self.event_reports(req) if r["status"] == "incomplete"]
+        self.assertEqual(len(events), 1)
+        self.assertEqual(len(self.fake.messages), 1)  # No continuation was sent.
+
+    def test_same_task_continuation_then_real_stall_alerts_again(self):
+        req, reqfile = self.background_fixture()
+        sent = []
+        def planner(*args, **kwargs):
+            view = scheduler.snapshot(self.state, req["task_id"])["tasks"][0]
+            if view["last_observation"]["status"] == "incomplete" and not sent:
+                sent.append(True)
+                result = scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=self.fake)
+                self.assertEqual(result["status"], "CONTINUE_SUBMITTED")
+            return "interval"
+        reports = self.replay_monitor(req, reqfile, [("idle", 10)] * 5, on_wait=planner)
+        incomplete = [r for r in reports if r["status"] == "incomplete"]
+        self.assertEqual(incomplete[0]["stall_episode"], 1)
+        self.assertEqual({r["stall_episode"] for r in incomplete[1:]}, {2})
+        events = [r for r in self.event_reports(req) if r["status"] == "incomplete"]
+        self.assertEqual([r["stall_episode"] for r in events], [1, 2])
+        self.assertEqual(len(self.fake.messages), 2)  # Dispatch plus exactly one continuation.
+
+    def test_checkpoint_restart_does_not_repeat_the_same_episode(self):
+        req, reqfile = self.background_fixture()
+        self.replay_monitor(req, reqfile, [("idle", 10)] * 3)
+        first = [r for r in self.event_reports(req) if r["status"] == "incomplete"]
+        self.assertEqual(len(first), 1)
+        (Path(req["cwd"]) / "STOP_MONITOR").unlink()
+        reports = self.replay_monitor(req, reqfile, [("idle", 10)] * 2, resume=True)
+        incomplete = [r for r in reports if r["status"] == "incomplete"]
+        self.assertEqual({r["stall_episode"] for r in incomplete}, {1})
+        second = [r for r in self.event_reports(req) if r["status"] == "incomplete"]
+        self.assertEqual(len(second), 1)
+        self.assertEqual(len(self.fake.messages), 1)
+
+    def test_continuation_scope_requires_same_task_generation_and_episode(self):
+        req, _ = self.background_fixture()
+        scheduler.record_observation(self.state, req, {"task_id": req["task_id"], "nonce": req["nonce"],
+                                                       "status": "incomplete", "stall_episode": 1})
+        scheduler.continue_task(self.state, req["task_id"], *self.actor(), transport=self.fake)
+        self.assertTrue(scheduler.continued_episode(self.state, req["task_id"], 1, 1))
+        self.assertFalse(scheduler.continued_episode(self.state, req["task_id"], 1, 2))
+        self.assertFalse(scheduler.continued_episode(self.state, req["task_id"], 2, 1))
+        self.assertFalse(scheduler.continued_episode(self.state, "TASK-OTHER", 1, 1))
+        self.assertFalse(scheduler.continued_episode(self.root / "missing-state", req["task_id"], 1, 1))
+        # A file that looks like a liveness receipt is not journal evidence.
+        (Path(req["cwd"]) / "continue_reserved.json").write_text(
+            json.dumps({"stall_episode": 2, "pid": 999999}), encoding="utf-8")
+        self.assertFalse(scheduler.continued_episode(self.state, req["task_id"], 1, 2))
+
+    def test_valid_delivery_after_stall_still_reaches_review_ready_once(self):
+        req, reqfile = self.background_fixture()
+        def deliver(*args, **kwargs):
+            for name in ("HANDOFF.md", "RESULT.md"):
+                (Path(req["cwd"]) / name).write_text(self.message(req), encoding="utf-8")
+            return "interval"
+        reports = self.replay_monitor(req, reqfile, [("idle", 10), ("idle", 10), ("idle", 11)], on_wait=deliver)
+        self.assertEqual([r["status"] for r in reports].count("review_ready"), 1)
+        summaries = [r for r in self.event_reports(req) if r["status"] == "review_ready"]
+        self.assertEqual(len(summaries), 1)
 
 
 if __name__ == "__main__":

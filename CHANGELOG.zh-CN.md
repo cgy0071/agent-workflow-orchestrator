@@ -4,10 +4,31 @@
 
 项目还没有编号版本。下面按改动合并到 `main` 的日期分组，括号里是对应的 PR 编号。所有改动都遵守同一套安全规则：每个任务只发送一次，不自动回答授权提示，独立审核记录在案才算完成，配置不等于授权。
 
-## 2026-11-06
+## Unreleased
 
 ### 新增
 
+- **可选的 V2 服务边界。** `scripts/awo_service.py` 增加增量 `v2_*` 表、默认只读的 dry-run 与由 controller 执行的保守迁移、带持久幂等的命令信封，以及针对 legacy register/dispatch 与 continuation 最终发送的 freeze/epoch 门禁。V2 默认关闭；下面列出的其他 V2 组件都是独立的可选模块。迁移复用现有 acceptance 门禁，绝不把缺失或变更的证据升级。此改动尚未提交，也未进入 `main` 或 GitHub。见 [references/awo-service.zh-CN.md](references/awo-service.zh-CN.md)。
+- **最小 Agent 注册表。** controller 发放单次 enrollment grant、pending self-registration、能力证据级别、认证心跳与撤销。secret 只写入独占本地文件；supported 能力要求上下文匹配并重核本地证据哈希。不增加 scheduler/MCP/消息权限。见 [references/awo-registry.zh-CN.md](references/awo-registry.zh-CN.md)。
+- **预算账本。** 从 Assignment/Task/项目推导 run/task/workflow scope，原子分 scope 预留，delta/累计 sample，per-run 暴露，authoritative close 对账，按维度 unknown，以及 controller limit/action 命令。不增加调度器启用或供应商硬上限声明。见 [references/awo-budget.zh-CN.md](references/awo-budget.zh-CN.md)。
+- **其他 V2 组件（未发布）。** 以下可选模块扩展同一个台账，不新增权威：优先级调度器（排队顺序、协作槽位、准入闸门）、Assignment 工作区（隔离根目录、Git worktree、冻结源）、持久化 Agent 消息、本地知识、应用网关、协作运行时、合并队列、本地监督与配对外部草稿，以及只读运行视图和隔离审计回执。每个可写模块仍由服务 enable 开关控制，并各自有 `references/awo-*.md` 指南；只读运行视图只要 V2 schema 存在就提供经认证的快照。这些组件的独立验收另行跟踪，本条目不声称已验收。
+- **Git worktree 代码闭环（未发布）。** `scripts/validate_v2_worktree_code.py` 验证可选的 V2 路径：从真实 Git worktree 执行、独立审核、本地 Merge Queue，一直到下游物化。它在一个一次性夹具上产生五次真实的已认证 Codex 轮次，创建 Task A 和依赖它的 Task B，落地 Task A，并让 Task B 保持 accepted 但未 landed。费用仍为未知；已测试范围是 Windows 加 Codex CLI。它不是任意项目的启动器。此改动尚未提交，也未进入 `main` 或 GitHub。见 [references/worktree-code-loop.zh-CN.md](references/worktree-code-loop.zh-CN.md)。
+- **面向已有仓库的项目入口（未发布）。** `scripts/project_entry.py` 为任意本地 Git 仓库准备一份哈希封存的计划；在显式执行时，向受管 worktree 发送一次有界 Codex worker 回合，强制冻结的允许路径与验收 argv，封存 worker 证据，取得独立代码审核和集成审核，通过本地 Merge Queue 落地，并支持只读状态查询和恢复，且绝不重发已尝试的 Assignment。它复用既有账本、调度器、原生桥接、worktree、审核封存和合并队列，不新增状态权威。accepted 与 landed 保持区分，准备阶段从不启动模型或移动目标 ref。已在 Windows + Codex 上测试；金额费用未知。见 [references/project-entry.zh-CN.md](references/project-entry.zh-CN.md)。
+
+### 修复
+
+- **后台进展只算一次事故范围。** `working`/`settling` 观测，或没有有效交付的新完成序号，不再结束监控的停顿事件范围；因此 Worker 反复回到空闲、而所属后台进程仍在继续时，只报告一次事件，而不是重复序列。事件范围现在只在有效任务绑定交付，或为该任务、generation 和该次停顿记入日志的继续之后关闭；继续之后再次停顿属于新的范围，会单独发布事件并通知。输出文字、进程号、心跳和看似存活证明的文件都不会关闭范围；过期、不匹配或伪造的存活记录也不能压下真实停顿。见 [references/monitoring.zh-CN.md](references/monitoring.zh-CN.md) 和 [references/scheduling.zh-CN.md](references/scheduling.zh-CN.md)。
+- **崩溃测试的效应发布（仅测试）。** 协作运行时崩溃测试改为在同目录写临时文件并原子替换来发布效应进程号，并按确切 PID 有界清理。读取方不会再看到空的最终文件；测试用注入的写入暂停证明这一点。产品行为不变。
+
+## 2026-11-06
+
+### 改动
+
+- **看板：每个 Agent 只在一处显示。** **立即检查 Agent** 把实时状态显示在各角色卡片上、紧挨着它的进行中任务，不再放在页面下方一个重复列出角色的独立面板里。“工作中”但台账里没有任务时，注明它在处理工作流之外的事情；空闲但有进行中任务时，提示去看任务阶段。
+
+### 新增
+
+- **用手机远程使用命令行**（可选，Windows；[references/remote-access.zh-CN.md](references/remote-access.zh-CN.md)）。`contrib/windows-remote/setup-ssh-tailscale.ps1` 把 Windows OpenSSH 配置为只能经 Tailscale 连接：只认密钥、只监听 Tailscale 地址、防火墙只放行 `100.64.0.0/10`、默认 shell 可选 cmd 或 PowerShell，并用开机任务等 Tailscale 就绪后再启动。`hd.cmd`/`hd.ps1` 在 SSH 里列出、读取 Herdr 窗口并向其输入；Herdr 的全屏界面在这种方式下显示不正常。
 - **看板的 Tailscale 身份检查。** 在 `tailscale serve` 后面使用 `--public-origin` 时，`--tailscale-user LOGIN` 只放行 `Tailscale-User-Login` 属于所列登录名的请求（该标头由 Serve 设置，并会删除客户端自带的副本）。令牌仍然必需；本机回环请求不受影响。响应新增 `Referrer-Policy: no-referrer`。监控文档增加了通过 Tailscale 用手机访问的步骤和隐私说明。
 
 ## 2026-11-05
