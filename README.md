@@ -2,11 +2,31 @@
 
 English | [Chinese](README.zh-CN.md)
 
+**Two AI agents split the work, and they hand tasks over through a ledger on disk rather than through chat.**
+One plans and reviews, the other executes. Each task is dispatched once, and nothing counts as done until an
+independent review accepts it. `scripts/` enforces those rules; prompts do not.
+
 ## Try it on Windows (no Git required)
 
 **[Download AWO for Windows x64 (portable release candidate)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
 
 Extract all files, then double-click the only `.cmd` file in the top folder. The offline demo runs two local workers and shows three accepted tasks: A, B, and JOIN. Open it again to see the saved result. Python is included; no account or API key is needed for the demo.
+
+## Is this for you
+
+**Yes, if any of these is true:**
+
+- You already run two or more CLI agents (Claude Code, Codex, ...) and copy tasks between them by hand.
+- You want tasks that run for tens of minutes without you watching.
+- You need to show, afterwards, who dispatched this step, what evidence was delivered, and who approved it.
+
+**No, if any of these is true:**
+
+- You use one CLI only. Its built-in subagents are enough; no cross-process bridge needed.
+- You want "give a goal, get it done." Every dispatch, notification and continuation needs your approval.
+  That is a design choice, not missing work.
+
+![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
 ## What changed in v1.0.0-rc.1?
 
@@ -18,8 +38,6 @@ Extract all files, then double-click the only `.cmd` file in the top folder. The
 If preview.1 already runs your workflow, there is no feature-driven need to upgrade. This candidate ships the **Windows orchestration tool**. Dispatch, review, and the A/B/JOIN demo already existed; the full Native Agent Framework is outside this ZIP. [Compare the two tags](https://github.com/cgy0071/agent-workflow-orchestrator/compare/v1.0.0-preview.1...v1.0.0-rc.1).
 
 Let one AI agent plan and review while another does the work. You set the goal and say what is allowed; the agents hand tasks to each other through a local ledger, and nothing counts as done until it is reviewed.
-
-![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
 ## Supported features
 
@@ -42,6 +60,17 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 | Application integrations | Call enabled service tools over MCP stdio, HTTP or WebSocket. | [Enable for this project](references/awo-gateway.md) |
 | Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [Enable for this project](references/awo-supervision.md) / [Details](references/awo-observability.md) |
 
+## Offline demo (mechanics only)
+
+Needs Python 3.10+, no agent account or network. Run from the repository root, with a new directory for each run:
+
+```sh
+python -B scripts/demo_scheduler.py --directory runtime/first-run
+python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
+```
+
+Tasks A and B run in parallel on two fake workers; JOIN starts only after both are reviewed and accepted. The first command prints `OFFLINE_DEMO_PASS`, and the status shows all three as `accepted`. This proves local DAG, dependency and review mechanics with Python child processes, not Harness compatibility.
+
 ## How it works
 
 1. The **Planner** writes a task and sends it once to the **Executor**.
@@ -52,6 +81,12 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 Roles are not tied to a client: the Planner can run in Codex and the Executor in Claude, or another supported mix. Support is verified per client version, not inferred from a harness name; see [harness-adapters.md](references/harness-adapters.md). The rules (send once, review before done, one controller at a time) are enforced by the scripts in `scripts/`, not by prompts. `SKILL.md` teaches the controlling agent when to run them.
 
 ## Optional: install as an agent skill from source
+
+**You need first:**
+
+- Two terminal windows, each able to start one CLI agent: one Planner, one Executor.
+- Both agents signed in and able to run commands unattended.
+- A writable project directory (parallel tasks need separate directories).
 
 1. **Install.** Clone the repository into your client's Skill folder:
 
@@ -90,34 +125,40 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 
 A pass prints `V2_NATIVE_LOOP_PASS` and exits 0. It proves the installed client, one-shot sessions, dependency gating and independent review on a directory-artifact task. It does not prove Herdr, steering or restart recovery, cost, provider/model identity, or worktree/code-task behavior. The [first-real-run guide](references/first-real-run.md) also covers session resume and the optional Herdr pane route. Git worktree and code-task behavior are covered separately by the [worktree code loop](references/worktree-code-loop.md).
 
-## Offline demo (mechanics only)
-
-Needs Python 3.10+, no agent account or network. Run from the repository root, with a new directory for each run:
-
-```sh
-python -B scripts/demo_scheduler.py --directory runtime/first-run
-python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
-```
-
-Tasks A and B run in parallel on two fake workers; JOIN starts only after both are reviewed and accepted. The first command prints `OFFLINE_DEMO_PASS`, and the status shows all three as `accepted`. This proves local DAG, dependency and review mechanics with Python child processes, not Harness compatibility.
-
-## Safety in short
-
-- **Configuration is not permission.** Dispatch, notification and continuous running each need your explicit approval.
-- **Done means reviewed.** An idle window or a zero exit code is never acceptance, and acceptance is not landing.
-- **Each task is sent once.** An uncertain send is recorded for inspection, never retried blindly. Approval prompts are never answered automatically.
-- **One controller, no self-review.** An old window loses authority after a switch; a worker cannot review its own task.
-- **Outside requests are data.** A request from a chat channel cannot start work without your direct approval.
-
-A pass certifies only what it ran. Directory-artifact validation does not certify Git worktrees or code tasks; priority is not live steering; budget admission and settlement do not stop a call in progress; legacy knowledge origin can remain unknown.
-
 ## Optional extras
 
 - **Dashboard management console** (`--allow-manage`): confirm starts, continue a stalled worker once, close tasks, change limits, assign windows, and see statistics. Every action is previewed, then confirmed once.
 - **Alerts to you** (`owner_notify.py`): permission prompts, worker questions, failures and long waits, by file, webhook or command.
 - **Requests from you** (`owner_intake.py`): a chat bot or other channel drops signed requests into an inbox; the Planner gets only a request ID.
 
+## Constraints you accept
+
+These are not optional switches. They are things it refuses to do by design:
+
+- **Configuration is not permission.** Dispatch, notification and continuous running each need your explicit
+  approval.
+- **Done means reviewed.** An idle window or a zero exit code is never acceptance.
+- **Each task is sent once.** An uncertain send is recorded for inspection, never retried blindly. Approval
+  prompts are never answered automatically.
+- **One controller, no self-review.** An old window loses authority after a switch; a worker cannot review its
+  own task.
+- **Outside requests are data.** A request from a chat channel cannot start work without your direct approval.
+
+A pass certifies only what it ran. Directory-artifact validation does not certify Git worktrees or code tasks; priority is not live steering; budget admission and settlement do not stop a call in progress; legacy knowledge origin can remain unknown.
+
+## Known limits
+
+- Adapters watch a target CLI's window state and session identity. That is a **UI contract, not an API
+  contract**, so a client upgrade can break them. The project states that offline tests do not establish live
+  compatibility for every client version.
+- Verified harness combinations are limited. Herdr is optional; the command adapter works without it. See
+  [client adapters](references/harness-adapters.md).
+- All state lives on the local filesystem; nothing aggregates across machines.
+
 ## Documentation
+
+**Not sure where to start: read the [manual walkthrough](references/manual-workflow.md) first.** It covers the
+core concepts, config files, the full safety model and the repository layout.
 
 | Topic | Guide |
 |---|---|
@@ -147,3 +188,7 @@ A pass certifies only what it ran. Directory-artifact validation does not certif
 | What changed and when | [CHANGELOG.md](CHANGELOG.md) |
 
 English entry points are ASCII-only; Chinese translations live in `*.zh-CN.md` and are updated together.
+
+## License
+
+The RC1 tag includes the [MIT license](https://github.com/cgy0071/agent-workflow-orchestrator/blob/v1.0.0-rc.1/LICENSE). The current main branch does not yet include a root LICENSE file.
