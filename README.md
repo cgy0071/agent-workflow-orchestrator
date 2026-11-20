@@ -21,9 +21,26 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 ![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
-## Can I read project knowledge?
+## Supported features
 
-Yes. Configure the project knowledge extension and obtain a project read credential. You can then list visible entries and read the text, source, or a specific revision by ID. Check the returned `usable` flag before relying on an entry. The double-click offline demo does not yet offer a natural-language search box. [Knowledge queries and permissions](references/awo-knowledge.md).
+The Windows ZIP runs the offline demo immediately. Real clients need configuration and authorization; enable V2 extensions per project.
+
+| Feature | What you can do | Access |
+| --- | --- | --- |
+| Offline demo | Run A and B with local workers, review JOIN and reopen saved results. | [Offline demo](references/manual-workflow.md) |
+| Roles and review | Configure roles, inspect delivery evidence, then accept, request repair or reject. | [Setup](references/task-and-review.md) |
+| Scheduling | Declare dependencies, dispatch independent work in parallel, and continue stalled tasks. | [Setup](references/scheduling.md) |
+| Client adapters | Bind and switch workers; select command, receipt or optional Herdr transport based on verified client capabilities. | [Setup](references/harness-adapters.md) |
+| Dashboard and alerts | Inspect progress and stalls, preview management actions, and send authorized notifications. | [Setup](references/monitoring.md) |
+| External requests and remote access | Receive signed requests for review; optionally use a remote terminal from a phone. | [Setup](references/owner-intake.md) / [Details](references/remote-access.md) |
+| Repository work | Prepare tasks in an existing repository, execute in isolated worktrees, review and land changes locally. | [Setup](references/project-entry.md) / [Details](references/worktree-code-loop.md) |
+| Service and identity | Preview migrations, freeze writes, enroll agents, inspect capabilities and heartbeats, and revoke access. | [V2 extension](references/awo-service.md) / [Details](references/awo-registry.md) |
+| Budget and capacity | Reserve and reconcile usage; admit queued work by priority, available slots and resources. | [V2 extension](references/awo-budget.md) / [Details](references/awo-scheduler.md) |
+| Workspaces and merge queue | Assign an isolated directory or worktree, pin the baseline and land reviewed changes by ticket. | [V2 extension](references/awo-workspaces.md) / [Details](references/awo-merge.md) |
+| Messaging and collaboration | Send, reply to and acknowledge task messages; coordinate multiple workers with shared budgets and bounded repair. | [V2 extension](references/awo-messaging.md) / [Details](references/awo-collaboration.md) |
+| Project knowledge and documents | List authorized entries and read content, sources, revisions and review history by ID; check usability before reuse. | [V2 extension](references/awo-knowledge.md) |
+| Application integrations | Call enabled service tools over MCP stdio, HTTP or WebSocket. | [V2 extension](references/awo-gateway.md) |
+| Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [V2 extension](references/awo-supervision.md) / [Details](references/awo-observability.md) |
 
 ## How it works
 

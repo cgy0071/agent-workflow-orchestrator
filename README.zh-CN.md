@@ -23,9 +23,26 @@
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)
 
-## 能调取项目知识库吗？
+## 支持的功能
 
-可以。配置项目知识扩展并取得项目读取凭据后，可先列出有权查看的条目，再按 ID 读取正文、来源和指定历史版本。用作执行依据前，应检查返回的 `usable` 状态。双击启动的离线示例目前没有自然语言搜索框。[查看知识查询操作与权限说明](references/awo-knowledge.zh-CN.md)。
+Windows 便携版可直接运行离线示例。接入真实客户端需单独配置账号和权限；V2 扩展按项目启用。
+
+| 功能 | 可以做什么 | 使用方式 |
+| --- | --- | --- |
+| 离线体验 | 解压后双击运行；两个模拟执行者完成 A、B，再验收 JOIN，重开可查看结果。 | [直接体验](references/manual-workflow.zh-CN.md) |
+| 角色与独立审核 | 配置规划者、执行者和审核者；核对交付证据，决定通过、返工或拒绝。 | [配置指南](references/task-and-review.zh-CN.md) |
+| 任务调度 | 声明依赖、并行和串行步骤；单次派发，处理停顿、继续和交接。 | [配置指南](references/scheduling.zh-CN.md) |
+| 执行客户端 | 绑定、切换和恢复执行窗口；按客户端版本核验可用操作，支持命令、回执和可选 Herdr 接入。 | [配置指南](references/harness-adapters.zh-CN.md) |
+| 运行面板与通知 | 查看进度和异常；启用管理模式可预览并确认操作；授权后发送文件或 Webhook 提醒。 | [配置指南](references/monitoring.zh-CN.md) |
+| 外部请求与远程操作 | 接收签名请求供 Planner 审查；可配置远程终端从手机查看工作。 | [配置指南](references/owner-intake.zh-CN.md) · [补充指南](references/remote-access.zh-CN.md) |
+| 项目与代码交付 | 在已有仓库准备任务，用隔离的 Git worktree 执行，独立审核后通过本地合并队列落地或恢复。 | [配置指南](references/project-entry.zh-CN.md) · [补充指南](references/worktree-code-loop.zh-CN.md) |
+| 服务与身份 | 迁移前预演、冻结或恢复写入；登记 Agent，核验能力与心跳，撤销身份。 | [V2 扩展](references/awo-service.zh-CN.md) · [补充指南](references/awo-registry.zh-CN.md) |
+| 预算与资源 | 按任务或项目预留并核对用量；按优先级、协作槽位和资源占用决定是否接纳任务。 | [V2 扩展](references/awo-budget.zh-CN.md) · [补充指南](references/awo-scheduler.zh-CN.md) |
+| 工作区与合并队列 | 为任务分配隔离目录或 worktree，固定基线，将已审核变更按票据落地。 | [V2 扩展](references/awo-workspaces.zh-CN.md) · [补充指南](references/awo-merge.zh-CN.md) |
+| 消息与多 Agent 协作 | 按任务收发消息、回复和确认；将任务分给多个执行者，汇总结果，限制预算和返工次数。 | [V2 扩展](references/awo-messaging.zh-CN.md) · [补充指南](references/awo-collaboration.zh-CN.md) |
+| 项目知识与文档 | 按权限列出条目，按 ID 读取正文、来源、版本和审核历史；使用前检查可用状态。 | [V2 扩展](references/awo-knowledge.zh-CN.md) |
+| 应用接入 | 通过 MCP 标准输入输出、HTTP 或 WebSocket 调用已启用的服务工具。 | [V2 扩展](references/awo-gateway.zh-CN.md) |
+| 监督与审计 | 查看本地监督建议、接收配对草稿，按项目查看运行记录并导出审计回执。 | [V2 扩展](references/awo-supervision.zh-CN.md) · [补充指南](references/awo-observability.zh-CN.md) |
 
 ## 怎么运作
 
