@@ -23,6 +23,10 @@
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)
 
+## 能调取项目知识库吗？
+
+可以。配置项目知识扩展并取得项目读取凭据后，可先列出有权查看的条目，再按 ID 读取正文、来源和指定历史版本。用作执行依据前，应检查返回的 `usable` 状态。双击启动的离线示例目前没有自然语言搜索框。[查看知识查询操作与权限说明](references/awo-knowledge.zh-CN.md)。
+
 ## 怎么运作
 
 1. **Planner** 写好任务，向 **Executor** 只发送一次。

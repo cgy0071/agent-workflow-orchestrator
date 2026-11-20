@@ -21,6 +21,10 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 ![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
+## Can I read project knowledge?
+
+Yes. Configure the project knowledge extension and obtain a project read credential. You can then list visible entries and read the text, source, or a specific revision by ID. Check the returned `usable` flag before relying on an entry. The double-click offline demo does not yet offer a natural-language search box. [Knowledge queries and permissions](references/awo-knowledge.md).
+
 ## How it works
 
 1. The **Planner** writes a task and sends it once to the **Executor**.
