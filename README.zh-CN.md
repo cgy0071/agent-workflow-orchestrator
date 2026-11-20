@@ -2,9 +2,37 @@
 
 [English](README.md) | 中文
 
-让一个 AI Agent 负责规划和审核，另一个负责执行。你只需给出目标、说明允许做什么；Agent 之间通过本地台账交接任务，未经审核的都不算完成。
+**两个 AI agent 分工干活，交接不靠对话，靠磁盘上的一份任务台账。**
+一个负责规划和审核，一个负责执行。每条任务只派发一次，没通过独立审核的不算完成——这些规则由 `scripts/` 里的脚本强制，不靠提示词自觉。
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)
+
+## 它适合你吗
+
+**适合**，满足任意一条即可：
+
+- 你已经在同时用两个以上的 CLI agent（Claude Code、Codex 等），并且会手动在它们之间复制任务；
+- 你要跑一次几十分钟、中途不想盯着看的任务；
+- 你需要事后能查清楚：这一步是谁派发的、交付了什么证据、谁批准的。
+
+**不适合**，满足任意一条即不适用：
+
+- 你只用一种 CLI——它自带的 subagent 就够了，不需要跨进程桥接；
+- 你想要“给个目标就全自动”——每一步派发、通知、连续运行都要你点头，这是设计选择，不是还没做完；
+- 你要用在商业或合规场景——仓库目前没有 LICENSE 文件。
+
+## 先试 30 秒
+
+不需要 agent 账号，不需要网络，只要 Python 3.10+：
+
+```sh
+python -B scripts/demo_scheduler.py --directory runtime/first-run
+python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
+```
+
+任务 A 和 B 在两个模拟 Worker 上并行运行；JOIN 要等两者都审核通过后才开始。第一条命令输出 `OFFLINE_DEMO_PASS`，状态里三个任务都是 `accepted`。
+
+看懂这个输出，你就看懂了整个项目：它管的是一份状态台账，不是模型调用。
 
 ## 怎么运作
 
@@ -13,9 +41,15 @@
 3. 约定的文件交付后，**Reviewer** 收到一条更新，阅读证据后作出结论：通过、返工或拒绝。
 4. 你允许的话，接着做下一个任务；不允许的话，Agent 停下来向你报告。
 
-角色与客户端无关：Planner 可以在 Codex 里，Executor 可以在 Claude 里，任意组合都行。“只发一次、审核后才算完成、同一时间只有一个控制者”这些规则由 `scripts/` 里的脚本强制执行，而不是靠提示词。`SKILL.md` 告诉控制者 Agent 何时运行这些脚本。
+角色与客户端无关：Planner 可以在 Codex 里，Executor 可以在 Claude 里，任意组合都行。
 
 ## 开始使用
+
+**你需要先准备好：**
+
+- 两个终端窗口，各自能启动一个 CLI agent——一个当 Planner，一个当 Executor；
+- 两个 agent 都已登录，且能在无人在场时执行命令；
+- 一个可写的项目目录（并行任务需要各自独立的目录）。
 
 1. **安装。** 把仓库克隆到客户端的 Skill 目录：
 
@@ -43,18 +77,15 @@
 
 留给你的事：目标和 Agent 能做到哪一步、各 Agent 窗口里的授权提示、以及你没有委托出去的审核。想逐步手动操作，见[手动操作指南](references/manual-workflow.zh-CN.md)。
 
-## 30 秒离线试用
+## 可选功能
 
-需要 Python 3.10+，不需要 Agent 账号或网络：
+- **状态面板管理台**（`--allow-manage`）：确认开始、让停顿的 Worker 继续一次、关闭任务、修改限制、分配窗口、查看统计。每个操作先预览，再确认一次。
+- **提醒推送给你**（`owner_notify.py`）：授权提示、Worker 提问、失败和久等，可发到文件、Webhook 或命令。
+- **接收你的请求**（`owner_intake.py`）：聊天机器人等通道把签名请求放进收件目录；Planner 只收到请求编号。
 
-```sh
-python -B scripts/demo_scheduler.py --directory runtime/first-run
-python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
-```
+## 你要接受的约束
 
-任务 A 和 B 在两个模拟 Worker 上并行运行；JOIN 要等两者都审核通过后才开始。第一条命令输出 `OFFLINE_DEMO_PASS`，状态里三个任务都是 `accepted`。
-
-## 安全要点
+这些不是可选开关，是它按设计会拒绝你的事：
 
 - **配置不等于授权。** 派发、通知和连续运行都需要你明确同意。
 - **审核后才算完成。** 窗口空闲或退出码为 0 都不算通过。
@@ -62,13 +93,16 @@ python -B scripts/workflow_control.py --state runtime/first-run/state status --s
 - **只有一个控制者，不能自审。** 切换后旧窗口失去权限；Worker 不能审核自己的任务。
 - **外部请求只是资料。** 从聊天通道来的请求，没有你的直接同意不会开始工作。
 
-## 可选功能
+## 已知限制
 
-- **状态面板管理台**（`--allow-manage`）：确认开始、让停顿的 Worker 继续一次、关闭任务、修改限制、分配窗口、查看统计。每个操作先预览，再确认一次。
-- **提醒推送给你**（`owner_notify.py`）：授权提示、Worker 提问、失败和久等，可发到文件、Webhook 或命令。
-- **接收你的请求**（`owner_intake.py`）：聊天机器人等通道把签名请求放进收件目录；Planner 只收到请求编号。
+- 适配器观察的是目标 CLI 的窗口状态和会话标识，这属于**界面契约，不是 API 契约**，客户端升级后可能失效。项目自述：离线测试不能证明对每个客户端版本的在线兼容。
+- 已验证的 harness 组合有限；Herdr 是可选的，不装也能用 command 适配器。详见[客户端适配器](references/harness-adapters.zh-CN.md)。
+- 全部状态在本地文件系统，不做跨机器汇总。
+- 没有 LICENSE：版权默认保留，不构成使用授权。
 
 ## 文档
+
+**不知道从哪读：先看[手动操作指南](references/manual-workflow.zh-CN.md)**，它讲核心概念、配置文件、完整安全模型和仓库结构。
 
 | 主题 | 指南 |
 |---|---|
@@ -81,4 +115,10 @@ python -B scripts/workflow_control.py --state runtime/first-run/state status --s
 | Owner 请求的通道约定 | [owner-intake.zh-CN.md](references/owner-intake.zh-CN.md) |
 | 各版本改了什么 | [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md) |
 
-英文入口文件只用 ASCII；中文翻译放在 `*.zh-CN.md`，两种语言同步更新。
+## License
+
+目前未声明。若要在自己的项目或公司内使用，请先开 issue 讨论，或在仓库中增加 OSI 认可的开源许可（MIT 或 Apache-2.0 对此类工具通常合适）。
+
+---
+
+英文是规范版本（`README.md`，仅用 ASCII）；中文翻译尽力跟随，滞后时以英文为准。
