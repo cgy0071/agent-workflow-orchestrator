@@ -453,7 +453,10 @@ def service_worker():
                         messages_enabled=request["messages_enabled"]), request["messages_enabled"])
                     if request.get('extensions_enabled') is True:
                         import service_extensions
+                        import kb_host_bridge
                         specs += service_extensions.tool_specs()
+                        kb_deployment = kb_host_bridge.deployment(request['state'])
+                        specs += kb_host_bridge.specs(kb_deployment)
                     if operation == "specs":
                         result = specs
                     else:
@@ -461,6 +464,8 @@ def service_worker():
                         invoked = True
                         if request["tool"] in P0_TOOLS | MESSAGE_TOOLS:
                             result = service.gateway_call(*args, request["tool"], request["arguments"])
+                        elif request["tool"].startswith("kb."):
+                            result = kb_host_bridge.call(*args, request["tool"], request["arguments"], kb_deployment)
                         else:
                             result = service_extensions.call(*args, request["tool"], request["arguments"])
                 else:
@@ -640,6 +645,10 @@ def run_stdio(backend, token, source=None, sink=None):
         while True:
             line = source.readline(MAX_INPUT + 1)
             if not line:
+                if (isinstance(backend, ServiceBackend) and backend.extensions_enabled
+                        and session.initialized and not session.closed and not session.pending):
+                    from kb_session_source import completed
+                    completed(backend, token)
                 break
             if len(line) > MAX_INPUT:
                 emit(rpc_error(None, -32600, "Input limit exceeded"))
@@ -664,6 +673,7 @@ def main(argv=None):
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--token-file", default=os.environ.get("AWO_AGENT_TOKEN_FILE"))
     parser.add_argument("--messages-enabled", action="store_true")
+    parser.add_argument("--extensions-enabled", action="store_true")
     parser.add_argument("--call-timeout", type=float, default=30)
     args = parser.parse_args(argv)
     try:
@@ -671,6 +681,7 @@ def main(argv=None):
             raise GatewayError("unauthenticated")
         token = read_token_file(args.token_file)
         backend = ServiceBackend(args.state, args.project_root,
+                                 extensions_enabled=args.extensions_enabled,
                                  messages_enabled=args.messages_enabled, call_timeout=args.call_timeout)
         backend.principal(token)  # No unauthenticated stdio lifecycle.
         return run_stdio(backend, token)

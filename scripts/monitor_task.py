@@ -101,6 +101,16 @@ def read_json(path):
 def save_json(path, data):
     path = Path(path)
     tmp = path.with_name(path.name + "." + str(os.getpid()) + "." + uuid.uuid4().hex + ".tmp")
+    if os.name == "nt" and len(str(tmp.absolute())) >= 260:
+        # Use the extended-length path for the temporary sibling and atomic replacement.
+        def extended(value):
+            raw = os.path.abspath(value)
+            if raw.startswith("\\\\?\\"):
+                return raw
+            if raw.startswith("\\\\"):
+                return "\\\\?\\UNC\\" + raw[2:]
+            return "\\\\?\\" + raw
+        tmp, path = Path(extended(tmp)), Path(extended(path))
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     # Windows readers may briefly hold a handle without FILE_SHARE_DELETE.
     # Replacing our own unchanged temporary file is idempotent; sending a task is not.
@@ -546,6 +556,8 @@ def notify_once(request, report, directory, transport):
         event = publish_event(request["workflow_state"], request, report,
                               read_json(receipt_path) if receipt_path.exists() else None)
         return deliver_event(request["workflow_state"], event, transport)
+    if "kb_gate" in request:
+        return {"status": "KB_REVISION_REQUIRED", "detail": "Registered workflow state required for KB handoff"}
     authorization = request["authorization"]
     if authorization.get("notify_reviewer") is not True or not authorization.get("source"):
         return {"status": "not_authorized"}
@@ -733,6 +745,15 @@ def main():
             except Exception as exc:
                 errors += 1
                 status, detail, receipt = "adapter_error", str(exc)[:500], None
+            if status == "review_ready" and "kb_gate" in request:
+                if request.get("workflow_state"):
+                    from workflow_control import database
+                    from awo_kb_gate import screen
+                    with database(request["workflow_state"]) as con:
+                        screened = screen(con, request, {"status": status}, receipt)
+                    status, detail = screened["status"], screened.get("anomaly_summary", detail)
+                else:
+                    status, detail = "kb_revision_required", "Registered workflow state required for KB handoff"
             if status in STALLED and not stalled:
                 episode, stalled = episode + 1, True
             # working/settling never closes a stall episode. A repeated stall
@@ -741,6 +762,8 @@ def main():
             report = {"task_id": request["task_id"], "nonce": request["nonce"],
                       "status": status, "anomaly_summary": detail, "observed_at": utc_now(),
                       "consecutive_errors": errors, "elapsed_seconds": max(0, time.time() - started)}
+            if status == "kb_revision_required":
+                report["kb_screen"] = {"outcome": "revise_or_supply_evidence", "reason": detail}
             if status in STALLED:
                 report["stall_episode"] = episode
                 if status == "incomplete" and escalated != status + ":" + str(episode):

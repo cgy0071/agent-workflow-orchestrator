@@ -201,6 +201,8 @@ def send(directory, payload):
                    output_dir=str(directory / "receipt"), timeout_seconds=config["timeout_seconds"],
                    harness_version=config.get("harness_version"),
                    completion_contract={"type": "native_turn", "harness": config["harness"]})
+        if "kb_context" in config:
+            job["kb_context_required"] = True
         save_json(directory / "job.json", job)
         save_json(root / "active.json", {"task_id": payload["task_id"], "nonce": payload["nonce"],
                                        "directory": str(directory), "baseline": current["completion_seq"]})
@@ -276,6 +278,11 @@ def run(directory, job_path):
     config = read_json(root / "config.json")
     target = Path(job_path).parent
     try:
+        if "kb_context" in config or job.get("kb_context_required"):
+            from kb_executor_context import prepare
+            prompt, measurement = prepare(config, job)
+            job = dict(job, argv=argv_for(config, dict(job, prompt=prompt), root))
+            save_json(target / "kb-context-receipt.json", measurement)
         receipt = run_job.run(job)
         turn = receipt.get("native_turn", {})
         if turn.get("status") != "completed":

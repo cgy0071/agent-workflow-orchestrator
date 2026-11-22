@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from python_child import process_options
 import sys
 import time
 import unittest
@@ -295,7 +296,7 @@ for index in range(150):
         path = Path(req["cwd"]) / "request.json"
         path.write_text(json.dumps(req), encoding="utf-8")
         argv = [sys.executable, "-B", str(Path(monitor.__file__).resolve()), "--request", str(path)]
-        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(argv, **process_options(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         checkpoint = path.parent / "monitor_checkpoint.json"
         try:
             self.wait_for(checkpoint.exists)

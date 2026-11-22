@@ -247,6 +247,7 @@ def forward_lock(state):
     try:
         with lock.open("x", encoding="ascii") as stream:
             stream.write(str(os.getpid()))
+            acquired = os.fstat(stream.fileno())
     except FileExistsError:
         try:
             pid = int(lock.read_text(encoding="ascii").strip())
@@ -259,7 +260,21 @@ def forward_lock(state):
     try:
         yield
     finally:
-        lock.unlink(missing_ok=True)
+        # On Windows a contender reading the PID can briefly deny deletion.
+        # Retry only sharing violations, retaining the existing lock throughout.
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                if not os.path.samestat(acquired, lock.stat()):
+                    raise RuntimeError("owner_intake.lock was replaced while held")
+                lock.unlink()
+                break
+            except FileNotFoundError:
+                break
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) != 32 or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
 
 def forward(state, *, environ=None, transport=None, locked=False):

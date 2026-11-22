@@ -558,6 +558,8 @@ def register_task(state, request, actor, version, context, *, reservation=None):
                              "authorization.allow_long_repair_chain with that decision as the source")
         from workflow_scheduler import check_claim, reserve
         claim_warnings = check_claim(con, request, reservation)
+        from awo_kb_gate import admit
+        admit(con, request, worker)
         data = {"request": request, "request_sha256": digest(request),
                 "authorization_sha256": digest(request["authorization"]), "worker_binding": worker,
                 "controller": who, "registered_at": stamp()}
@@ -622,6 +624,9 @@ def publish_event(state, request, report, receipt=None):
                            (request["task_id"], request["nonce"])).fetchone()
         if not task or task[0] != digest(request):
             raise ValueError("monitor request is not the registered frozen request")
+        if "kb_gate" in request and report["status"] == "review_ready":
+            from awo_kb_gate import screen
+            report = screen(con, request, report, receipt)
         # A later stall episode of the same attempt is a new event; the first keeps the original ID.
         identity = {"request": digest(request), "status": report["status"]}
         if report.get("stall_episode", 1) > 1:
@@ -650,6 +655,13 @@ def deliver_event(state, event_id, transport):
         if event["status"] != "pending":
             return {"status": "ALREADY_ACKNOWLEDGED"}
         request = json.loads(con.execute("SELECT data FROM tasks WHERE id=?", (event["task"],)).fetchone()[0])["request"]
+        if "kb_gate" in request:
+            from awo_kb_gate import screen
+            frozen_event = json.loads(event["data"])
+            checked = screen(con, request, frozen_event["report"], frozen_event.get("receipt"))
+            if checked["status"] == "kb_revision_required":
+                return {"status": "KB_REVISION_REQUIRED", "event_id": event_id,
+                        "detail": checked["kb_screen"]["reason"]}
         if request["authorization"].get("notify_reviewer") is not True:
             return {"status": "INBOX_ONLY", "event_id": event_id}
         target = active(con, event["role"])
@@ -739,6 +751,9 @@ def record_review(state, event_id, actor, version, context, file, verdict):
                   "path": str(path), "sha256": hashlib.sha256(raw).hexdigest(), "verdict": verdict,
                   "action": cfg["workflow"]["transitions"][verdict], "actor": who,
                   "workflow_config_sha256": digest(cfg), "reviewed_at": stamp()}
+        if "kb_gate" in task_data["request"]:
+            from awo_kb_gate import seal
+            seal(con, task_data, json.loads(event["data"]), text, result)
         con.execute("INSERT INTO reviews VALUES (?,?)", (event_id, json.dumps(result)))
         con.execute("UPDATE events SET status='reviewed' WHERE id=?", (event_id,))
         audit(con, "review_recorded", result)
@@ -759,6 +774,10 @@ def next_gate(state, event_id, actor, version, context):
         if hashlib.sha256(Path(review["path"]).read_bytes()).hexdigest() != review["sha256"]:
             raise ValueError("parent review changed after acceptance")
         allowed = config_of(con).get("workflow", {}).get("continuation_verdicts", ["accept", "repair"])
+        if review["verdict"] == "accept":
+            from awo_kb_gate import approved
+            event = json.loads(con.execute("SELECT data FROM events WHERE id=?", (event_id,)).fetchone()[0])
+            approved(con, review["task_id"], event, review)
         if review["verdict"] not in allowed:
             raise ValueError("review decision does not admit a follow-up")
         return {"status": "NEXT_GATE_PASS", "parent_review": review}

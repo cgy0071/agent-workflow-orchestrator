@@ -34,6 +34,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from python_child import process_options
 import sys
 import time
 import uuid
@@ -390,7 +391,7 @@ class Driver:
         err = (directory / "stderr.log").open("ab")
         try:
             proc = subprocess.Popen(args, cwd=str(self.root), stdout=out, stderr=err,
-                                    stdin=subprocess.DEVNULL, env=dict(os.environ))
+                                    stdin=subprocess.DEVNULL, **process_options())
         finally:
             out.close()
             err.close()

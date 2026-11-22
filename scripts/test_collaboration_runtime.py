@@ -14,6 +14,7 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+from python_child import process_options
 import sys
 import tempfile
 import time
@@ -709,7 +710,7 @@ class CollaborationTests(unittest.TestCase):
         gate = work / "release"
         env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent),
                    AWO_EFFECT_PAUSE_FILE=str(gate))
-        child = subprocess.Popen([sys.executable, "-B", "-c", ATOMIC_EFFECT_CODE], cwd=work, env=env,
+        child = subprocess.Popen([sys.executable, "-B", "-c", ATOMIC_EFFECT_CODE], cwd=work, **process_options(env),
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         path, part = work / "effect.txt", work / "effect.txt.part"
         try:

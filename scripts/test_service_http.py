@@ -44,6 +44,20 @@ def server_frame(source):
 
 
 class FrameTests(unittest.TestCase):
+    def test_finish_drains_only_declared_bytes_on_options_and_head(self):
+        from unittest.mock import Mock
+
+        for method in ('OPTIONS', 'HEAD'):
+            for headers, consumed in (({'Content-Length': '3'}, 3), ({}, 0)):
+                with self.subTest(method=method, headers=headers):
+                    handler = object.__new__(transport.ApplicationHandler)
+                    handler.command = method
+                    handler.headers = headers
+                    handler.request = Mock()
+                    handler.rfile = io.BytesIO(b'abc-next')
+                    handler._drain_request_body()
+                    self.assertEqual(handler.rfile.tell(), consumed)
+
     def test_masked_frames_all_length_encodings(self):
         for length in (0, 5, 125, 126, 65535, 65536):
             payload = b"x" * length
