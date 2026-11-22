@@ -5,6 +5,8 @@
 **两个 AI agent 分工干活，交接不靠对话，靠磁盘上的一份任务台账。**
 一个负责规划和审核，一个负责执行。每条任务只派发一次，没通过独立审核的不算完成——这些规则由 `scripts/` 里的脚本强制，不靠提示词自觉。
 
+**[安装 Windows 知识库插件（0.4.1 正式版）](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)**：用 Python 3.10+ 或 Anaconda 读取一条示例知识记录。
+
 ## 第一次用 Windows 版？从这里下载，无需 Git
 
 **[下载 Windows 64 位便携候选版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
@@ -56,7 +58,7 @@ Windows 便携版可直接运行离线示例。接入真实客户端需单独配
 | 预算与资源 | 按任务或项目预留并核对用量；按优先级、协作槽位和资源占用决定是否接纳任务。 | [需在项目中启用](references/awo-budget.zh-CN.md) · [补充指南](references/awo-scheduler.zh-CN.md) |
 | 工作区与合并队列 | 为任务分配隔离目录或 worktree，固定基线，将已审核变更按票据落地。 | [需在项目中启用](references/awo-workspaces.zh-CN.md) · [补充指南](references/awo-merge.zh-CN.md) |
 | 消息与多 Agent 协作 | 按任务收发消息、回复和确认；将任务分给多个执行者，汇总结果，限制预算和返工次数。 | [需在项目中启用](references/awo-messaging.zh-CN.md) · [补充指南](references/awo-collaboration.zh-CN.md) |
-| 项目知识与文档 | 按权限列出条目，按 ID 读取正文、来源、版本和审核历史；使用前检查可用状态。 | [需在项目中启用](references/awo-knowledge.zh-CN.md) |
+| 项目知识与文档 | 按权限列出条目，按 ID 读取正文、来源、版本和审核历史；使用前检查可用状态。 | [安装插件](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1) / [服务 API 接入](references/awo-knowledge.zh-CN.md) |
 | 应用接入 | 通过 MCP 标准输入输出、HTTP 或 WebSocket 调用已启用的服务工具。 | [需在项目中启用](references/awo-gateway.zh-CN.md) |
 | 监督与审计 | 查看本地监督建议、接收配对草稿，按项目查看运行记录并导出审计回执。 | [需在项目中启用](references/awo-supervision.zh-CN.md) · [补充指南](references/awo-observability.zh-CN.md) |
 
