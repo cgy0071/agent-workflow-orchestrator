@@ -414,7 +414,7 @@ def _enqueue(con, project_id, actor, payload):
     _fields(payload, ("task_id", "expected_revision", "request", "message", "agent_id", "budget",
                       "required_capabilities", "resources", "dependencies", "workspace_mode",
                       "task_kind", "due_at", "dag_run", "dag_node", "slot_id", "expected_collaboration_revision",
-                      "workspace_base_commit"),
+                      "workspace_base_commit", "required_project_role"),
             ("task_id", "expected_revision", "request", "message", "agent_id", "budget"))
     task = _task(con, project_id, payload["task_id"])
     _revision(task, payload["expected_revision"])
@@ -530,6 +530,11 @@ def _enqueue(con, project_id, actor, payload):
     agent = con.execute("SELECT project_id,role,lifecycle FROM v2_agent WHERE agent_id=?", (contract["agent_id"],)).fetchone()
     if not agent or agent["project_id"] != project_id or agent["role"] != "worker" or agent["lifecycle"] != "active":
         raise service.ServiceError("Selected Agent is not an approved worker in this project.")
+    if "required_project_role" in payload:
+        import project_roles
+        role = payload["required_project_role"]
+        contract["project_role_revision"] = project_roles.require(con, project_id, contract["agent_id"], role)
+        contract["required_project_role"] = role
     prepared = None
     if policy:
         # Dependency/classification is Task-wide; competing slots cannot approve
@@ -791,6 +796,8 @@ def _candidate_checks(con, project_id, row, actor=None):
                    (task["task_id"], row["slot_id"])).fetchone():
         raise service.ServiceError("An Assignment already owns this task's slot.")
     c = json.loads(row["contract_json"])
+    import project_roles
+    project_roles.check_contract(con, project_id, c)
     approval_state = service._state_row(con)
     actor = c["approved_controller_id"] if actor is None else actor
     approver = service._controller(con, actor, c["approved_controller_version"], "main")
@@ -1000,6 +1007,8 @@ def _admitted_collaboration(con, project_id, assignment, contract, approver):
 
 
 def _send_gates(con, project_id, assignment, intent, contract, actor, version, expected_epoch, transport):
+    import project_roles
+    project_roles.check_contract(con, project_id, contract)
     if not assignment["holds_slot"] or assignment["state"] != "reserved":
         raise service.ServiceError("Assignment no longer holds an unsent reserved slot.")
     if (intent["controller_id"], intent["controller_version"], intent["controller_epoch"]) != (actor, version, expected_epoch):

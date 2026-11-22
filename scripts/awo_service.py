@@ -22,7 +22,7 @@ import uuid
 
 import workflow_control as control
 
-V2_SCHEMA_VERSION = 6
+V2_SCHEMA_VERSION = 7
 TASK_STATES = (
     "draft", "ready", "queued", "active", "review_ready", "accepted", "landed",
     "finalized", "rejected", "repair_required", "cancelled", "blocked",
@@ -330,6 +330,8 @@ def create_schema(con):
     create_supervision_schema(con)
     from owner_access import create_owner_schema
     create_owner_schema(con)
+    import project_roles
+    project_roles.create_schema(con)
     con.execute("INSERT INTO v2_meta(key,value) VALUES ('schema_version',?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(V2_SCHEMA_VERSION),))
 
