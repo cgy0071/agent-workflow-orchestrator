@@ -626,6 +626,9 @@ def _verified_delivery(con, attempt, event_id):
             issues.append("frozen deliverable missing from receipt")
     if state != "sealed" or problems or issues or not evidence:
         raise service.ServiceError("Reviewed evidence is missing or changed: " + "; ".join(problems + issues))
+    if review["verdict"] == "accept" and "kb_gate" in request:
+        from awo_kb_gate import approved
+        approved(con, attempt, json.loads(event["data"]), review)
     return review, evidence
 
 
@@ -823,6 +826,10 @@ def _candidate_checks(con, project_id, row, actor=None):
 def _admit(con, project_id, actor, row):
     task, c, worker, agent, value = _candidate_checks(con, project_id, row, actor)
     request, generation = c["request"], c["request"].get("generation", 1)
+    from awo_kb_gate import admit
+    if "kb_gate" in request and request["kb_gate"]["task"]["project"] != project_id:
+        raise service.ServiceError("KB gate project differs from admitted project")
+    admit(con, request, worker)
     _idle(request, monitor.Transport(request))
     state, who = _guard(con, project_id, actor)
     now, admitted = service._now(), None
@@ -1137,6 +1144,11 @@ def _publish_completion(con, request, detail, receipt, generation, actor):
     # authority and no nested transaction/notification side effect.
     event_id = control.digest({"request": control.digest(request), "status": "review_ready"})
     report = {"status": "review_ready", "detail": detail}
+    if "kb_gate" in request:
+        from awo_kb_gate import screen
+        report = screen(con, request, report, receipt)
+        if report["status"] != "review_ready":
+            return None, report
     data = {"event_id": event_id, "request_sha256": control.digest(request),
             "report": report, "receipt": receipt, "created_at": control.stamp()}
     old = con.execute("SELECT data FROM events WHERE id=?", (event_id,)).fetchone()
@@ -1148,7 +1160,7 @@ def _publish_completion(con, request, detail, receipt, generation, actor):
                     (event_id, request["task_id"], request["nonce"], request["reviewer"]["role"], "pending", _json(data)))
         legacy.journal(con, request["task_id"], generation, actor, "delivery_review_ready", data, event_id)
     con.execute("UPDATE tasks SET status='finished' WHERE id=? AND status='running'", (request["task_id"],))
-    return event_id
+    return event_id, report
 
 
 def reconcile_in_transaction(con, project_id, actor, assignment_id, *, transport=None):
@@ -1180,7 +1192,9 @@ def reconcile_in_transaction(con, project_id, actor, assignment_id, *, transport
     if confirmed:
         confirmed_request = _confirmed(con, contract)
         if status == "review_ready":
-            event_id = _publish_completion(con, confirmed_request, detail, receipt, assignment["generation"], actor)
+            event_id, screened = _publish_completion(con, confirmed_request, detail, receipt, assignment["generation"], actor)
+            if screened["status"] == "kb_revision_required":
+                status, detail, mapped = screened["status"], screened["anomaly_summary"], "blocked"
     if assignment["review_status"] == "awaiting_review" and status != "review_ready":
         # Do not erase an existing review receipt on a later transport outage.
         mapped = "uncertain"
@@ -1431,6 +1445,9 @@ def review_in_transaction(con, project_id, actor, version, context, event_id, ev
     if assignment["workspace_id"]:
         from workspace_runtime import review_gate
         result["workspace_inventory"] = review_gate(con, assignment, verdict=verdict)
+    if "kb_gate" in request:
+        from awo_kb_gate import seal
+        seal(con, json.loads(task["data"]), json.loads(event["data"]), raw.decode("utf-8-sig"), result)
     con.execute("INSERT INTO reviews VALUES (?,?)", (event_id, _json(result)))
     con.execute("UPDATE events SET status='reviewed' WHERE id=?", (event_id,))
     control.audit(con, "event_acknowledged", {"event": event_id, "actor": actor, "version": version})

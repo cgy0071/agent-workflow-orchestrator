@@ -253,12 +253,15 @@ class ApplicationHandler(BaseHTTPRequestHandler):
         # An empty request line (connect and close, idle timeout, or _expire)
         # returns before parse_request sets `command`; a bare attribute read
         # here would skip the timer cancel and leak one Timer per connection.
-        if getattr(self, 'command', None) not in ('POST', 'PUT', 'PATCH', 'DELETE'):
-            return
         headers = getattr(self, 'headers', None)
         if headers is None:
             return
         length = headers.get('Content-Length', '')
+        if getattr(self, 'command', None) not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            # OPTIONS and HEAD may also arrive with a framed body. Never
+            # wait for undeclared data on a normally bodyless request.
+            if not re.fullmatch(r'[0-9]{1,7}', length):
+                return
         remaining = int(length) if re.fullmatch(r'[0-9]{1,7}', length) else 65536
         deadline = time.monotonic() + 0.25
         try:

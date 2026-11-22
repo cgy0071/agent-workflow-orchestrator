@@ -609,7 +609,9 @@ def acceptance(con, task):
             if not all(item.get("path") and hashlib.sha256(Path(item["path"]).read_bytes()).hexdigest() == item["sha256"]
                        for item in files):
                 continue
-        except (OSError, KeyError):
+            from awo_kb_gate import approved
+            approved(con, task, event, review)
+        except (OSError, KeyError, ValueError, TypeError, ImportError):
             continue
         return review
     return None

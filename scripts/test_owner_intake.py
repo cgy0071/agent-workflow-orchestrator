@@ -216,6 +216,29 @@ class IntakeTests(unittest.TestCase):
         self.assertEqual(len(fake.messages), 2)
         self.assertEqual(len(self.notices()), 4)
 
+    @unittest.skipUnless(os.name == "nt", "Windows sharing rules")
+    def test_release_after_contender_reads_pid(self):
+        lock = self.state / "owner_intake.lock"
+        with intake.forward_lock(self.state):
+            reader = lock.open("rb")
+            self.addCleanup(reader.close)
+            original = Path.unlink
+            conflicts = []
+            def release_after_conflict(path, *args, **kw):
+                try:
+                    return original(path, *args, **kw)
+                except PermissionError as exc:
+                    conflicts.append(exc.winerror)
+                    reader.close()
+                    raise
+            patcher = patch.object(Path, "unlink", release_after_conflict)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.assertEqual(conflicts, [32])
+        self.assertFalse(lock.exists())
+        with intake.forward_lock(self.state):
+            self.assertTrue(lock.exists())
+
     def test_concurrent_forward_and_nonherdr_or_disabled_prompt(self):
         folder = self.enable(prompt=False)
         self.put(folder, "qq-20261105-0004")
