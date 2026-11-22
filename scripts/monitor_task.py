@@ -101,6 +101,16 @@ def read_json(path):
 def save_json(path, data):
     path = Path(path)
     tmp = path.with_name(path.name + "." + str(os.getpid()) + "." + uuid.uuid4().hex + ".tmp")
+    if os.name == "nt" and len(str(tmp.absolute())) >= 260:
+        # Use the extended-length path for the temporary sibling and atomic replacement.
+        def extended(value):
+            raw = os.path.abspath(value)
+            if raw.startswith("\\\\?\\"):
+                return raw
+            if raw.startswith("\\\\"):
+                return "\\\\?\\UNC\\" + raw[2:]
+            return "\\\\?\\" + raw
+        tmp, path = Path(extended(tmp)), Path(extended(path))
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     # Windows readers may briefly hold a handle without FILE_SHARE_DELETE.
     # Replacing our own unchanged temporary file is idempotent; sending a task is not.

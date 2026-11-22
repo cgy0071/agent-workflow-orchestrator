@@ -1,0 +1,4 @@
+https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/kb-host-v0.1.0-preview.1/awo_core-0.1.0-py3-none-any.whl#sha256=b23de0d72f4c3f3d1513abbdfa1c86b89267da47a13f8db4d195eb9e215c4042
+https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/kb-host-v0.1.0-preview.1/awo_contracts-1.0.0-py3-none-any.whl#sha256=2f1962b8c76df44766c6b5ce961c880a7dd7c2510b801ec252faa7323239cbcc
+https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/kb-v0.4.1/awo_kb-0.4.1-py3-none-any.whl#sha256=0eb5bffdcae103192a4abb8b29c7345bb7feb90ec0c78bb05c3b13cf3319c0e7
+pypdf==6.21.4

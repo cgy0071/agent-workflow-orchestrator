@@ -7,7 +7,7 @@
 
 **[安装 Windows 知识库插件（0.4.1 正式版）](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)**：用 Python 3.10+ 或 Anaconda 读取一条示例知识记录。
 
-**Windows 宿主预览（源码目录）。** 在虚拟环境安装 awo-core 0.1.0、awo-contracts 1.0.0、awo-kb 0.4.1 和 pypdf 6.21.4 后，从仓库根目录运行 `python scripts/demo_kb_host.py`。示例自行创建临时项目，用任务凭据读取固定修订的记录，并在撤权和停用插件后再次尝试读取。成功时会显示项目编号、修订号、`S1: Named evidence` 和 `AWO KB HOST PREVIEW PASS`。
+**[试用 Windows 宿主的任务知识库](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - 从预览发布页下载源码 ZIP，解压后按页内三条命令运行。成功时会看到项目、修订、引文和 `AWO KB HOST PREVIEW PASS`。 [查看框架后续交付设计](docs/native-framework-delivery.zh-CN.md)
 
 ## 第一次用 Windows 版？从这里下载，无需 Git
 

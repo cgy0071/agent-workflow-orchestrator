@@ -8,7 +8,7 @@ independent review accepts it. `scripts/` enforces those rules; prompts do not.
 
 **[Install the Windows knowledge base plugin (0.4.1)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)** - Try a sample record with Python 3.10+ (including Anaconda).
 
-**Windows host preview (source checkout).** With the preview dependencies installed in a virtual environment (awo-core 0.1.0, awo-contracts 1.0.0, awo-kb 0.4.1 and pypdf 6.21.4), run `python scripts/demo_kb_host.py` from the repository root. A temporary project reads a pinned record through the task gateway, then retries after access is revoked and after the plugin is disabled. Look for the project and revision, `S1: Named evidence`, and `AWO KB HOST PREVIEW PASS`. The example creates its own data.
+**[Try the Windows host with task-scoped knowledge](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - Download the source ZIP from the preview release and follow its three commands. The demo prints the project, revision, quote and `AWO KB HOST PREVIEW PASS`.
 
 ## Try it on Windows (no Git required)
 
