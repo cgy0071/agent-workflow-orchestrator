@@ -6,6 +6,8 @@ English | [Chinese](README.zh-CN.md)
 One plans and reviews, the other executes. Each task is dispatched once, and nothing counts as done until an
 independent review accepts it. `scripts/` enforces those rules; prompts do not.
 
+**[Install the Windows knowledge base plugin (0.4.1)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)** - Try a sample record with Python 3.10+ (including Anaconda).
+
 ## Try it on Windows (no Git required)
 
 **[Download AWO for Windows x64 (portable release candidate)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
@@ -56,7 +58,7 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 | Budget and capacity | Reserve and reconcile usage; admit queued work by priority, available slots and resources. | [Enable for this project](references/awo-budget.md) / [Details](references/awo-scheduler.md) |
 | Workspaces and merge queue | Assign an isolated directory or worktree, pin the baseline and land reviewed changes by ticket. | [Enable for this project](references/awo-workspaces.md) / [Details](references/awo-merge.md) |
 | Messaging and collaboration | Send, reply to and acknowledge task messages; coordinate multiple workers with shared budgets and bounded repair. | [Enable for this project](references/awo-messaging.md) / [Details](references/awo-collaboration.md) |
-| Project knowledge and documents | List authorized entries and read content, sources, revisions and review history by ID; check usability before reuse. | [Enable for this project](references/awo-knowledge.md) |
+| Project knowledge and documents | List authorized entries and read content, sources, revisions and review history by ID; check usability before reuse. | [Install the plugin](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1) / [Service API](references/awo-knowledge.md) |
 | Application integrations | Call enabled service tools over MCP stdio, HTTP or WebSocket. | [Enable for this project](references/awo-gateway.md) |
 | Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [Enable for this project](references/awo-supervision.md) / [Details](references/awo-observability.md) |
 
