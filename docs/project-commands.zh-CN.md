@@ -1,5 +1,7 @@
 # 在 Windows 项目中使用框架命令
 
+**[下载 Windows 项目命令预览版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0-preview.1)** — 从 Assets 下载 `AWO-Windows-Project-CLI-0.1.0-preview.1.zip`，解压后在该目录用 Python 3.10+ 运行 `python -B try_project.py`。 两种检索方式都应输出 `201 HV`，随后显示 `WINDOWS PROJECT COMMANDS PASS`。示例不需要现有项目或令牌。
+
 从包含 README 的源码目录运行 `python scripts/awo_project.py --help`。这些命令随当前源码提供；已发布的宿主预览 ZIP 仍使用它发布页上的演示命令。
 
 | 我想做什么 | 从哪里开始 |
