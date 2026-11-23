@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 
+import secretary_adapter
 import agy_turn
 import sqlite3
 import subprocess
@@ -61,7 +62,7 @@ def main(argv=None):
     actions.add_parser("start").add_argument("--confirm-execute", action="store_true", required=True)
     actions.add_parser("status")
     chat = actions.add_parser("chat")
-    chat.add_argument("--model", help="Use this Gemini model through agy for conversation")
+    secretary_adapter.options(chat)
     args = parser.parse_args(argv)
     if bool(args.directory) != bool(args.project) or (args.material and not args.directory):
         parser.error("supply --directory and --project together when routing a task")
@@ -83,8 +84,8 @@ def main(argv=None):
                 try:
                     local = message in {"status", "进度", "结果", "做完了吗"} or (
                         message.split()[:1] in (["submit"], ["start"]))
-                    if args.model and message and not local:
-                        print(agy_turn.secretary_turn(root, args.model, message)["response"], flush=True)
+                    if message and not local:
+                        print(secretary_adapter.reply(args.secretary, root, args.model, message)["response"], flush=True)
                     elif message:
                         act(root, message, resolve if args.directory else None)
                 except errors as exc:

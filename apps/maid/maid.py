@@ -15,9 +15,14 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 def direct(argv):
     parser = argparse.ArgumentParser(description="Open the existing secretary conversation here.")
     parser.add_argument("--thread", type=Path, required=True)
-    root = parser.parse_args(argv).thread.resolve()
+    import secretary_adapter
+    secretary_adapter.options(parser)
+    args = parser.parse_args(argv)
+    root = args.thread.resolve()
     from harness_probe import binary, ProbeError
     try:
+        if args.secretary != "agy":
+            return subprocess.call(secretary_adapter.command(args.secretary, "direct", root, args.model))
         path = root.with_name("." + root.name + ".agy.sqlite3")
         with closing(sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=1)) as db:
             db.execute("BEGIN IMMEDIATE")

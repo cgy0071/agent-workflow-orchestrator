@@ -4,6 +4,8 @@ Run these examples from a checkout containing `apps/maid/`. The student reposito
 
 ## Secretary and terminal
 
+The default secretary is agy. Pass `--secretary examples/maid-secretary-claude.json` to chat, request or direct to select Claude. A trusted local JSON profile supplies a turn command array (prompt on stdin, reply on stdout) and an optional direct command array for your terminal. Commands may use {thread} and {model}. For persistent conversations, the adapter must save and resume its session by thread. The Claude example starts fresh sessions.
+
 Sign in to agy, list the available models and pass one model ID to chat. Send a message and type `exit` before using direct in the terminal of your choice to reopen the native Gemini session.
 
 ```powershell

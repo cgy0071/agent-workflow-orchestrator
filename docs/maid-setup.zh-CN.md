@@ -4,6 +4,8 @@
 
 ## 选择秘书和窗口
 
+秘书默认使用 agy。要改为 Claude，在 chat、request 或 direct 后传入 `--secretary examples/maid-secretary-claude.json`。也可传入自己的本地 JSON 配置：turn 是命令参数数组，从标准输入读取提问并将回复写到标准输出；direct 是在当前终端打开原生界面的命令。命令可用 {thread} 和 {model} 占位符。需要续聊时，适配器应按 thread 保存和恢复会话。Claude 示例每次启动新会话。只使用自己信任的命令配置。
+
 安装并登录 agy 后，用第一条命令查看当前账户能选的模型，把模型 ID 填到第二条命令。在 Herdr 窗格、Windows Terminal 或 PowerShell 中均可启动。先发送一条消息，再输入 `exit`。第三条命令在当前终端直接打开同一段 Gemini 对话。
 
 ```powershell

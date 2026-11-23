@@ -10,14 +10,15 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 
 
 def main(argv):
+    sys.path.insert(0, str(SCRIPTS))
+    import secretary_adapter
     parser = argparse.ArgumentParser(prog="maid.py request")
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--thread", type=Path, required=True)
-    parser.add_argument("--model", required=True)
+    secretary_adapter.options(parser)
     parser.add_argument("request")
     args = parser.parse_args(argv)
-    sys.path.insert(0, str(SCRIPTS))
-    import agy_turn
+    import sqlite3
     import project_entry
     from harness_probe import ProbeError
 
@@ -28,7 +29,7 @@ def main(argv):
         spec = json.loads(args.profile.read_text(encoding="utf-8"))
         spec.update(goal=args.request, work_root=str(root))
         project_entry.validate_spec(dict(spec))
-        reply = agy_turn.secretary_turn(root, args.model,
+        reply = secretary_adapter.reply(args.secretary, root, args.model,
             "Draft a concise task objective in the user's language. Preserve the request "
             "and its limits. Return the objective only. Use no tools.\n" + args.request)
         spec["goal"] = args.request + "\n\nSecretary draft:\n" + reply["response"].strip()
@@ -40,7 +41,7 @@ def main(argv):
                           "allowed_paths": spec["allowed_paths"], "dispatched": False},
                          ensure_ascii=True))
         return 0
-    except (ValueError, TypeError, OSError, ProbeError, project_entry.EntryError,
+    except (ValueError, TypeError, OSError, sqlite3.Error, ProbeError, project_entry.EntryError,
             subprocess.TimeoutExpired) as exc:
         print(str(exc), file=sys.stderr)
         return 2
