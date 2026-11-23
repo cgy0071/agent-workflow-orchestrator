@@ -1,16 +1,23 @@
 {
   "version": 1,
   "projects": {
-    "student": {"manager": "student-lead", "root": "C:/projects/student"},
-    "materials": {"manager": "materials-lead", "root": "C:/projects/materials", "state": "C:/awo/materials-state"}
+    "student": {
+      "manager": "student-lead",
+      "root": "D:/Research/student"
+    },
+    "materials": {
+      "manager": "materials-lead",
+      "root": "D:/Research/materials",
+      "state": "D:/MAID/state/materials"
+    }
   },
   "exports": {
     "calibration": {
       "source": "materials",
       "recipient": "student",
-      "doc_id": "REPLACE_WITH_PUBLISHED_DOC_ID",
+      "doc_id": "REPLACE_WITH_PUBLISHED_DOCUMENT_ID",
       "revision_sha256": "REPLACE_WITH_PUBLISHED_REVISION_SHA256",
-      "token_file": "C:/awo/secrets/materials-doc.token"
+      "token_file": "D:/MAID/credentials/calibration.token"
     }
   }
 }

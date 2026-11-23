@@ -1,4 +1,6 @@
-# Agent Workflow Orchestrator
+# MAID 秘书处 · 多智能体协作与调度
+
+[第一次配置：选择秘书、指定项目工程师、共享材料和连接知识库](docs/maid-setup.zh-CN.md)。底层工作流引擎沿用 AWO 名称。
 
 [English](README.md) | 中文
 

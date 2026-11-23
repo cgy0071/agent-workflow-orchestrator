@@ -1,4 +1,6 @@
-# Agent Workflow Orchestrator
+# MAID - Multi-Agent Inter-harness Dispatch
+
+[Set up your secretary, project engineers and shared knowledge](docs/maid-setup.md). AWO is the workflow engine.
 
 English | [Chinese](README.zh-CN.md)
 
