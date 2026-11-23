@@ -4,7 +4,8 @@ import sys
 COMMANDS = {
     "role": ("project_roles", "Manage project-scoped roles and inspect authorization"),
     "retrieve": ("project_retrieve", "Read authorized project documents with a selected backend"),
-    "probe": ("harness_probe", "Check a local Claude or Codex harness"),
+    "probe": ("harness_probe", "Check a local Claude, Codex or agy harness"),
+    "ask": ("agy_turn", "Send one prompt through agy"),
     "inventory": ("kb_cli", "Read the authenticated task knowledge inventory"),
     "task": ("project_entry", "Prepare, run, inspect or recover a project task"),
 }
