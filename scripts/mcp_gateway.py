@@ -46,6 +46,7 @@ ERROR_MESSAGES = {
     "resource_exhausted": "Capacity is currently unavailable.",
     "uncertain_send": "The external outcome is unknown; do not automatically resend.",
     "invalid_arguments": "Arguments do not match the tool schema.",
+    "invalid_payload": "A supplied field is empty or invalid; check the document ID and other arguments.",
     "invalid_request": "Invalid application request.",
     "command_id_required": "A command ID is required.",
     "timeout": "The call deadline expired; reconcile using the original command ID.",
@@ -325,7 +326,7 @@ def read_token_file(path):
             data = stream.read(MAX_TOKEN + 1)
         if not data or len(data) > MAX_TOKEN:
             raise ValueError("token size")
-        token = data.decode("utf-8", "strict").strip()
+        token = data.decode("utf-8-sig", "strict").strip()
         if not token or any(ord(c) < 33 or ord(c) > 126 for c in token):
             raise ValueError("token characters")
         return token
