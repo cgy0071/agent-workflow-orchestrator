@@ -5,6 +5,7 @@
 **两个 AI agent 分工干活，交接不靠对话，靠磁盘上的一份任务台账。**
 一个负责规划和审核，一个负责执行。每条任务只派发一次，没通过独立审核的不算完成——这些规则由 `scripts/` 里的脚本强制，不靠提示词自觉。
 
+**[下载 MAID 秘书处 Windows 预览版 2](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/maid-v0.1.0-preview.2)**。解压后打开 START-HERE.zh-CN.md。
 **[安装 Windows 知识库插件（0.4.1 正式版）](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)**：用 Python 3.10+ 或 Anaconda 读取一条示例知识记录。
 
 **[试用 Windows 宿主的任务知识库](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - 从预览发布页下载 AWO-Windows-KB-Host ZIP 附件（请勿选择自动生成的 Source code），解压后按页内三条命令运行。成功时会看到项目、修订、引文和 `AWO KB HOST PREVIEW PASS`。 [查看框架后续交付设计](docs/native-framework-delivery.zh-CN.md)
