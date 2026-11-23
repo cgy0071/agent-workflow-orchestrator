@@ -14,6 +14,8 @@ independent review accepts it. `scripts/` enforces those rules; prompts do not.
 
 [Project commands in this source checkout](docs/project-commands.md)
 
+[Follow a task from a local MAID secretary conversation (source checkout)](docs/maid.md)
+
 ## Try it on Windows (no Git required)
 
 **[Download AWO for Windows x64 (portable release candidate)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)

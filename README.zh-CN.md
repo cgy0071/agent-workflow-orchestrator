@@ -13,6 +13,8 @@
 
 [当前源码版的项目命令](docs/project-commands.zh-CN.md)
 
+[用本地秘书处跟进任务并查看验收结果（源码版）](docs/maid.zh-CN.md)
+
 ## 第一次用 Windows 版？从这里下载，无需 Git
 
 **[下载 Windows 64 位便携候选版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
