@@ -212,3 +212,9 @@ python scripts/awo_project.py probe agy
 agy models
 python scripts/awo_project.py ask agy --model gemini-3.8-flash-low --prompt "Reply OK"
 ```
+
+Start the secretary with the command below. Reopen the same thread with the same model to continue. Type `exit` to leave. Task commands such as `status` run locally.
+
+```powershell
+python scripts/maid.py --thread runtime/my-thread chat --model gemini-3.8-flash-low
+```

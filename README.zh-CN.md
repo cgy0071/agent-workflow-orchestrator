@@ -205,3 +205,9 @@ python scripts/awo_project.py probe agy
 agy models
 python scripts/awo_project.py ask agy --model gemini-3.8-flash-low --prompt "Reply OK"
 ```
+
+用下列命令启动秘书，直接输入问题。退出时输入 `exit`，再次执行同一命令即可续聊。`status` 等任务命令由本地处理。
+
+```powershell
+python scripts/maid.py --thread runtime/my-thread chat --model gemini-3.8-flash-low
+```
