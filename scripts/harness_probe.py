@@ -127,16 +127,26 @@ def codex_probe(cwd):
         proc.communicate()
 
 
+def agy_probe(cwd):
+    result = subprocess.run([binary("agy"), "--version"], cwd=cwd, env=environment(),
+                            capture_output=True, text=True, timeout=10)
+    version = result.stdout.strip()
+    if result.returncode or not re.fullmatch(r"[0-9]+(?:[.][0-9]+)+", version):
+        raise ProbeError("Could not read the agy CLI version.")
+    return {"harness": "agy", "version": version, "status": "local_version_only",
+            "model_turn_sent": False}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("harness", choices=("claude", "codex"),
-                        help="claude: one budgeted DS marker; codex: local app-server handshake only")
+    parser.add_argument("harness", choices=("claude", "codex", "agy"),
+                        help="claude: one budgeted DS marker; codex: local app-server handshake; agy: local version")
     args = parser.parse_args(argv)
     try:
         with tempfile.TemporaryDirectory(prefix="awo-probe-") as tmp:
             cwd = Path(tmp) / "empty"
             cwd.mkdir()
-            result = (claude_probe if args.harness == "claude" else codex_probe)(cwd)
+            result = {"claude": claude_probe, "codex": codex_probe, "agy": agy_probe}[args.harness](cwd)
     except ProbeError as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}))
         return 1

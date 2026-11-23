@@ -24,6 +24,7 @@ def directory(project):
 
 def select(catalog, project, material, spec, thread):
     """The local operator supplies the directory. Task specs cannot grant exports."""
+    thread = Path(thread).resolve()
     data = json.loads(Path(catalog).read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError("Unsupported manager directory version")

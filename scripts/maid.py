@@ -4,6 +4,11 @@ import json
 from pathlib import Path
 import sys
 
+import secretary_adapter
+import agy_turn
+import sqlite3
+import subprocess
+
 import maid_routing
 import project_entry as entry
 
@@ -56,7 +61,8 @@ def main(argv=None):
     actions.add_parser("submit").add_argument("--spec", required=True)
     actions.add_parser("start").add_argument("--confirm-execute", action="store_true", required=True)
     actions.add_parser("status")
-    actions.add_parser("chat")
+    chat = actions.add_parser("chat")
+    secretary_adapter.options(chat)
     args = parser.parse_args(argv)
     if bool(args.directory) != bool(args.project) or (args.material and not args.directory):
         parser.error("supply --directory and --project together when routing a task")
@@ -67,7 +73,7 @@ def main(argv=None):
         return maid_routing.select(args.directory, args.project, args.material, spec, thread)
 
     root = args.thread.resolve()
-    errors = (entry.EntryError, ValueError, OSError)
+    errors = (entry.EntryError, ValueError, OSError, agy_turn.ProbeError, sqlite3.Error, subprocess.TimeoutExpired)
     try:
         if args.action == "chat":
             print("MAID: submit SPEC_PATH | start --confirm-execute | status | exit", flush=True)
@@ -76,7 +82,12 @@ def main(argv=None):
                 if message in {"exit", "退出"}:
                     break
                 try:
-                    act(root, message, resolve if args.directory else None)
+                    local = message in {"status", "进度", "结果", "做完了吗"} or (
+                        message.split()[:1] in (["submit"], ["start"]))
+                    if message and not local:
+                        print(secretary_adapter.reply(args.secretary, root, args.model, message)["response"], flush=True)
+                    elif message:
+                        act(root, message, resolve if args.directory else None)
                 except errors as exc:
                     print(str(exc), file=sys.stderr)
             return 0

@@ -1,4 +1,6 @@
-# Agent Workflow Orchestrator
+# MAID 秘书处 · 多智能体协作与调度
+
+[第一次配置：选择秘书、指定项目工程师、共享材料和连接知识库](docs/maid-setup.zh-CN.md)。底层工作流引擎沿用 AWO 名称。
 
 [English](README.md) | 中文
 
@@ -195,3 +197,21 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 ## 许可证
 
 RC1 标签包含 [MIT 许可证](https://github.com/cgy0071/agent-workflow-orchestrator/blob/v1.0.0-rc.1/LICENSE)。当前 main 分支根目录尚无 LICENSE 文件。
+
+## 通过 agy 调用 Gemini
+
+在源码目录执行以下命令，依次检查本机版本、查看可选模型，并在临时目录中发送一次提问。
+
+```powershell
+python scripts/awo_project.py probe agy
+agy models
+python scripts/awo_project.py ask agy --model gemini-3.8-flash-low --prompt "Reply OK"
+```
+
+用下列命令启动秘书，直接输入问题。退出时输入 `exit`，再次执行同一命令即可续聊。`status` 等任务命令由本地处理。
+
+```powershell
+python scripts/maid.py --thread runtime/my-thread chat --model gemini-3.8-flash-low
+```
+
+可以在 Herdr 窗格、Windows Terminal 或 PowerShell 中操作。要直接与同一位 Gemini 秘书交谈，在选定的终端运行 `python apps/maid/maid.py direct --thread runtime/my-thread`，退出 agy 后即可回到 MAID。已打开的交互式执行者窗口可以照常直接输入。一次性自动 Codex 任务可通过 MAID 查询状态。

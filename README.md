@@ -1,4 +1,6 @@
-# Agent Workflow Orchestrator
+# MAID - Multi-Agent Inter-harness Dispatch
+
+[Set up your secretary, project engineers and shared knowledge](docs/maid-setup.md). AWO is the workflow engine.
 
 English | [Chinese](README.zh-CN.md)
 
@@ -202,3 +204,21 @@ English entry points are ASCII-only; Chinese translations live in `*.zh-CN.md` a
 ## License
 
 The RC1 tag includes the [MIT license](https://github.com/cgy0071/agent-workflow-orchestrator/blob/v1.0.0-rc.1/LICENSE). The current main branch does not yet include a root LICENSE file.
+
+## Gemini through agy
+
+From the source checkout, check the installed CLI version, list model IDs, then send one prompt in a temporary directory.
+
+```powershell
+python scripts/awo_project.py probe agy
+agy models
+python scripts/awo_project.py ask agy --model gemini-3.8-flash-low --prompt "Reply OK"
+```
+
+Start the secretary with the command below. Reopen the same thread with the same model to continue. Type `exit` to leave. Task commands such as `status` run locally.
+
+```powershell
+python scripts/maid.py --thread runtime/my-thread chat --model gemini-3.8-flash-low
+```
+
+Use your preferred terminal (including a Herdr pane). To talk directly in the native Gemini interface, open the same secretary thread with `python apps/maid/maid.py direct --thread runtime/my-thread`. Exit agy to return control to MAID. Existing interactive worker panes accept input in their own terminals. Automated one-shot Codex tasks expose their status through MAID.
