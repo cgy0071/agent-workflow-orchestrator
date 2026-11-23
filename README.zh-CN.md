@@ -195,3 +195,13 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 ## 许可证
 
 RC1 标签包含 [MIT 许可证](https://github.com/cgy0071/agent-workflow-orchestrator/blob/v1.0.0-rc.1/LICENSE)。当前 main 分支根目录尚无 LICENSE 文件。
+
+## 通过 agy 调用 Gemini
+
+在源码目录执行以下命令，依次检查本机版本、查看可选模型，并在临时目录中发送一次提问。
+
+```powershell
+python scripts/awo_project.py probe agy
+agy models
+python scripts/awo_project.py ask agy --model gemini-3.8-flash-low --prompt "Reply OK"
+```
