@@ -6,6 +6,8 @@ English | [Chinese](README.zh-CN.md)
 One plans and reviews, the other executes. Each task is dispatched once, and nothing counts as done until an
 independent review accepts it. `scripts/` enforces those rules; prompts do not.
 
+**[Try MAID for Windows (preview 0.1.0-preview.2)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/maid-v0.1.0-preview.2)** ? the secretary uses agy by default, prepares a scoped Codex task, and returns the independent review result. Requires Python 3.10+, Git, agy and Codex sign-in.
+
 **[Install the Windows knowledge base plugin (0.4.1)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)** - Try a sample record with Python 3.10+ (including Anaconda).
 
 **[Try the Windows host with task-scoped knowledge](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - Download the named Windows ZIP from the preview release (not GitHub's automatic Source code archive) and follow its three commands. The demo prints the project, revision, quote and `AWO KB HOST PREVIEW PASS`.
