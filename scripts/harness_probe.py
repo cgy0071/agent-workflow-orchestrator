@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import platform
 import re
 import secrets
 import shutil
@@ -28,6 +29,20 @@ def binary(name):
             launcher = Path(shutil.which("claude.cmd"))
             candidate = launcher.parent / "node_modules/@anthropic-ai/claude-code/bin/claude.exe"
             found = str(candidate) if candidate.is_file() else None
+        if not found and name == "codex":
+            shim = shutil.which("codex.cmd")
+            arch = {"amd64": ("x64", "x86_64"), "x86_64": ("x64", "x86_64"),
+                    "arm64": ("arm64", "aarch64"), "aarch64": ("arm64", "aarch64")}.get(platform.machine().lower())
+            if shim and arch:
+                package, target = arch
+                modules = Path(shim).parent / "node_modules"
+                codex = modules / "@openai/codex"
+                platform_pkg = "@openai/codex-win32-" + package
+                for root in (codex / "node_modules" / platform_pkg, modules / platform_pkg, codex):
+                    vendor = root / "vendor" / (target + "-pc-windows-msvc")
+                    for candidate in (vendor / "bin/codex.exe", vendor / "codex/codex.exe"):
+                        if candidate.is_file():
+                            return str(candidate.resolve())
     else:
         found = shutil.which(name)
     if not found:

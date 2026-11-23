@@ -8,6 +8,7 @@ import uuid
 
 import awo_service as service
 import service_access as access
+from mcp_gateway import read_token_file
 
 
 def create_schema(con):
@@ -101,15 +102,19 @@ def operate(state, root, token, action, agent, role, *, epoch=None, expected_rev
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check", "grant", "revoke"))
-    for name in ("state", "project-root", "token-file", "agent", "role"):
-        parser.add_argument("--" + name, required=True)
-    parser.add_argument("--epoch", type=int)
-    parser.add_argument("--expected-revision", type=int)
-    parser.add_argument("--command-id")
+    actions = parser.add_subparsers(dest="action", required=True)
+    for action in ("check", "grant", "revoke"):
+        group = actions.add_parser(action)
+        for name in ("state", "project-root", "token-file", "agent", "role"):
+            group.add_argument("--" + name, required=True)
+        if action != "check":
+            group.add_argument("--epoch", required=True, type=int)
+            group.add_argument("--expected-revision", required=True, type=int)
+            group.add_argument("--command-id")
+    parser.set_defaults(epoch=None, expected_revision=None, command_id=None)
     args = parser.parse_args(argv)
     try:
-        result = operate(args.state, args.project_root, service._read_secret_file(args.token_file, "Controller token"),
+        result = operate(args.state, args.project_root, read_token_file(args.token_file),
                          args.action, args.agent, args.role, epoch=args.epoch, expected_revision=args.expected_revision,
                          command_id=args.command_id)
     except (ValueError, OSError, sqlite3.Error, RuntimeError) as exc:

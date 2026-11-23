@@ -17,3 +17,5 @@ python scripts/awo_project.py retrieve --state "$state" --project-root "$project
 ```
 
 输出包含文档 ID、修订和内容摘要。将 `sqlite` 换成 `lexical` 可复用同一请求和权限。领域文件是声明式 JSON；材料示例读取 Assay、Hardness 两个字段。仅查文本时省略 `--skill`。项目文档检索与任务知识库清单是不同的读取入口，使用对应的凭据。
+
+`--project-root` 必须是已存在目录的绝对路径；`--state` 指向已初始化的 AWO 状态目录。令牌文件支持绝对或相对路径；令牌和 Skill JSON 均支持带或不带 BOM 的 UTF-8。授予或撤销角色时，需要提供控制器 epoch 和 `role check` 返回的修订号，详见 `role grant --help` 或 `role revoke --help`。任务知识清单还需要安装可选知识库插件。

@@ -17,3 +17,5 @@ python scripts/awo_project.py retrieve --state "$state" --project-root "$project
 ```
 
 The result includes the document ID, revision and content digest. Switch to `--backend lexical` for the same request and authorization. The declarative materials skill reads the Assay and Hardness fields; omit `--skill` for a text search. Document retrieval and the task knowledge inventory use separate authorization paths.
+
+Use an absolute, existing directory for `--project-root`; `--state` must point to an initialized AWO state directory. Token files may use absolute or relative paths and UTF-8 with or without a BOM. The same encoding works for skill JSON. Run `role grant --help` or `role revoke --help` for required write arguments: supply the controller epoch and the revision returned by `role check`. Task inventory also requires the optional knowledge plugin.

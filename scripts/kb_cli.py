@@ -4,7 +4,8 @@ import json
 import os
 import sys
 
-from mcp_gateway import ServiceBackend, read_token_file, safe_error
+from mcp_gateway import ServiceBackend, read_token_file
+from project_cli_inputs import check_paths, diagnostic
 
 
 def main(argv=None):
@@ -19,11 +20,12 @@ def main(argv=None):
     if not args.token_file:
         parser.error("supply --token-file or set AWO_AGENT_TOKEN_FILE")
     try:
+        check_paths(args.state, args.project_root)
         token = read_token_file(args.token_file)
         backend = ServiceBackend(args.state, args.project_root, extensions_enabled=True)
         report = backend.call(token, "kb.inventory", {"task_id": args.task, "variants": args.variant})
     except (Exception, KeyboardInterrupt) as exc:
-        print("kb inventory: " + safe_error(exc).code, file=sys.stderr)
+        print("kb inventory: " + diagnostic(exc), file=sys.stderr)
         return 2
     print(json.dumps(report, ensure_ascii=True, indent=2))
     return 0

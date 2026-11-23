@@ -10,7 +10,8 @@ import re
 import sqlite3
 import sys
 
-from mcp_gateway import ServiceBackend, read_token_file, safe_error
+from mcp_gateway import ServiceBackend, read_token_file
+from project_cli_inputs import check_paths, diagnostic
 
 
 class RetrievalError(ValueError):
@@ -22,11 +23,14 @@ def terms(text):
 
 
 def load_skill(path):
-    with Path(path).open("rb") as stream:
-        raw = stream.read(8193)
-    if len(raw) > 8192:
-        raise RetrievalError("invalid_skill")
-    skill = json.loads(raw.decode("utf-8"))
+    try:
+        with Path(path).open("rb") as stream:
+            raw = stream.read(8193)
+        if len(raw) > 8192:
+            raise ValueError
+        skill = json.loads(raw.decode("utf-8-sig"))
+    except (OSError, ValueError, RecursionError):
+        raise RetrievalError("invalid_skill") from None
     if not isinstance(skill, dict) or set(skill) != {"skill", "fields"}:
         raise RetrievalError("invalid_skill")
     if not isinstance(skill["skill"], str) or not re.fullmatch(r"[a-z][a-z0-9.-]{0,62}@[1-9][0-9]{0,5}", skill["skill"]):
@@ -108,10 +112,11 @@ def main(argv=None):
     if not args.token_file:
         parser.error("supply --token-file or set AWO_AGENT_TOKEN_FILE")
     try:
+        check_paths(args.state, args.project_root)
         gateway = ServiceBackend(args.state, args.project_root, extensions_enabled=True)
         result = retrieve(gateway, read_token_file(args.token_file), args.doc, args.query, args.backend, args.skill)
     except Exception as exc:
-        print("project retrieve: " + (str(exc) if isinstance(exc, RetrievalError) else safe_error(exc).code), file=sys.stderr)
+        print("project retrieve: " + (str(exc) if isinstance(exc, RetrievalError) else diagnostic(exc)), file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0
