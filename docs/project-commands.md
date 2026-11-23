@@ -1,6 +1,6 @@
 # Windows project commands
 
-**[Download the Windows project commands preview](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0-preview.1)** - Under Assets, download `AWO-Windows-Project-CLI-0.1.0-preview.1.zip`, extract it, and run `python -B try_project.py` there with Python 3.10+. Both retrieval backends should print `201 HV`, followed by `WINDOWS PROJECT COMMANDS PASS`. The demo needs no existing project or token.
+**[Download the Windows project commands 0.1.0](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0)** - Under Assets, download `AWO-Windows-Project-CLI-0.1.0.zip`, extract it, and run `python -B try_project.py` there with Python 3.10+. Both retrieval backends should print `201 HV`, followed by `WINDOWS PROJECT COMMANDS PASS`. The demo needs no existing project or token.
 
 From a source checkout, run `python scripts/awo_project.py --help`. For the published host preview ZIP, use the demo commands on its release page instead.
 

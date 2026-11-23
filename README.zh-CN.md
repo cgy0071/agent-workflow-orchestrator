@@ -9,7 +9,7 @@
 
 **[试用 Windows 宿主的任务知识库](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - 从预览发布页下载 AWO-Windows-KB-Host ZIP 附件（请勿选择自动生成的 Source code），解压后按页内三条命令运行。成功时会看到项目、修订、引文和 `AWO KB HOST PREVIEW PASS`。 [查看框架后续交付设计](docs/native-framework-delivery.zh-CN.md)
 
-**[下载 Windows 项目命令预览版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0-preview.1)** — 从 Assets 下载 `AWO-Windows-Project-CLI-0.1.0-preview.1.zip`，解压后在该目录用 Python 3.10+ 运行 `python -B try_project.py`。
+**[下载 Windows 项目命令正式版 0.1.0](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0)** — 从 Assets 下载 `AWO-Windows-Project-CLI-0.1.0.zip`，解压后在该目录用 Python 3.10+ 运行 `python -B try_project.py`。
 
 [当前源码版的项目命令](docs/project-commands.zh-CN.md)
 

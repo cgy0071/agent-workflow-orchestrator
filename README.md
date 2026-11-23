@@ -10,7 +10,7 @@ independent review accepts it. `scripts/` enforces those rules; prompts do not.
 
 **[Try the Windows host with task-scoped knowledge](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - Download the named Windows ZIP from the preview release (not GitHub's automatic Source code archive) and follow its three commands. The demo prints the project, revision, quote and `AWO KB HOST PREVIEW PASS`.
 
-**[Download the Windows project commands preview](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0-preview.1)** - Under Assets, download `AWO-Windows-Project-CLI-0.1.0-preview.1.zip`, extract it, and run `python -B try_project.py` there with Python 3.10+.
+**[Download the Windows project commands 0.1.0](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/project-cli-v0.1.0)** - Under Assets, download `AWO-Windows-Project-CLI-0.1.0.zip`, extract it, and run `python -B try_project.py` there with Python 3.10+.
 
 [Project commands in this source checkout](docs/project-commands.md)
 
