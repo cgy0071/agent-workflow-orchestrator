@@ -218,3 +218,5 @@ Start the secretary with the command below. Reopen the same thread with the same
 ```powershell
 python scripts/maid.py --thread runtime/my-thread chat --model gemini-3.8-flash-low
 ```
+
+Use your preferred terminal (including a Herdr pane). To talk directly in the native Gemini interface, open the same secretary thread with `python apps/maid/maid.py direct --thread runtime/my-thread`. Exit agy to return control to MAID. Existing interactive worker panes accept input in their own terminals. Automated one-shot Codex tasks expose their status through MAID.

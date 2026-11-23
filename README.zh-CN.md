@@ -211,3 +211,5 @@ python scripts/awo_project.py ask agy --model gemini-3.8-flash-low --prompt "Rep
 ```powershell
 python scripts/maid.py --thread runtime/my-thread chat --model gemini-3.8-flash-low
 ```
+
+可以在 Herdr 窗格、Windows Terminal 或 PowerShell 中操作。要直接与同一位 Gemini 秘书交谈，在选定的终端运行 `python apps/maid/maid.py direct --thread runtime/my-thread`，退出 agy 后即可回到 MAID。已打开的交互式执行者窗口可以照常直接输入。一次性自动 Codex 任务可通过 MAID 查询状态。
