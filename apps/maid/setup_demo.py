@@ -1,4 +1,5 @@
 """Create a disposable MAID project profile on the current computer."""
+import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -6,10 +7,30 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from harness_probe import binary
+from harness_probe import ProbeError, binary
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true", help="Check default demo prerequisites only")
+    args = parser.parse_args()
+    problems = []
+    for name, flags, remedy in (
+        ("agy", ["--version"], "Install the Antigravity CLI, reopen PowerShell, then run agy to sign in."),
+        ("codex", ["login", "status"], "Run codex login (or codex.cmd login), then retry."),
+    ):
+        try:
+            exe = binary(name)
+            result = subprocess.run([exe, *flags], capture_output=True, timeout=20)
+            if result.returncode:
+                raise ProbeError(remedy)
+        except (ProbeError, OSError, subprocess.TimeoutExpired) as exc:
+            problems.append(f"{name}: {exc} {remedy}")
+    if problems:
+        raise SystemExit("\n".join(problems))
+    if args.check:
+        print("agy executable found; Codex login confirmed. Sign in to agy before requesting a draft.")
+        return
     codex = binary("codex")
     base = ROOT / "runtime" / "maid-demo"
     base.mkdir(parents=True, exist_ok=False)
