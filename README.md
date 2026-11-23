@@ -6,6 +6,8 @@ English | [Chinese](README.zh-CN.md)
 One plans and reviews, the other executes. Each task is dispatched once, and nothing counts as done until an
 independent review accepts it. `scripts/` enforces those rules; prompts do not.
 
+**Prefer a secretary interface? [MAID](https://github.com/cgy0071/MAID) lets you choose a secretary and project; AWO dispatches the work and records independent acceptance.** Install and update the two repositories separately. See the MAID homepage for compatible AWO versions.
+
 **[Install the Windows knowledge base plugin (0.4.1)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-v0.4.1)** - Try a sample record with Python 3.10+ (including Anaconda).
 
 **[Try the Windows host with task-scoped knowledge](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/kb-host-v0.1.0-preview.1)** - Download the named Windows ZIP from the preview release (not GitHub's automatic Source code archive) and follow its three commands. The demo prints the project, revision, quote and `AWO KB HOST PREVIEW PASS`.
