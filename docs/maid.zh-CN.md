@@ -14,12 +14,14 @@
 
 提交只准备任务；明确输入 start 命令才开始执行。执行期间可从另一个终端用同一目录查询 status。下次打开同一目录，输入“进度”或“做完了吗”，就能读取账本中的任务、审核结论和证据编号。已执行任务不会因重复输入 start 再次派发；中断恢复沿用项目任务指南。
 
-## 交给指定项目经理，引用另一个项目的材料
+## 按项目选择负责人和材料
 
-例如，学生项目负责产出结果，材料项目只提供一份已发布的标定记录。先在本机建立项目目录 JSON，登记两个独立项目的路径与负责人，并为这份材料指定接收项目、文档编号、修订摘要和文档级读取凭据。完整字段见[目录示例](maid.md#route-a-task-to-a-project-manager)。凭据文件单独保管在仓库之外。
+复制[项目目录示例](../examples/maid-directory.json)到操作者管理的位置，分别登记各项目的独立根目录和负责人。需要共享材料时，在 exports 中写明来源项目、接收项目、已发布文档的 ID、该修订的 SHA-256 及限读该文档的 AWO 凭据文件路径。凭据应放在仓库和执行者工作区之外。来源项目的账本中须已有这份已发布修订。
 
-    python scripts/maid.py --thread C:/work/awo-demo --directory C:/awo/directory.json --project student --material calibration submit --spec C:/work/spec.json
+    python scripts/maid.py --thread C:/awo/student-task --directory C:/awo/projects.json --project student --material calibration submit --spec C:/awo/student-spec.json
+    python scripts/maid.py --thread C:/awo/student-task start --confirm-execute
+    python scripts/maid.py --thread C:/awo/student-task status
 
-任务说明中的仓库必须属于 `student`。提交时秘书核对授权和修订，把选中的材料复制进待执行的任务提示。后续撤销授权会阻止新的导出，已交付的副本仍留在会话目录，请限制该目录的访问。只用本项目材料时省略 `--material`。
+任务说明应指定请求项目的仓库和同一会话目录。提交时会把已授权材料复制到冻结的任务提示中，之后撤销凭据仍会保留接收方已获得的副本。省略 --material 可以只选择负责人。重新查询 status 可看到项目负责人、选用材料的来源及修订，以及审核通过后的证据 ID。落地结果在会话目录下请求仓库副本的目标分支上。
 
-按上文的 start 命令执行。结果保存在任务副本的目标 Git 分支，重新打开同一会话可查项目、负责人、材料出处和通过独立审核的证据编号。目前每个本地会话对应一个任务，目录中的负责人名称用于标识路由。
+本地入口按项目键选择已登记的负责人，每个会话对应一项任务，支持上述显式命令。

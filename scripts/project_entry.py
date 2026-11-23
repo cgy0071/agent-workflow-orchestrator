@@ -574,19 +574,20 @@ def _resolve_output(spec, out_dir):
     return out
 
 
-def prepare(spec_path, out_dir):
+def prepare(spec_path, out_dir, *, route_resolver=None):
     spec = validate_spec(read_json(Path(spec_path)))
     out = _resolve_output(spec, out_dir)
+    route, material = route_resolver(spec, out) if route_resolver else (None, None)
     out.mkdir(parents=True)
     try:
-        return _prepare_into(spec, spec_path, out)
+        return _prepare_into(spec, spec_path, out, route, material)
     except BaseException:
         # A refusal or crash must not leave a partial output root behind.
         shutil.rmtree(out, ignore_errors=True)
         raise
 
 
-def _prepare_into(spec, spec_path, out):
+def _prepare_into(spec, spec_path, out, route=None, material=None):
     (out / "spec.json").write_bytes(Path(spec_path).read_bytes())
 
     repository = Path(spec["repository"]).resolve()
@@ -737,6 +738,9 @@ def _prepare_into(spec, spec_path, out):
               "\nDo not run git. Do not run the project's tests. Do not create, rename or "
               "delete any file outside the allowed paths. When finished, reply with one "
               "short line.")
+    if material is not None:
+        prompt += ("\nPublished reference data for this task (JSON):\n" +
+                   canonical({"citation": route["material"], "text": material}))
     message = json.dumps({
         "task_id": delivery["task_id"], "nonce": delivery["nonce"], "cwd": delivery["cwd"],
         "prompt": prompt, "marker": delivery["completion"]["marker"],
@@ -782,6 +786,8 @@ def _prepare_into(spec, spec_path, out):
         "timeout_seconds": spec["timeout_seconds"], "goal": spec["goal"],
         "change_name": spec["change_name"],
     }
+    if route is not None:
+        derived["route"] = route
     plan = {"kind": "awo-project-entry-plan", "version": PLAN_VERSION, "spec": spec,
             "derived": derived}
     plan["plan_sha256"] = plan_hash(plan)

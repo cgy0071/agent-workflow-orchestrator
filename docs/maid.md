@@ -16,23 +16,12 @@ Start waits for the run. Another terminal can read status while it runs. Reopen 
 
 ## Route a task to a project manager
 
-An operator maintains a local JSON directory. Each project has its own key, manager name and repository. An export names one recipient and one published document revision. The credential file belongs outside the repositories and must hold an AWO token scoped to that document. Replace the sample paths, document ID and revision with your own values.
+Copy the [example directory](../examples/maid-directory.json) to an operator-controlled location. Register each distinct project root and manager. For a material export, enter its source project, recipient project, published document ID, exact revision SHA-256 and path to an AWO credential scoped to that document. Keep the credential outside repositories and worker workspaces. The source state must already contain that published revision.
 
-```json
-{
-  "version": 1,
-  "projects": {
-    "student": {"manager": "student-lead", "root": "C:/work/student"},
-    "materials": {"manager": "materials-lead", "root": "C:/work/materials", "state": "C:/awo/materials-state"}
-  },
-  "exports": {
-    "calibration": {"source": "materials", "recipient": "student", "doc_id": "<published document ID>", "revision_sha256": "<published revision digest>", "token_file": "C:/awo/private/calibration.token"}
-  }
-}
-```
+    python scripts/maid.py --thread C:/awo/student-task --directory C:/awo/projects.json --project student --material calibration submit --spec C:/awo/student-spec.json
+    python scripts/maid.py --thread C:/awo/student-task start --confirm-execute
+    python scripts/maid.py --thread C:/awo/student-task status
 
-    python scripts/maid.py --thread C:/work/awo-demo --directory C:/awo/directory.json --project student --material calibration submit --spec C:/work/spec.json
+The task spec must name the requesting repository and the same thread directory. Submit copies the authorized reference into the frozen task prompt, so the recipient can retain that snapshot after a grant changes. Omitting --material routes a task without sharing a document. Status reports the manager, the source citation when present, and the accepted evidence ID after review. A landed result is on the task's target branch in the requesting repository's disposable clone under the thread directory.
 
-The spec must point to the student's repository. At submission MAID checks the source grant and copies the selected revision into the prepared worker prompt. A later revocation applies to future exports. Keep the conversation directory private because it holds the exported copy. Omit `--material` for a task that needs only the requesting project.
-
-Use the same start and status commands as above. The result lives on the task clone's target ref. Status includes the project, manager, source citation and reviewed evidence identifier. A manager name identifies the selected route. This version supports one bounded task per local conversation.
+The directory selects a registered manager by project key. This local interface supports one task per conversation and explicit commands.

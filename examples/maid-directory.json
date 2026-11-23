@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "projects": {
+    "student": {"manager": "student-lead", "root": "C:/projects/student"},
+    "materials": {"manager": "materials-lead", "root": "C:/projects/materials", "state": "C:/awo/materials-state"}
+  },
+  "exports": {
+    "calibration": {
+      "source": "materials",
+      "recipient": "student",
+      "doc_id": "REPLACE_WITH_PUBLISHED_DOC_ID",
+      "revision_sha256": "REPLACE_WITH_PUBLISHED_REVISION_SHA256",
+      "token_file": "C:/awo/secrets/materials-doc.token"
+    }
+  }
+}
