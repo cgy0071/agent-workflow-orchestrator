@@ -89,25 +89,9 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 
 ## How it works
 
-~~~mermaid
-flowchart TD
-    A["Confirmed MAID task or direct request"] --> P["Planner: define scope and checks"]
-    P -->|dispatch once| E["Executor: deliver work and evidence"]
-    E --> M["Monitor: record delivery"]
-    M -->|inbox event| R["Reviewer: check the evidence"]
-    R -->|accept, repair or reject| L["Recorded decision: query status and evidence"]
-~~~
+![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
-**Where the optional connections fit.** Solid arrows above show the task changing hands. The dotted arrows below show what each connection provides.
-
-~~~mermaid
-flowchart LR
-    K["Project knowledge"] -. approved document .-> P["Draft and task preparation"]
-    H["Client adapters"] -. run the chosen client .-> E["Execution or review"]
-    L["Recorded task state"] -. read progress .-> D["Status dashboard"]
-    M["Delivery monitor"] -. review ready .-> I["Reviewer inbox"]
-    I -. configured notification .-> R["Reviewer"]
-~~~
+![Where knowledge grants, clients, dashboards and inboxes connect](docs/images/integrations-overview.svg)
 
 Grant access to a specific published document when a task needs it. Preparation checks the grant again; revoking it blocks future reads but does not erase copies already delivered. Adapters connect roles to supported clients. The dashboard shows recorded progress; an inbox event tells the reviewer when to act. Neither the dashboard nor a notification accepts work.
 
@@ -118,7 +102,6 @@ Grant access to a specific published document when a task needs it. Preparation 
 
 > Roles are decoupled from clients: mix Codex, Claude, or other supported harnesses as you like. The core rules (send once, review before done, one controller at a time) are enforced by the Python scripts in `scripts/`, not by prompts alone. Client support is verified per version; see [harness-adapters.md](references/harness-adapters.md).
 
-![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
 
 ## Next step: first real model run
 
