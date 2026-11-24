@@ -73,3 +73,28 @@ class AppBoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(Exception, "changed"):
                     ops.handle("start", [*args, "--confirm-execute"])
             self.assertFalse((root / "run.json").exists())
+
+    def test_concurrent_start_and_reopen_never_dispatch_twice(self):
+        import os
+        import awo_app_operations as ops
+        with tempfile.TemporaryDirectory() as td:
+            f = Fixture(td)
+            root = Path(td) / "run"
+            spec = Path(td) / "spec.json"
+            spec.write_text(json.dumps(f.spec(root, "refs/heads/demo")), encoding="utf8")
+            args = ["--thread", str(root)]
+            ops.handle("prepare", [*args, "--spec", str(spec)])
+            f.install_fixture_executables(root)
+            command = [sys.executable, "-B", awo_app.__file__, "start", *args, "--confirm-execute"]
+            env = dict(os.environ, **f.write_mode())
+            processes = [subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          text=True) for _ in range(2)]
+            outputs = [json.loads(proc.communicate(timeout=240)[0]) for proc in processes]
+            self.assertTrue(any(row["state"] == "complete" for row in outputs), outputs)
+            jobs = lambda: tuple(sorted(p.name for p in (root / "worker" / "jobs").iterdir()))
+            original = jobs()
+            self.assertEqual(len(original), 1)
+            for operation in ("start", "recover"):
+                state, _, duplicate = ops.handle(operation, [*args, "--confirm-execute"])
+                self.assertEqual((state, duplicate), ("complete", True))
+                self.assertEqual(jobs(), original)
