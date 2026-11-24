@@ -161,8 +161,10 @@ A pass prints `V2_NATIVE_LOOP_PASS` and exits 0. It makes three real model turns
 
 ---
 
-Note: The Native Agent Framework `1.0.0-rc.1` was a separate offline Windows candidate (2026-11-19); that archive was not published and is not required for the orchestration skill.
+The public Windows portable orchestrator candidate is linked above. The November 19 Native Agent Framework archive was a separate internal test artifact.
+
+Application clients can call `python -B scripts/awo_app.py capabilities` to check protocol 1. It lists `profile` (create a project profile) and `maid` (forward the secretary CLI arguments). Only the capabilities response is a versioned JSON contract. Operation-specific JSON envelopes and a stable backend release pin are separate milestones; follow the MAID README for its tested AWO revision.
 
 ## License
 
-The RC1 tag includes the [MIT license](https://github.com/cgy0071/agent-workflow-orchestrator/blob/v1.0.0-rc.1/LICENSE). The current main branch does not yet include a root LICENSE file.
+AWO is available under the [MIT License](LICENSE).

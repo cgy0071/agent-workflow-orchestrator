@@ -163,8 +163,10 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 
 ---
 
-附注：Native Agent Framework 的 `1.0.0-rc.1` 是独立的 Windows 离线候选包（2026-11-19），该归档未公开发布，日常使用编排 Skill 不需要它。
+上方链接提供公开的 Windows 便携编排器候选版。11 月 19 日的 Native Agent Framework 归档是另一份内部测试产物。
+
+应用可执行 `python -B scripts/awo_app.py capabilities` 查询协议 1。返回的 `profile` 用于创建项目配置，`maid` 接收秘书命令行参数。当前仅能力查询定义了版本化 JSON 契约。各操作统一的 JSON 输出和正式后端版本固定另行完成；配套 AWO 版本请以 MAID README 的实测说明为准。
 
 ## 许可证
 
-RC1 标签包含 [MIT 许可证](https://github.com/cgy0071/agent-workflow-orchestrator/blob/v1.0.0-rc.1/LICENSE)。当前 main 分支根目录尚无 LICENSE 文件。
+AWO 采用 [MIT 许可证](LICENSE)。
