@@ -163,7 +163,7 @@ A pass prints `V2_NATIVE_LOOP_PASS` and exits 0. It makes three real model turns
 
 The public Windows portable orchestrator candidate is linked above. The November 19 Native Agent Framework archive was a separate internal test artifact.
 
-Application clients can call `python -B scripts/awo_app.py capabilities` to check protocol 1. It lists `profile` (create a project profile) and `maid` (forward the secretary CLI arguments). Only the capabilities response is a versioned JSON contract. Operation-specific JSON envelopes and a stable backend release pin are separate milestones; follow the MAID README for its tested AWO revision.
+Application clients can query protocol 1 with `python -B scripts/awo_app.py capabilities`. See the [application protocol](docs/application-protocol.md) for preparing, starting, querying and recovering an individual run.
 
 ## License
 

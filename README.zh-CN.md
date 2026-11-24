@@ -165,7 +165,7 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 
 上方链接提供公开的 Windows 便携编排器候选版。11 月 19 日的 Native Agent Framework 归档是另一份内部测试产物。
 
-应用可执行 `python -B scripts/awo_app.py capabilities` 查询协议 1。返回的 `profile` 用于创建项目配置，`maid` 接收秘书命令行参数。当前仅能力查询定义了版本化 JSON 契约。各操作统一的 JSON 输出和正式后端版本固定另行完成；配套 AWO 版本请以 MAID README 的实测说明为准。
+应用可通过 `python -B scripts/awo_app.py capabilities` 查询协议 1。准备、启动、查询与恢复任务的 JSON 接口见[应用协议](docs/application-protocol.md)。
 
 ## 许可证
 
