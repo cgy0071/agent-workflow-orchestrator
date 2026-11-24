@@ -21,3 +21,17 @@ python scripts/awo_project.py retrieve --state "$state" --project-root "$project
 The result includes the document ID, revision and content digest. Switch to `--backend lexical` for the same request and authorization. The declarative materials skill reads the Assay and Hardness fields; omit `--skill` for a text search. Document retrieval and the task knowledge inventory use separate authorization paths.
 
 Use an absolute, existing directory for `--project-root`; `--state` must point to an initialized AWO state directory. Token files may use absolute or relative paths and UTF-8 with or without a BOM. The same encoding works for skill JSON. Run `role grant --help` or `role revoke --help` for required write arguments: supply the controller epoch and the revision returned by `role check`. Task inventory also requires the optional knowledge plugin.
+
+## Look up a project across source revisions
+
+From a source checkout, use a project-wide service credential and the content root that its controller has already bound with `project.bind_root`:
+
+```powershell
+python scripts/awo_project.py domain --state "$state" --project-root "$project" --token-file "$readerToken"
+```
+
+The command returns the ledger project ID, the canonical root path digest and the root binding revision. A commit or branch switch keeps this identity. On reopening a conversation, pass the saved ID with `--expected-project-id`. A changed ledger identity, copied state directory, mismatched root or expired credential causes the lookup to fail. A digest of a path identifies the location and does not verify the files in it.
+
+For one secretary working with two projects, configure a separate state, bound root, credential and expected ID for each. The existing project-entry command prepares its own state per run. Those run IDs alone cannot group tasks from a long-lived project. This command reads an existing project domain and does not attach an existing task or authorize access to another project's materials.
+
+Further integration has three steps. First, submit tasks through their selected project's controller and coordinate any shared path and harness claims before dispatch. Next, reserve and reconcile each task's budget with that controller. Finally, on restart, resolve the saved project ID and read the original assignment, review and evidence before attempting further dispatch.
