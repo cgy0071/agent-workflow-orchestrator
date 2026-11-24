@@ -2,6 +2,7 @@
 import argparse
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -54,8 +55,8 @@ def main(argv=None):
         return 0
     if operation == "profile":
         return profile(argv[1:])
-    from maid import main as maid_main
-    return maid_main(argv[1:])
+    app = Path(__file__).resolve().parents[1] / "apps" / "maid" / "maid.py"
+    return subprocess.call([sys.executable, "-B", str(app), *argv[1:]])
 
 
 if __name__ == "__main__":

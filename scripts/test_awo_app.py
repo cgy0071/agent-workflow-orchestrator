@@ -46,8 +46,9 @@ class AppBoundaryTests(unittest.TestCase):
                     awo_app.main([s if s != "app.py" else "../elsewhere" for s in another])
                 self.assertFalse((base / "other.json").exists())
 
-    def test_maid_transparent_argv_and_exit(self):
-        with patch("maid.main", return_value=2) as entry:
-            args = ["--thread", "example thread", "start"]
-            self.assertEqual(awo_app.main(["maid", *args]), 2)
-            entry.assert_called_once_with(args)
+    def test_maid_routes_to_full_application(self):
+        for argv, expected in [(["request", "--help"], "--profile"), (["direct", "--help"], "--thread")]:
+            proc = subprocess.run([sys.executable, "-B", awo_app.__file__, "maid", *argv],
+                                  capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn(expected, proc.stdout)
