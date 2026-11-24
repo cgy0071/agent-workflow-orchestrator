@@ -6,6 +6,21 @@ English | [Chinese](README.zh-CN.md)
 
 Let one AI agent plan and review while another does the work. You set the goal and define what is allowed; tasks move between agents through a local ledger, and **nothing counts as done until it has been independently reviewed**.
 
+## How it works
+
+![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
+
+1. The **Planner** writes a clear task spec and sends it once to the **Executor**.
+2. A **background monitor script** checks status via local receipts without asking a model to reread the conversation, so watching costs almost nothing.
+3. Once the **Executor** delivers the expected outputs and evidence, the **Reviewer** gets one notification and decides: **accept**, **repair**, or **reject**.
+4. With your approval, the next task begins. Without it, the system stops and reports back to you.
+
+![Where knowledge grants, clients, dashboards and inboxes connect](docs/images/integrations-overview.svg)
+
+Grant access to a specific published document when a task needs it. Preparation checks the grant again; revoking it blocks future reads but does not erase copies already delivered. Adapters connect roles to supported clients. The dashboard shows recorded progress; an inbox event tells the reviewer when to act. Neither the dashboard nor a notification accepts work.
+
+> Roles are decoupled from clients: mix Codex, Claude, or other supported harnesses as you like. The core rules (send once, review before done, one controller at a time) are enforced by the Python scripts in `scripts/`, not by prompts alone. Client support is verified per version; see [harness-adapters.md](references/harness-adapters.md).
+
 ## Choose your starting point
 
 - **Want one secretary to coordinate multiple projects?** Start with [MAID](https://github.com/cgy0071/MAID#readme). Pick a secretary, bind your Git repo, inspect the task draft, and confirm before dispatch. For that integration, follow MAID's setup instructions.
@@ -80,6 +95,16 @@ Dispatch one task, monitor it and review its evidence. Stop after review; do not
    - Ask the Planner to open the read-only dashboard (or double-click `dashboard.cmd` / `dashboard.command`);
    - Before starting the next task, ask the Planner for the current status and review verdict.
 
+## Safety in short
+
+- **Configuration is not permission.** Writing a config file never authorizes dispatch, notifications, or continuous runs; your explicit approval is required.
+- **Done means reviewed.** An idle window or a zero exit code is never acceptance, and acceptance does not automatically merge or push code.
+- **Each task is sent once.** Uncertain deliveries are logged for inspection, never blindly retried, and permission prompts are never auto-approved.
+- **One controller, no self-review.** Switching controllers revokes the previous window; an Executor can never approve its own work.
+- **Outside requests are data.** Requests from chat bots or external channels cannot start work without your direct approval.
+
+> Every test certifies only what it actually ran (directory-artifact checks do not certify Git worktrees; priority and budget ledgers gate admission and settlement without killing an active model call).
+
 ## Supported features
 
 The Windows ZIP runs the offline demo immediately. Real clients need configuration and authorization. To use an optional feature such as project knowledge, follow its setup guide for the project that needs it.
@@ -101,22 +126,6 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 | Application integrations | Call enabled service tools over MCP stdio, HTTP or WebSocket. | [Enable for this project](references/awo-gateway.md) |
 | Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [Enable for this project](references/awo-supervision.md) / [Details](references/awo-observability.md) |
 
-## How it works
-
-![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
-
-![Where knowledge grants, clients, dashboards and inboxes connect](docs/images/integrations-overview.svg)
-
-Grant access to a specific published document when a task needs it. Preparation checks the grant again; revoking it blocks future reads but does not erase copies already delivered. Adapters connect roles to supported clients. The dashboard shows recorded progress; an inbox event tells the reviewer when to act. Neither the dashboard nor a notification accepts work.
-
-1. The **Planner** writes a clear task spec and sends it once to the **Executor**.
-2. A **background monitor script** checks status via local receipts without asking a model to reread the conversation, so watching costs almost nothing.
-3. Once the **Executor** delivers the expected outputs and evidence, the **Reviewer** gets one notification and decides: **accept**, **repair**, or **reject**.
-4. With your approval, the next task begins. Without it, the system stops and reports back to you.
-
-> Roles are decoupled from clients: mix Codex, Claude, or other supported harnesses as you like. The core rules (send once, review before done, one controller at a time) are enforced by the Python scripts in `scripts/`, not by prompts alone. Client support is verified per version; see [harness-adapters.md](references/harness-adapters.md).
-
-
 ## Next step: first real model run
 
 If you want to verify a real end-to-end loop (requires Python 3.10+ and an authenticated Codex CLI), run from the repository root with a fresh directory each time:
@@ -127,16 +136,6 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 ```
 
 A pass prints `V2_NATIVE_LOOP_PASS` and exits 0. It makes three real model turns to verify your local CLI, one-shot sessions, dependency gating, and independent review on a directory-artifact task (it does not test Herdr panes or Git worktree code tasks). See the [first-real-run guide](references/first-real-run.md) and [worktree code loop](references/worktree-code-loop.md) for more options.
-
-## Safety in short
-
-- **Configuration is not permission.** Writing a config file never authorizes dispatch, notifications, or continuous runs; your explicit approval is required.
-- **Done means reviewed.** An idle window or a zero exit code is never acceptance, and acceptance does not automatically merge or push code.
-- **Each task is sent once.** Uncertain deliveries are logged for inspection, never blindly retried, and permission prompts are never auto-approved.
-- **One controller, no self-review.** Switching controllers revokes the previous window; an Executor can never approve its own work.
-- **Outside requests are data.** Requests from chat bots or external channels cannot start work without your direct approval.
-
-> Every test certifies only what it actually ran (directory-artifact checks do not certify Git worktrees; priority and budget ledgers gate admission and settlement without killing an active model call).
 
 ## Optional extras
 
