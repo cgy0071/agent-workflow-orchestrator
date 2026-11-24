@@ -98,3 +98,37 @@ class AppBoundaryTests(unittest.TestCase):
                 state, _, duplicate = ops.handle(operation, [*args, "--confirm-execute"])
                 self.assertEqual((state, duplicate), ("complete", True))
                 self.assertEqual(jobs(), original)
+
+    def test_uncertain_start_fresh_recovery_does_not_send(self):
+        import os
+        import awo_app_operations as ops
+        with tempfile.TemporaryDirectory() as td:
+            f = Fixture(td)
+            root = Path(td) / "run"
+            spec = Path(td) / "spec.json"
+            spec.write_text(json.dumps(f.spec(root, "refs/heads/demo")), encoding="utf8")
+            args = ["--thread", str(root)]
+            ops.handle("prepare", [*args, "--spec", str(spec)])
+            f.install_fixture_executables(root)
+            lock = root / "worker" / "send.lock"
+            lock.write_text(json.dumps({"pid": os.getpid()}), encoding="utf8")
+            env = dict(os.environ, **f.write_mode())
+
+            def call(op, *flags):
+                proc = subprocess.run([sys.executable, "-B", awo_app.__file__, op, *args, *flags],
+                                      env=env, capture_output=True, timeout=120, text=True)
+                return proc.returncode, json.loads(proc.stdout)
+
+            code, response = call("start", "--confirm-execute")
+            self.assertEqual((code, response["error"]["code"]), (2, "dispatch_uncertain"))
+            lock.unlink()  # A resend would now succeed, making this a sensitive control.
+            before = call("status")[1]
+            self.assertEqual(before["state"], "uncertain")
+            code, recovery = call("recover", "--confirm-execute")
+            self.assertEqual((code, recovery["error"]["code"]), (2, "recovery_blocked"))
+            code, restarted = call("start", "--confirm-execute")
+            self.assertEqual((code, restarted["state"], restarted["duplicate"]), (2, "uncertain", True))
+            after = call("status")[1]
+            self.assertEqual(before["result"]["assignment"], after["result"]["assignment"])
+            self.assertEqual(after["result"]["journal"]["phase"], "dispatch_uncertain")
+            self.assertFalse((root / "worker" / "jobs").exists())
