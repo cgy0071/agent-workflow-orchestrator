@@ -18,7 +18,7 @@ class AppBoundaryTests(unittest.TestCase):
             proc = subprocess.run([sys.executable, "-I", "-B",
                                    str(Path(awo_app.__file__).resolve()), "capabilities"],
                                   cwd=td, capture_output=True, text=True, check=True)
-            self.assertEqual(json.loads(proc.stdout), {"protocol": 1, "capabilities": ["profile", "maid"]})
+            self.assertEqual(json.loads(proc.stdout), {"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover"]})
             self.assertFalse(list(Path(td).iterdir()))
 
     def test_profile_exclusive_and_scoped(self):
@@ -52,3 +52,24 @@ class AppBoundaryTests(unittest.TestCase):
                                   capture_output=True, text=True)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertIn(expected, proc.stdout)
+
+    def test_machine_replay_and_version_drift(self):
+        import awo_app_operations as ops
+        with tempfile.TemporaryDirectory() as td:
+            f = Fixture(td)
+            root = Path(td) / "run"
+            spec = Path(td) / "input.json"
+            spec.write_text(json.dumps(f.spec(root, "refs/heads/demo")), encoding="utf8")
+            args = ["--thread", str(root)]
+            prepare = [*args, "--spec", str(spec)]
+            self.assertEqual(ops.handle("prepare", prepare)[::2], ("prepared", False))
+            self.assertEqual(ops.handle("prepare", prepare)[::2], ("prepared", True))
+            with self.assertRaisesRegex(Exception, "confirmation"):
+                ops.handle("start", args)
+            spec.write_text(spec.read_text() + "\n")
+            with self.assertRaisesRegex(Exception, "Different spec"):
+                ops.handle("prepare", prepare)
+            with patch.object(ops, "backend_version", return_value="other"):
+                with self.assertRaisesRegex(Exception, "changed"):
+                    ops.handle("start", [*args, "--confirm-execute"])
+            self.assertFalse((root / "run.json").exists())
