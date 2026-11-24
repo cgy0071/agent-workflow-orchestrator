@@ -1,6 +1,6 @@
 # Agent Workflow Orchestrator
 
-Pair AWO v1.1.1 with MAID v0.2.1. The secretary can read explicitly granted documents; task preparation rechecks the grant.
+AWO runs on its own. If you want a secretary interface, AWO v1.1.1 has also been tested with MAID v0.2.1.
 
 English | [Chinese](README.zh-CN.md)
 
@@ -8,7 +8,7 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 ## Choose your starting point
 
-- **Want one secretary to coordinate multiple projects?** Start with [MAID](https://github.com/cgy0071/MAID#readme). Pick a secretary, bind your Git repo, inspect the task draft, and confirm before dispatch. (MAID requires a matching AWO version; follow MAID's setup instructions.)
+- **Want one secretary to coordinate multiple projects?** Start with [MAID](https://github.com/cgy0071/MAID#readme). Pick a secretary, bind your Git repo, inspect the task draft, and confirm before dispatch. For that integration, follow MAID's setup instructions.
 - **Want to manage the Planner, workers, and reviews directly?** Stay here. Run the 1-minute offline demo below first, then hand a real task in your project to the Planner. AWO works on its own without MAID.
 
 ## Try it on Windows (no Git required)
@@ -88,6 +88,28 @@ The Windows ZIP runs the offline demo immediately. Real clients need configurati
 | Supervision and audit | Inspect local advice and paired drafts, view project runs and export audit receipts. | [Enable for this project](references/awo-supervision.md) / [Details](references/awo-observability.md) |
 
 ## How it works
+
+~~~mermaid
+flowchart TD
+    A["Confirmed MAID task or direct request"] --> P["Planner: define scope and checks"]
+    P -->|dispatch once| E["Executor: deliver work and evidence"]
+    E --> M["Monitor: record delivery"]
+    M -->|inbox event| R["Reviewer: check the evidence"]
+    R -->|accept, repair or reject| L["Recorded decision: query status and evidence"]
+~~~
+
+**Where the optional connections fit.** Solid arrows above show the task changing hands. The dotted arrows below show what each connection provides.
+
+~~~mermaid
+flowchart LR
+    K["Project knowledge"] -. approved document .-> P["Draft and task preparation"]
+    H["Client adapters"] -. run the chosen client .-> E["Execution or review"]
+    L["Recorded task state"] -. read progress .-> D["Status dashboard"]
+    M["Delivery monitor"] -. review ready .-> I["Reviewer inbox"]
+    I -. configured notification .-> R["Reviewer"]
+~~~
+
+Grant access to a specific published document when a task needs it. Preparation checks the grant again; revoking it blocks future reads but does not erase copies already delivered. Adapters connect roles to supported clients. The dashboard shows recorded progress; an inbox event tells the reviewer when to act. Neither the dashboard nor a notification accepts work.
 
 1. The **Planner** writes a clear task spec and sends it once to the **Executor**.
 2. A **background monitor script** checks status via local receipts without asking a model to reread the conversation, so watching costs almost nothing.
