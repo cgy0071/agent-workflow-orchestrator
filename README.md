@@ -11,6 +11,20 @@ Let one AI agent plan and review while another does the work. You set the goal a
 - **Want one secretary to coordinate multiple projects?** Start with [MAID](https://github.com/cgy0071/MAID#readme). Pick a secretary, bind your Git repo, inspect the task draft, and confirm before dispatch. For that integration, follow MAID's setup instructions.
 - **Want to manage the Planner, workers, and reviews directly?** Stay here. Run the 1-minute offline demo below first, then hand a real task in your project to the Planner. AWO works on its own without MAID.
 
+## Let your AI set this up
+
+Copy this prompt into your assistant (for example, Codex, Claude Code, agy or Cursor):
+
+```text
+Check the paths and versions of Git and Python (3.10+). List installed clients by path or version without starting a session. Report missing prerequisites instead of installing them.
+Use my chosen setup directory; ask me for it if missing. Clone only into new subdirectories and never overwrite existing files.
+Clone tag v1.1.1 from https://github.com/cgy0071/agent-workflow-orchestrator.git. MAID is not required. From the new checkout, use the checked Python for both commands. The first creates disposable demo state; the second only reads it:
+python -B scripts/demo_scheduler.py --directory runtime/first-run
+python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
+Check for OFFLINE_DEMO_PASS and verify that A, B and JOIN are all accepted.
+Do not modify my projects, access or change accounts or keys, make paid model calls, or dispatch real work. Report the environment, checkout paths, check results and the exact next command for me to run. Do not run that next step.
+```
+
 ## Try it on Windows (no Git required)
 
 **[Download AWO for Windows x64 (portable release candidate)](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** | [Release notes and checksum](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)

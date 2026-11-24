@@ -11,6 +11,20 @@ AWO 可以独立使用。如果希望通过秘书交办任务，AWO v1.1.1 也�
 - **想让一位“项目秘书”帮你协调多个项目？** 建议从 [MAID 秘书处](https://github.com/cgy0071/MAID#readme) 开始：选好秘书、绑定你的 Git 仓库、审阅草稿后再派工。选择这条接入路径时，请按 MAID 的说明配置。
 - **想自己直接掌控规划、派工和审核？** 留在当前仓库。花 1 分钟跑通下面的离线演示，熟悉流程后就可以把你自己的项目交给 Planner 了。AWO 可以完全独立于 MAID 运行。
 
+## 让 AI 帮你快速部署
+
+把下面整段复制给 Codex、Claude Code、agy 或 Cursor 等助手：
+
+```text
+先检查 Git、Python 3.10+ 的路径和版本，并列出已安装的客户端（只查路径或版本，不启动会话）。缺少必需工具时告诉我，不要自行安装。
+使用我指定的安装目录；如果没给目录，先问我。只在新的子目录中克隆，不覆盖现有文件。
+从 https://github.com/cgy0071/agent-workflow-orchestrator.git 克隆 v1.1.1；不用安装 MAID。进入新克隆，用已检查的 Python 运行以下两条命令。第一条只在新的演示目录生成模拟任务，第二条只读查询：
+python -B scripts/demo_scheduler.py --directory runtime/first-run
+python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
+核对 OFFLINE_DEMO_PASS 以及 A、B、JOIN 三项均为 accepted。
+不要修改我的项目、操作账号或密钥，也不要发起付费模型调用或真实派工。最后汇报环境、安装路径、自检结果和下一步可复制的命令；下一步只列出，不执行。
+```
+
 ## 第一次用 Windows 版？从这里下载，无需 Git
 
 **[下载 Windows 64 位便携候选版](https://github.com/cgy0071/agent-workflow-orchestrator/releases/download/v1.0.0-rc.1/AWO-Windows-x64-rc-check.zip)** ｜ [版本说明和校验值](https://github.com/cgy0071/agent-workflow-orchestrator/releases/tag/v1.0.0-rc.1)
