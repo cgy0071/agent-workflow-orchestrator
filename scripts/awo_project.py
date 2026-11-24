@@ -2,6 +2,7 @@
 import sys
 
 COMMANDS = {
+    "domain": ("project_domain", "Resolve a bound project identity across source revisions"),
     "role": ("project_roles", "Manage project-scoped roles and inspect authorization"),
     "retrieve": ("project_retrieve", "Read authorized project documents with a selected backend"),
     "probe": ("harness_probe", "Check a local Claude, Codex or agy harness"),
