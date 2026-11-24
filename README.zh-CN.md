@@ -172,3 +172,5 @@ python -B scripts/validate_v2_native_loop.py --directory runtime/repro/native-on
 ## 许可证
 
 AWO 采用 [MIT 许可证](LICENSE)。
+
+[秘书汇报规范](docs/secretary-reporting.zh-CN.md) · [Windows 测试与发布排错](docs/troubleshooting-windows.zh-CN.md)

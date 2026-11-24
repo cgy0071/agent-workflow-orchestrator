@@ -22,6 +22,10 @@ def command(profile, action, root, model):
 
 
 def reply(profile, root, model, prompt):
+    prompt = ("For Owner-facing prose, lead with the outcome and use plain language. "
+              "Rephrase internal jargon from other roles; if a specialist term is necessary, "
+              "explain it briefly on first use. Preserve facts, evidence IDs, quotations, "
+              "uncertainty and any requested output format.\n\n" + prompt)
     if profile == "agy":
         return agy_turn.secretary_turn(root, model or "gemini-3.8-flash-low", prompt)
     argv = command(profile, "turn", root, model)

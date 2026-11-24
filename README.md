@@ -170,3 +170,5 @@ Application clients can query protocol 1 with `python -B scripts/awo_app.py capa
 ## License
 
 AWO is available under the [MIT License](LICENSE).
+
+[Secretary reporting guidance (Chinese)](docs/secretary-reporting.zh-CN.md) | [Windows troubleshooting (Chinese)](docs/troubleshooting-windows.zh-CN.md)
