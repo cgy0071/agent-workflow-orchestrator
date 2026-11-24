@@ -132,3 +132,40 @@ class AppBoundaryTests(unittest.TestCase):
             self.assertEqual(before["result"]["assignment"], after["result"]["assignment"])
             self.assertEqual(after["result"]["journal"]["phase"], "dispatch_uncertain")
             self.assertFalse((root / "worker" / "jobs").exists())
+
+    def test_ack_lost_after_actual_worker_job_no_duplicate_on_recovery(self):
+        import os
+        import awo_app_operations as ops
+        with tempfile.TemporaryDirectory() as td:
+            f = Fixture(td)
+            root = Path(td) / "run"
+            spec = Path(td) / "spec.json"
+            spec.write_text(json.dumps(f.spec(root, "refs/heads/demo")), encoding="utf8")
+            args = ["--thread", str(root)]
+            ops.handle("prepare", [*args, "--spec", str(spec)])
+            f.install_fixture_executables(root)
+            env = dict(os.environ, **f.write_mode())
+            fault = (
+                "import sys; sys.path.insert(0, sys.argv.pop(1))\n"
+                "import awo_app, project_entry as entry\n"
+                "send = entry.scheduler.dispatch_assignment\n"
+                "def lose_ack(*args, **kwargs):\n"
+                "    reply = send(*args, **kwargs)\n"
+                "    assert reply['status'] == 'SUBMITTED', reply\n"
+                "    return {'status':'TRANSPORT_LOST'}\n"
+                "entry.scheduler.dispatch_assignment = lose_ack\n"
+                "raise SystemExit(awo_app.main(sys.argv[1:]))\n"
+            )
+            failed = subprocess.run([sys.executable, "-B", "-c", fault,
+                                     str(Path(awo_app.__file__).parent), "start", *args, "--confirm-execute"],
+                                    env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(json.loads(failed.stdout)["error"]["code"], "dispatch_uncertain")
+            jobs = lambda: tuple(sorted(p.name for p in (root / "worker" / "jobs").iterdir()))
+            original = jobs()
+            self.assertEqual(len(original), 1)
+            for op in ("start", "recover", "start"):
+                proc = subprocess.run([sys.executable, "-B", awo_app.__file__, op, *args, "--confirm-execute"],
+                                      env=env, capture_output=True, text=True, timeout=180)
+                response = json.loads(proc.stdout)
+                self.assertIn(response["state"], ("uncertain", "complete", "refused"))
+                self.assertEqual(jobs(), original)
