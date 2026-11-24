@@ -1,6 +1,6 @@
 # Agent Workflow Orchestrator
 
-AWO v1.1.0 与 MAID v0.2.0 配对。秘书可读取明确授权的文档；派工前准备任务时再次核验授权。
+AWO v1.1.1 与 MAID v0.2.1 配对。秘书可读取明确授权的文档；派工前准备任务时再次核验授权。
 
 [English](README.md) | 中文
 

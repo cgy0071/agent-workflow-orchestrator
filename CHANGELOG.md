@@ -6,6 +6,10 @@ Entries are grouped by the date changes reached `main`; pull request numbers lin
 
 ## Unreleased
 
+## v1.1.1
+
+Secretary reports use plain language and explain unfamiliar terms. Added Windows testing and release troubleshooting.
+
 ## v1.1.0
 
 Pair AWO v1.1.0 with MAID v0.2.0. The secretary can read explicitly granted documents; task preparation rechecks the grant.

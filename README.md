@@ -1,6 +1,6 @@
 # Agent Workflow Orchestrator
 
-Pair AWO v1.1.0 with MAID v0.2.0. The secretary can read explicitly granted documents; task preparation rechecks the grant.
+Pair AWO v1.1.1 with MAID v0.2.1. The secretary can read explicitly granted documents; task preparation rechecks the grant.
 
 English | [Chinese](README.zh-CN.md)
 
