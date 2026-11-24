@@ -1,5 +1,7 @@
 # Agent Workflow Orchestrator
 
+Pair AWO v1.1.0 with MAID v0.2.0. The secretary can read explicitly granted documents; task preparation rechecks the grant.
+
 English | [Chinese](README.zh-CN.md)
 
 Let one AI agent plan and review while another does the work. You set the goal and define what is allowed; tasks move between agents through a local ledger, and **nothing counts as done until it has been independently reviewed**.

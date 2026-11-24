@@ -2,9 +2,13 @@
 
 English | [Chinese](CHANGELOG.zh-CN.md)
 
-The project has no numbered releases yet. Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
+Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
 
 ## Unreleased
+
+## v1.1.0
+
+Pair AWO v1.1.0 with MAID v0.2.0. The secretary can read explicitly granted documents; task preparation rechecks the grant.
 
 ### Added
 
