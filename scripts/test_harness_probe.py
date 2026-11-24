@@ -18,11 +18,14 @@ class ProbeTests(unittest.TestCase):
 
     def test_refuses_wrong_model_marker_and_bad_cost(self):
         for change in ({"modelUsage": {"other": {}}}, {"result": "invented"},
-                       {"total_cost_usd": 2}, {"total_cost_usd": -1},
+                       {"total_cost_usd": -1},
                        {"total_cost_usd": float("nan")}, {"total_cost_usd": True},
                        {"is_error": True}):
             with self.subTest(change=change), self.assertRaises(probe.ProbeError):
                 probe.check_reply(dict(self.reply(), **change), "marker")
+
+    def test_reports_cost_without_a_monetary_ceiling(self):
+        self.assertEqual(probe.check_reply(dict(self.reply(), total_cost_usd=2), "marker")["cli_estimated_usd"], 2)
 
     def test_paid_invocation_is_bounded_and_uses_no_project_content(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {
@@ -34,7 +37,7 @@ class ProbeTests(unittest.TestCase):
             def invoke(cmd, **kwargs):
                 self.assertEqual(cmd[cmd.index("--tools") + 1], "")
                 self.assertEqual(cmd[cmd.index("--max-turns") + 1], "1")
-                self.assertLessEqual(float(cmd[cmd.index("--max-budget-usd") + 1]), 1)
+                self.assertNotIn("--max-budget-usd", cmd)
                 self.assertEqual(kwargs["cwd"], cwd)
                 self.assertEqual(list(cwd.iterdir()), [])
                 self.assertNotIn("OTHER_PROJECT_SECRET", kwargs["env"])

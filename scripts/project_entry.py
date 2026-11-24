@@ -361,10 +361,19 @@ def validate_spec(spec):
     for name in ("worker", "reviewer"):
         bridge = spec[name]
         _require(isinstance(bridge, dict), "spec", name + " must be an object")
-        _require(set(bridge) <= {"harness", "executable", "timeout_seconds"}, "spec",
+        _require(set(bridge) <= {"harness", "executable", "timeout_seconds", "model", "max_tool_turns"}, "spec",
                  name + " has unknown keys")
-        _require(bridge.get("harness") == "codex", "spec",
-                 name + " harness must be codex for the verified one-shot path")
+        harness = bridge.get("harness")
+        _require(harness in ("codex", "claude"), "spec",
+                 name + " harness must be codex or DS-only Claude for the verified one-shot path")
+        if harness == "claude":
+            steps = bridge.get("max_tool_turns", native_events.CLAUDE_DEFAULT_TOOL_TURNS)
+            _require(native_events.valid_tool_turns(steps), "spec", name + ".max_tool_turns must be 1..64")
+            bridge["max_tool_turns"] = steps
+            _require(bridge.get("model") == native_worker.CLAUDE_DS_MODEL, "spec",
+                     name + " Claude model must be pinned to Kedaya DeepSeek Flash")
+        else:
+            _require("model" not in bridge and "max_tool_turns" not in bridge, "spec", name + " model override is unsupported for Codex")
         _pinned_executable(bridge.get("executable"), name + ".executable", allow_launcher=True)
         timeout = bridge.get("timeout_seconds", 300)
         _require(type(timeout) is int and 1 <= timeout <= 3600, "spec",
@@ -539,6 +548,29 @@ def _enforce_turn_budget(plan):
                          "turn_budget")
 
 
+def _validate_claude_receipt(plan, role, receipt, job):
+    """Validate the frozen Claude DS model/profile/cost at the point of use."""
+    spec = plan["derived"][role + "_spec"]
+    if spec.get("harness") != "claude":
+        return
+    contract = job.get("completion_contract") or {}
+    turn = receipt.get("native_turn") or {}
+    expected_profile = "project_worker" if role == "worker" else "review_only"
+    _require(spec.get("model") == native_events.CLAUDE_DS_MODEL
+             and spec.get("tool_profile") == expected_profile, role + "_turn",
+             "Claude bridge does not match the frozen DS model and role tool profile")
+    _require(contract.get("harness") == "claude"
+             and contract.get("expected_model") == native_events.CLAUDE_DS_MODEL
+             and contract.get("tool_profile") == expected_profile
+             and native_events.valid_tool_turns(spec.get("max_tool_turns"))
+             and contract.get("max_tool_turns") == spec["max_tool_turns"],
+             role + "_turn", "Claude job does not match frozen internal turn limit")
+    _require(turn.get("status") == "completed"
+             and turn.get("model") == native_events.CLAUDE_DS_MODEL
+             and native_events.valid_cost(turn.get("reported_cost_usd")),
+             role + "_turn", "Claude receipt model/cost evidence is missing or invalid")
+
+
 # ---------------------------------------------------------------------------
 # prepare
 
@@ -637,18 +669,25 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
         "scheduler": {"max_concurrency": 1, "resources": {"native_slot": 1}},
     }
     control.initialize(state, cfg)
-    version = cli_version(spec["worker"]["executable"])
+    controller_version = cli_version(spec["worker"]["executable"])
     controller_spec = dict(native_worker.initialize(
         out / "controller", "codex", spec["worker"]["executable"], "one-shot",
-        spec["worker"]["timeout_seconds"]), role="planner", version=version)
+        spec["worker"]["timeout_seconds"]), role="planner", version=controller_version)
+    worker_version = cli_version(spec["worker"]["executable"])
     worker_spec = dict(native_worker.initialize(
-        out / "worker", "codex", spec["worker"]["executable"], "one-shot",
-        spec["worker"]["timeout_seconds"], launch_cwd=str(workspace_path)),
-        role="executor", version=version)
+        out / "worker", spec["worker"]["harness"], spec["worker"]["executable"], "one-shot",
+        spec["worker"]["timeout_seconds"], model=spec["worker"].get("model"),
+        launch_cwd=str(workspace_path),
+        max_tool_turns=spec["worker"].get("max_tool_turns"),
+        tool_profile="project_worker" if spec["worker"]["harness"] == "claude" else None),
+        role="executor", version=worker_version)
+    reviewer_version = cli_version(spec["reviewer"]["executable"])
     reviewer_spec = dict(native_worker.initialize(
-        out / "reviewer", "codex", spec["reviewer"]["executable"], "one-shot",
-        spec["reviewer"]["timeout_seconds"]), role="reviewer",
-        context_policy="inbox_only", version=version)
+        out / "reviewer", spec["reviewer"]["harness"], spec["reviewer"]["executable"], "one-shot",
+        spec["reviewer"]["timeout_seconds"], model=spec["reviewer"].get("model"),
+        max_tool_turns=spec["reviewer"].get("max_tool_turns"),
+        tool_profile="review_only" if spec["reviewer"]["harness"] == "claude" else None), role="reviewer",
+        context_policy="inbox_only", version=reviewer_version)
 
     controller = control.bind(state, "planner", controller_spec,
                               bridge_identity(out / "controller"), "controller", "inbox_only")
@@ -674,7 +713,8 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
 
     capability = out / "evidence" / "capability.json"
     save_json(capability, {
-        "kind": "installed-cli-command-bridge", "harness": "codex", "version": version,
+        "kind": "installed-cli-command-bridge", "harness": spec["worker"]["harness"],
+        "version": worker_version,
         "mode": "one-shot",
         "worker_config_sha256": sha_file(out / "worker" / "config.json"),
         "reviewer_config_sha256": sha_file(out / "reviewer" / "config.json"),
@@ -685,7 +725,7 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
         service.set_agent_capability(state, *actor, {
             "tool": "agent.capability",
             "payload": {"agent_id": worker_agent["agent_id"], "capability_key": key,
-                        "level": "supported", "harness_version": version, "os": sys.platform,
+                        "level": "supported", "harness_version": worker_version, "os": sys.platform,
                         "host": "local", "checked_at": service._now(),
                         "evidence_path": str(capability), "evidence_sha256": sha_file(capability),
                         "source": "live_probe", "expected_revision": worker_agent["revision"]},
@@ -811,6 +851,10 @@ def render_plan(plan):
             "- Verify argv: `" + json.dumps(spec["verify_argv"]) + "` (shell=False)\n"
             "- Budget: `" + json.dumps(spec["budget"], sort_keys=True) + "`\n"
             "- Max real turns: " + str(spec["max_real_turns"]) + "\n"
+            + ("- Claude DS Flash: no USD ceiling; each job reports CLI cost. Internal tool turns: " +
+               ", ".join(name + "=" + str(spec[name]["max_tool_turns"]) for name in ("worker", "reviewer")
+                         if spec[name]["harness"] == "claude") + "\n"
+               if any(spec[name]["harness"] == "claude" for name in ("worker", "reviewer")) else "") +
             "- Authorization: " + spec["authorization"]["source"] + "\n"
             "- Local landing: " + ("authorized" if spec["authorization"]["allow_local_land"]
                                    else "not authorized") + "\n"
@@ -1453,8 +1497,13 @@ def collect_turn(plan, journal, workspace_path):
     job = read_json(job_dir / "job.json")
     _require(Path(job["execution_cwd"]).resolve() == workspace_path.resolve(), "worker_turn",
              "job execution directory differs from the frozen workspace")
-    sandbox = job["argv"][job["argv"].index("--sandbox") + 1]
-    _require(sandbox == "workspace-write", "worker_turn", "job sandbox is not workspace-write")
+    if d["worker_spec"].get("harness") == "claude":
+        _validate_claude_receipt(plan, "worker", receipt, job)
+        _require("--sandbox" not in job["argv"], "worker_turn",
+                 "Claude must use the frozen restricted tool profile, not a Codex sandbox flag")
+    else:
+        sandbox = job["argv"][job["argv"].index("--sandbox") + 1]
+        _require(sandbox == "workspace-write", "worker_turn", "job sandbox is not workspace-write")
     save_json(Path(d["paths"]["evidence"]) / "worker-receipt.json", receipt)
     save_json(Path(d["paths"]["evidence"]) / "worker-job.json",
               {k: job.get(k) for k in ("task_id", "nonce", "cwd", "execution_cwd",
@@ -1652,8 +1701,9 @@ def reviewer_turn(plan, label, prompt, files, worktree=None, sandbox=None):
                    "authorization": {"source": "independent reviewer turn for the frozen entry plan",
                                      "terminate_on_timeout": True}}
         if worktree is not None:
-            message["sandbox"] = sandbox or "workspace-write"
             message["execution_cwd"] = str(worktree)
+            if plan["derived"]["reviewer_spec"].get("harness") != "claude":
+                message["sandbox"] = sandbox or "workspace-write"
         sent = native_worker.send(reviewer_root, message)
         attempt["send_response"] = sent
         save_json(attempt_path, attempt)
@@ -1707,9 +1757,13 @@ def _await_review_result(plan, label, attempt):
              "review_uncertain")
     output = job / "receipt" / "output.log"
     _require(output.is_file(), label, "reviewer output log is missing", "review_uncertain")
-    turn = native_events.inspect_turn("codex", output.read_bytes())
+    harness = plan["derived"]["reviewer_spec"]["harness"]
+    turn = native_events.inspect_turn(harness, output.read_bytes())
     _require(turn.get("status") == "completed", label,
              "reviewer output has no completed native turn", "review_uncertain")
+    if harness == "claude":
+        _validate_claude_receipt(plan, "reviewer", read_json(job / "receipt" / "status.json"),
+                                 read_json(job / "job.json"))
     result_path = out_dir / "RESULT.md"
     _require(result_path.is_file(), label, "reviewer result file is missing", "review_uncertain")
     raw = result_path.read_text(encoding="utf-8")

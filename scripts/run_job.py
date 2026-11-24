@@ -12,6 +12,8 @@ import sys
 from datetime import datetime, timezone
 
 from monitor_task import read_json, save_json
+from native_events import (CLAUDE_DS_MODEL, valid_tool_turns,
+                           CLAUDE_TOOL_PROFILES)
 
 
 def finalize(job, state, directory):
@@ -22,6 +24,9 @@ def finalize(job, state, directory):
         output = directory / "output.log"
         raw = output.read_bytes() if output.exists() else b""
         state["native_turn"] = inspect_turn(contract["harness"], raw)
+        if contract["harness"] == "claude" and state["native_turn"].get("status") == "completed":
+            if state["native_turn"].get("model") != contract.get("expected_model"):
+                state["native_turn"].update(status="failed", error="Claude model identity did not match the pinned model")
         complete = (state["native_turn"]["status"] == "completed" and
                     state.get("process_status") == "clean_exit" and
                     state.get("returncode") == 0 and not state.get("timed_out"))
@@ -44,8 +49,28 @@ def run(job):
         raise ValueError("argv must be a nonempty string list")
     contract = job.get("completion_contract")
     if contract is not None and (not isinstance(contract, dict) or contract.get("type") != "native_turn"
-                                 or contract.get("harness") not in ("codex", "pi", "omp")):
+                                 or contract.get("harness") not in ("codex", "pi", "omp", "claude")):
         raise ValueError("unsupported completion_contract")
+    if contract and contract.get("harness") == "claude":
+        steps = contract.get("max_tool_turns")
+        profile = contract.get("tool_profile")
+        if contract.get("expected_model") != CLAUDE_DS_MODEL or not valid_tool_turns(steps) or profile not in CLAUDE_TOOL_PROFILES:
+            raise ValueError("Claude contract must pin Kedaya DS Flash, a known tool profile, and internal turn limit")
+        args = job["argv"]
+        def option(name):
+            positions = [i for i, item in enumerate(args[:-1]) if item == name]
+            if len(positions) != 1:
+                return None
+            return args[positions[0] + 1]
+        expected_tools = ",".join(CLAUDE_TOOL_PROFILES[profile])
+        expected_permission = "acceptEdits" if profile == "project_worker" else "dontAsk"
+        if (option("--model") != CLAUDE_DS_MODEL or "--max-budget-usd" in args
+                or option("--max-turns") != str(steps) or option("--tools") != expected_tools
+                or option("--permission-mode") != expected_permission
+                or "--no-session-persistence" not in args or "--bare" not in args or "--restricted" not in args
+                or "--strict-mcp-config" not in args or "--dangerously-skip-permissions" in args
+                or "--allow-dangerously-skip-permissions" in args):
+            raise ValueError("Claude argv does not match the frozen DS model, turn budget, and tool profile")
     timeout = job.get("timeout_seconds")
     if timeout is not None:
         from monitor_task import number

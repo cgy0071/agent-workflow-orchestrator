@@ -35,6 +35,13 @@ prompt = sys.argv[-1]
 
 
 def emit(text):
+    if "--model" in sys.argv:
+        model = sys.argv[sys.argv.index("--model") + 1]
+        print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                          "result": text, "session_id": "fixture-claude-session",
+                          "modelUsage": {model: {"inputTokens": 100, "outputTokens": 25}},
+                          "total_cost_usd": 0.01}), flush=True)
+        return
     print(json.dumps({"type": "thread.started", "thread_id": "fixture-thread"}), flush=True)
     print(json.dumps({"type": "turn.started"}), flush=True)
     print(json.dumps({"type": "item.completed",
@@ -215,6 +222,57 @@ class ProjectEntryTests(unittest.TestCase):
         self.assert_status(self.fixture.prepare(
             root, self.target("shell"), verify_argv=["cmd", "/c", "tests/smoke.py"]), 2,
             "REFUSED", "spec")
+
+    def test_claude_spec_pins_kedaya_ds_and_per_role_tool_turns(self):
+        model = "ccs-claude-kedaya-ai-ds-2--deepseek-flash"
+        invalid = self.run_dir("claude-wrong-model")
+        self.assert_status(self.fixture.prepare(
+            invalid, self.target("claude-wrong-model"),
+            worker={"harness": "claude", "executable": PYTHON, "model": "claude-sonnet"}),
+            2, "REFUSED", "spec")
+        self.assertFalse(invalid.exists())
+        valid = self.run_dir("claude-plan")
+        rc, payload, err = self.fixture.prepare(
+            valid, self.target("claude-plan"),
+            worker={"harness": "claude", "executable": PYTHON, "model": model, "max_tool_turns": 7},
+            reviewer={"harness": "claude", "executable": PYTHON, "model": model})
+        self.assertEqual(rc, 0, msg=(payload, err))
+        plan = json.loads((valid / "plan.json").read_text(encoding="utf-8"))
+        worker = json.loads((valid / "worker" / "config.json").read_text(encoding="utf-8"))
+        reviewer = json.loads((valid / "reviewer" / "config.json").read_text(encoding="utf-8"))
+        self.assertEqual(worker["model"], model)
+        self.assertEqual(worker["tool_profile"], "project_worker")
+        self.assertEqual(reviewer["tool_profile"], "review_only")
+        self.assertIn("worker=7, reviewer=12", (valid / "PLAN.md").read_text(encoding="utf-8"))
+
+    def test_claude_worker_and_reviewer_complete_offline_fixture_flow(self):
+        root = self.run_dir("claude-mixed")
+        model = "ccs-claude-kedaya-ai-ds-2--deepseek-flash"
+        rc, payload, err = self.fixture.prepare(
+            root, self.target("claude-mixed"),
+            worker={"harness": "claude", "executable": PYTHON, "model": model, "max_tool_turns": 7},
+            reviewer={"harness": "claude", "executable": PYTHON, "model": model})
+        self.assertEqual(rc, 0, msg=(payload, err))
+        self.fixture.install_fixture_executables(root)
+        env = self.fixture.write_mode()
+        result = self.fixture.cli("run", "--plan", str(root / "plan.json"),
+                                  "--confirm-execute", env=env)
+        if result[0] != 0:
+            self.fail((result[1], result[2],
+                       (root / "run.json").read_text(encoding="utf-8")
+                       if (root / "run.json").exists() else "no journal"))
+        self.assertEqual(result[1]["status"], "LANDED")
+        for role in ("worker", "reviewer"):
+            jobs = sorted((root / role / "jobs").glob("*/job.json"))
+            self.assertTrue(jobs, role)
+            for job_path in jobs:
+                job = json.loads(job_path.read_text(encoding="utf-8"))
+                receipt = json.loads((job_path.parent / "receipt" / "status.json").read_text(encoding="utf-8"))
+                self.assertEqual(job["completion_contract"]["expected_model"], model)
+                self.assertEqual(job["completion_contract"]["max_tool_turns"], 7 if role == "worker" else 12)
+                self.assertNotIn("--max-budget-usd", job["argv"])
+                self.assertEqual(receipt["native_turn"]["model"], model)
+                self.assertGreaterEqual(receipt["native_turn"]["reported_cost_usd"], 0)
 
     # 2. Preparation is side-effect free and hash-sealed -------------------
     def test_prepare_launches_nothing_and_refuses_tampered_plan(self):
@@ -1021,4 +1079,3 @@ class ProjectEntryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

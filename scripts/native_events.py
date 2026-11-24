@@ -1,14 +1,34 @@
 """Native turn evidence, independent of process exit and worker orchestration."""
 import hashlib
 import json
+import math
+
+CLAUDE_DS_MODEL = "ccs-claude-kedaya-ai-ds-2--deepseek-flash"
+CLAUDE_DEFAULT_TOOL_TURNS = 12
+
+
+def valid_tool_turns(value):
+    return type(value) is int and 1 <= value <= 64
+
+
+def valid_cost(value):
+    return (type(value) is int and value >= 0 or
+            type(value) is float and math.isfinite(value) and value >= 0)
+
+CLAUDE_TOOL_PROFILES = {
+    "project_worker": ("Read", "Edit", "Write", "Grep", "Glob"),
+    "review_only": ("Read", "Grep", "Glob"),
+}
 
 
 def inspect_turn(harness, raw):
-    if harness not in ("codex", "pi", "omp"):
+    if harness not in ("codex", "pi", "omp", "claude"):
         raise ValueError("unsupported native completion contract")
     data = raw if isinstance(raw, bytes) else raw.encode("utf-8")
     if harness == "omp":
         return inspect_omp(data)
+    if harness == "claude":
+        return inspect_claude(data)
     raw = data.decode("utf-8", errors="replace")
     result = {"status": "incomplete", "text": "", "native_session_id": None,
               "provider": None, "model": None,
@@ -27,7 +47,7 @@ def inspect_turn(harness, raw):
             # subsequent completed turn can establish that it recovered.
             pending_error = True
             result.setdefault("diagnostics", []).append(event.get("message", "native error"))
-        elif kind in ("error", "turn.failed"):
+        elif kind in ("error", "turn.failed") or (harness == "claude" and kind == "result" and event.get("is_error") is True):
             result.update(status="failed", error="native harness returned a failure event")
         if kind in ("turn.started", "agent_start"):
             completed = False
@@ -40,6 +60,16 @@ def inspect_turn(harness, raw):
             if kind == "turn.completed":
                 completed = True
                 pending_error = False
+        elif harness == "claude":
+            if kind == "result":
+                result["text"] = event.get("result", "")
+                result["provider"] = "kedaya"
+                models = event.get("modelUsage") or {}
+                result["model"] = next(iter(models), None) if isinstance(models, dict) else None
+                if event.get("session_id"):
+                    result["native_session_id"] = event["session_id"]
+                if event.get("is_error") is False:
+                    completed = True
         else:
             if kind == "session": result["native_session_id"] = event.get("id")
             message = event.get("message") or {}
@@ -116,6 +146,44 @@ def inspect_omp(data):
         result["status"] = "completed"
     else:
         result["error"] = "OMP final assistant response is empty"
+    return result
+
+
+def inspect_claude(data):
+    """Accept Claude's final JSON envelope only when DS identity and cost exist."""
+    result = {"status": "incomplete", "text": "", "native_session_id": None,
+              "provider": None, "model": None,
+              "output_sha256": hashlib.sha256(data).hexdigest()}
+    try:
+        event = json.loads(data.decode("utf-8"))
+    except (UnicodeError, ValueError):
+        result.update(status="failed", error="invalid Claude JSON result")
+        return result
+    if not isinstance(event, dict) or event.get("type") != "result":
+        result.update(status="failed", error="Claude result envelope is missing")
+        return result
+    if event.get("is_error") is not False:
+        result.update(status="failed", error="Claude reported an unsuccessful result")
+        return result
+    text = event.get("result")
+    usage = event.get("modelUsage")
+    cost = event.get("total_cost_usd")
+    if not isinstance(text, str) or not text.strip() or not isinstance(usage, dict) or len(usage) != 1:
+        result.update(status="failed", error="Claude result lacks text or a single model identity")
+        return result
+    model = next(iter(usage))
+    if model != CLAUDE_DS_MODEL:
+        result.update(status="failed", error="Claude model identity is not the pinned Kedaya DS Flash model")
+        return result
+    if event.get("session_id") is not None and (not isinstance(event["session_id"], str)
+                                                  or not event["session_id"].strip()):
+        result.update(status="failed", error="Claude session identity is invalid")
+        return result
+    if not valid_cost(cost):
+        result.update(status="failed", error="Claude reported missing or invalid turn cost")
+        return result
+    result.update(status="completed", text=text, provider="kedaya", model=model,
+                  native_session_id=event.get("session_id"), reported_cost_usd=cost)
     return result
 
 

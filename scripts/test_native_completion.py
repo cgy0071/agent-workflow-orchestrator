@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from monitor_task import Transport, inspect_once, read_json, save_json
 from native_events import inspect_turn
+from native_events import CLAUDE_DS_MODEL, CLAUDE_DEFAULT_TOOL_TURNS
 import native_worker
 from process_util import pid_alive
 import run_job
@@ -34,6 +35,10 @@ CODEX = [{"type": "thread.started", "thread_id": "fixture-thread"},
          {"type": "turn.completed"}]
 PI_ERROR = [{"type": "message_end", "message": {"role": "assistant", "provider": "fixture-provider",
              "model": "fixture-model", "content": [], "stopReason": "error"}}, {"type": "agent_end"}]
+CLAUDE_RESULT = {"type": "result", "subtype": "success", "is_error": False,
+                 "result": "fixture completion", "session_id": "fixture-session",
+                 "modelUsage": {CLAUDE_DS_MODEL: {"inputTokens": 10, "outputTokens": 4}},
+                 "total_cost_usd": 0.01}
 
 
 class CompletionTests(unittest.TestCase):
@@ -131,6 +136,71 @@ class CompletionTests(unittest.TestCase):
         self.assertEqual(inspect_turn("codex", raw)["status"], "incomplete")
         raw = "\n".join(json.dumps(e) for e in CODEX + [{"type": "turn.failed"}])
         self.assertEqual(inspect_turn("codex", raw)["status"], "failed")
+
+    def test_claude_completion_requires_exactly_one_pinned_model_and_reports_any_valid_cost(self):
+        self.assertEqual(inspect_turn("claude", json.dumps(CLAUDE_RESULT))["status"], "completed")
+        self.assertEqual(inspect_turn("claude", json.dumps(dict(CLAUDE_RESULT, total_cost_usd=12.0)))["status"], "completed")
+        invalid = [
+            dict(CLAUDE_RESULT, total_cost_usd=-1),
+            dict(CLAUDE_RESULT, total_cost_usd=float("nan")),
+            dict(CLAUDE_RESULT, total_cost_usd=float("inf")),
+            dict(CLAUDE_RESULT, total_cost_usd=None),
+            dict(CLAUDE_RESULT, modelUsage={"other-model": {"inputTokens": 1}}),
+            dict(CLAUDE_RESULT, modelUsage={CLAUDE_DS_MODEL: {}, "other-model": {}}),
+            dict(CLAUDE_RESULT, is_error=True),
+        ]
+        for envelope in invalid:
+            with self.subTest(envelope=envelope):
+                self.assertNotEqual(inspect_turn("claude", json.dumps(envelope))["status"], "completed")
+        self.assertNotEqual(inspect_turn("claude", "not json")["status"], "completed")
+
+    def test_claude_argv_pins_model_internal_turns_and_role_tools(self):
+        worker = self.root / "claude-worker"
+        native_worker.initialize(worker, "claude", sys.executable, model=CLAUDE_DS_MODEL,
+                                 tool_profile="project_worker")
+        config = read_json(worker / "config.json")
+        argv = native_worker.argv_for(config, {"prompt": "do bounded work"}, worker)
+        self.assertEqual(argv[argv.index("--model") + 1], CLAUDE_DS_MODEL)
+        self.assertNotIn("--max-budget-usd", argv)
+        self.assertEqual(argv[argv.index("--max-turns") + 1], str(CLAUDE_DEFAULT_TOOL_TURNS))
+        self.assertEqual(argv[argv.index("--tools") + 1], "Read,Edit,Write,Grep,Glob")
+        self.assertIn("--no-session-persistence", argv)
+        reviewer = self.root / "claude-reviewer"
+        native_worker.initialize(reviewer, "claude", sys.executable, model=CLAUDE_DS_MODEL,
+                                 tool_profile="review_only")
+        review_argv = native_worker.argv_for(read_json(reviewer / "config.json"),
+                                             {"prompt": "review"}, reviewer)
+        self.assertEqual(review_argv[review_argv.index("--tools") + 1], "Read,Grep,Glob")
+        self.assertEqual(review_argv[review_argv.index("--permission-mode") + 1], "dontAsk")
+        for bad in (0, 65, True, 1.25):
+            with self.assertRaisesRegex(ValueError, "max_tool_turns"):
+                native_worker.argv_for(dict(config, max_tool_turns=bad), {"prompt": "bad"}, worker)
+        with self.assertRaisesRegex(ValueError, "explicit"):
+            native_worker.initialize(self.root / "claude-no-profile", "claude", sys.executable,
+                                     model=CLAUDE_DS_MODEL)
+
+
+    def test_run_job_refuses_claude_contract_or_argv_turn_tampering_before_start(self):
+        valid_argv = [sys.executable, "--bare", "--restricted", "--print", "--model", CLAUDE_DS_MODEL,
+                      "--output-format", "json", "--tools", "Read,Edit,Write,Grep,Glob",
+                      "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
+                      "--permission-mode", "acceptEdits",
+                      "--max-turns", "12", "prompt"]
+        contract = {"type": "native_turn", "harness": "claude", "expected_model": CLAUDE_DS_MODEL,
+                    "max_tool_turns": 12, "tool_profile": "project_worker"}
+        for index, (argv, changed_contract) in enumerate((
+                (valid_argv[:-3] + ["0.05", "prompt"], contract),
+                ([*valid_argv[:valid_argv.index("--model")], "--model", "wrong-model", *valid_argv[valid_argv.index("--model") + 2:]], contract),
+                (valid_argv, dict(contract, max_tool_turns=8)),
+                (valid_argv, dict(contract, tool_profile="unrestricted")),
+                (valid_argv + ["--dangerously-skip-permissions"], contract),
+        )):
+            with self.subTest(index=index):
+                job = self.job([], "claude", name="claude-invalid-" + str(index))
+                job.update(argv=argv, completion_contract=changed_contract)
+                with self.assertRaises(ValueError):
+                    run_job.run(job)
+                self.assertFalse((self.root / ("claude-invalid-" + str(index))).exists())
 
     def test_pi_selection_is_per_invocation_and_defaults_are_optional(self):
         spec = native_worker.initialize(self.root / "pi", "pi", sys.executable, provider="test-provider", model="test-model")

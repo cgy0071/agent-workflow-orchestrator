@@ -15,7 +15,6 @@ import threading
 
 
 DS_MODEL = "ccs-claude-kedaya-ai-ds-2--deepseek-flash"
-CLI_BUDGET_USD = 0.05
 
 
 class ProbeError(Exception):
@@ -62,10 +61,10 @@ def check_reply(reply, marker):
     if reply.get("result", "").strip() != marker or set(reply.get("modelUsage") or {}) != {DS_MODEL}:
         raise ProbeError("Reply or provider/model identity did not match the probe.")
     cost = reply.get("total_cost_usd")
-    if type(cost) not in (int, float) or not math.isfinite(cost) or not 0 <= cost <= CLI_BUDGET_USD:
-        raise ProbeError("CLI cost was unavailable or exceeded its configured limit.")
+    if type(cost) not in (int, float) or not math.isfinite(cost) or cost < 0:
+        raise ProbeError("CLI cost was unavailable or invalid.")
     return {"harness": "claude", "status": "live_marker_echoed", "model": DS_MODEL,
-            "cli_estimated_usd": cost, "cli_budget_usd": CLI_BUDGET_USD}
+            "cli_estimated_usd": cost}
 
 
 def claude_probe(cwd):
@@ -83,7 +82,7 @@ def claude_probe(cwd):
     cmd = [exe, "--bare", "--print", "--model", DS_MODEL, "--output-format", "json",
            "--tools", "", "--strict-mcp-config", "--disable-slash-commands",
            "--no-session-persistence", "--permission-mode", "dontAsk",
-           "--max-budget-usd", str(CLI_BUDGET_USD), "--max-turns", "1",
+           "--max-turns", "1",
            "--system-prompt", "Reply only with the exact marker from the user."]
     result = subprocess.run(cmd, input=marker, text=True, encoding="utf-8", cwd=cwd,
                             env=env, capture_output=True, timeout=60)
@@ -140,7 +139,7 @@ def agy_probe(cwd):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("harness", choices=("claude", "codex", "agy"),
-                        help="claude: one budgeted DS marker; codex: local app-server handshake; agy: local version")
+                        help="claude: one DS marker; codex: local app-server handshake; agy: local version")
     args = parser.parse_args(argv)
     try:
         with tempfile.TemporaryDirectory(prefix="awo-probe-") as tmp:

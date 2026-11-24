@@ -13,11 +13,24 @@ from monitor_task import read_json, save_json
 from native_events import extract
 from process_util import pid_alive
 import run_job
+from native_events import (CLAUDE_DS_MODEL, CLAUDE_DEFAULT_TOOL_TURNS, valid_tool_turns,
+                           CLAUDE_TOOL_PROFILES)
 from workflow_evidence import task_key
 
 
 def cli_prefix(executable):
     path = Path(executable).resolve()
+    if path.suffix.lower() == ".ps1":
+        # PowerShell launchers are not executable argv entries under shell=False.
+        # Resolve the npm wrapper's native binary and invoke it directly.
+        text = path.read_text(encoding="utf-8", errors="replace")
+        marker = 'node_modules/@anthropic-ai/claude-code/bin/claude.exe'
+        if marker not in text:
+            raise ValueError("unverified PowerShell Claude launcher")
+        native = path.parent / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+        if not native.is_file():
+            raise ValueError("Claude native executable is missing")
+        return [str(native.resolve())]
     if path.suffix.lower() in (".cmd", ".bat"):
         # Avoid cmd.exe reinterpretation of prompts. Resolve the inspected Node
         # launchers and continue with an argv array, never shell=True.
@@ -35,8 +48,12 @@ def cli_prefix(executable):
 
 
 def selection(harness, provider=None, model=None):
+    if harness == "claude":
+        if provider is not None or model != CLAUDE_DS_MODEL:
+            raise ValueError("Claude execution requires the pinned Kedaya DeepSeek Flash model")
+        return {"provider": None, "model": CLAUDE_DS_MODEL}
     if harness not in ("pi", "omp") and (provider is not None or model is not None):
-        raise ValueError("provider/model overrides currently require Pi or OMP")
+        raise ValueError("provider/model overrides currently require Pi or OMP; Claude is DS-only")
     for value in (provider, model):
         if value is not None and (not isinstance(value, str) or not value.strip() or value.startswith("-")
                                   or any(ord(char) < 32 for char in value)):
@@ -55,12 +72,21 @@ def omp_version(executable):
 
 
 def initialize(directory, harness, executable, mode="one-shot", timeout=45, provider=None, model=None,
-               launch_cwd=None):
-    if harness not in ("codex", "pi", "omp") or mode not in ("one-shot", "session") or (harness == "omp" and mode != "one-shot"):
+               launch_cwd=None, tool_profile=None, max_tool_turns=None):
+    if harness not in ("codex", "pi", "omp", "claude") or mode not in ("one-shot", "session") or (harness in ("omp", "claude") and mode != "one-shot"):
         raise ValueError("unsupported native harness or execution mode")
     from monitor_task import number
     number(timeout, "native test timeout", maximum=3600)
     requested = selection(harness, provider, model)
+    if harness == "claude":
+        if max_tool_turns is None:
+            max_tool_turns = CLAUDE_DEFAULT_TOOL_TURNS
+        if not valid_tool_turns(max_tool_turns):
+            raise ValueError("Claude max_tool_turns must be 1..64")
+        if tool_profile not in CLAUDE_TOOL_PROFILES:
+            raise ValueError("Claude requires an explicit project_worker or review_only tool profile")
+    elif tool_profile is not None or max_tool_turns is not None:
+        raise ValueError("tool_profile is only supported for Claude")
     version = omp_version(executable) if harness == "omp" else None
     root = Path(directory).resolve()
     if launch_cwd is None:
@@ -76,11 +102,15 @@ def initialize(directory, harness, executable, mode="one-shot", timeout=45, prov
     identity = {"kind": harness, "terminal": "native-bridge-" + uuid.uuid4().hex, "launch_cwd": declared}
     config = {"harness": harness, "executable": str(Path(executable).resolve()), "mode": mode,
               "timeout_seconds": timeout, "identity": identity, "native_session_id": None,
-              "harness_version": version, **requested}
+              "harness_version": version, **requested,
+              **({"tool_profile": tool_profile, "max_tool_turns": max_tool_turns} if tool_profile is not None else {})}
     save_json(root / "config.json", config)
     script = str(Path(__file__).resolve())
     base = [sys.executable, "-B", script, "--worker", str(root)]
     return {"adapter": "command", "harness": harness, "expected_identity": identity,
+            "model": requested.get("model"), "tool_profile": tool_profile,
+            **({"max_tool_turns": max_tool_turns} if harness == "claude" else {}),
+            "harness_version": version,
             "status_argv": base + ["status"], "identity_argv": base + ["status"],
             "output_argv": base + ["output"], "prompt_argv": base + ["send", "--message", "{message}"]}
 
@@ -116,6 +146,24 @@ def status(directory):
 
 def argv_for(config, payload, root):
     executable = config.get("argv_prefix") or cli_prefix(config["executable"])
+    if config["harness"] == "claude":
+        if config["mode"] != "one-shot": raise ValueError("Claude session reuse is not verified")
+        selected = selection("claude", config.get("provider"), config.get("model"))
+        profile = config.get("tool_profile")
+        if profile not in CLAUDE_TOOL_PROFILES:
+            raise ValueError("Claude tool profile is missing or unsupported")
+        steps = config.get("max_tool_turns")
+        if not valid_tool_turns(steps):
+            raise ValueError("Claude job lacks a frozen max_tool_turns; prepare a new plan")
+        tools = ",".join(CLAUDE_TOOL_PROFILES[profile])
+        permission_mode = "acceptEdits" if profile == "project_worker" else "dontAsk"
+        prompt = payload.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Claude invocation requires a nonempty prompt")
+        return executable + ["--bare", "--restricted", "--print", "--model", selected["model"], "--output-format", "json",
+                             "--tools", tools, "--strict-mcp-config", "--disable-slash-commands",
+                             "--no-session-persistence", "--permission-mode", permission_mode,
+                             "--max-turns", str(steps), prompt]
     if config["harness"] == "omp":
         if config["mode"] != "one-shot": raise ValueError("OMP session reuse is not verified")
         cwd = Path(payload["cwd"])
@@ -190,17 +238,25 @@ def send(directory, payload):
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
         config = read_json(root / "config.json")
-        if payload.get("sandbox") == "workspace-write" and config["harness"] != "codex":
-            raise ValueError("workspace-write execution is only defined for the Codex bridge")
+        if payload.get("sandbox") == "workspace-write" and not (
+                config["harness"] == "codex" or
+                (config["harness"] == "claude" and config.get("tool_profile") == "project_worker")):
+            raise ValueError("workspace-write execution requires Codex or the bounded Claude project_worker profile")
         if config["harness"] == "omp" and omp_version(config["executable"]) != config.get("harness_version"):
             raise ValueError("OMP version changed since worker initialization")
+        if config["harness"] == "claude":
+            selection("claude", config.get("provider"), config.get("model"))
         argv = argv_for(config, payload, root)
         directory = root / "jobs" / task_key(payload)
         directory.mkdir(parents=True, exist_ok=False)
         job = dict(payload, argv=argv, identity=config["identity"],
                    output_dir=str(directory / "receipt"), timeout_seconds=config["timeout_seconds"],
                    harness_version=config.get("harness_version"),
-                   completion_contract={"type": "native_turn", "harness": config["harness"]})
+                   completion_contract={"type": "native_turn", "harness": config["harness"],
+                       **({"expected_model": CLAUDE_DS_MODEL,
+                           "max_tool_turns": config["max_tool_turns"],
+                           "tool_profile": config["tool_profile"]}
+                          if config["harness"] == "claude" else {})})
         if "kb_context" in config:
             job["kb_context_required"] = True
         save_json(directory / "job.json", job)
