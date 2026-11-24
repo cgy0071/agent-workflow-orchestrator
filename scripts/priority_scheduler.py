@@ -410,11 +410,31 @@ def _agent_binding(agent_id, worker):
                                    "an enrollment identity requires a Controller-confirmed binding bridge.")
 
 
+def _write_paths(con, project_id, values):
+    """Freeze declared targets in the controller-bound project content root."""
+    from project_knowledge import _relative
+    from service_access import root_hash
+    from workspace_manager import _no_links
+    if not isinstance(values, list) or not 1 <= len(values) <= 256:
+        raise service.ServiceError("write_paths requires 1 to 256 project-relative targets")
+    binding = con.execute("SELECT root_path,root_sha256 FROM v2_project_content_root WHERE project_id=?",
+                          (project_id,)).fetchone()
+    if not binding or root_hash(binding[0]) != binding[1]:
+        raise service.ServiceError("Explicit bound project root required for write paths")
+    paths = []
+    for value in values:
+        relative = _relative(value)
+        if any(c in value for c in '*?"<>|'):
+            raise service.ServiceError("write_paths requires literal filenames")
+        paths.append(str(_no_links(Path(binding[0]) / relative)))
+    return sorted(set(paths))
+
+
 def _enqueue(con, project_id, actor, payload):
     _fields(payload, ("task_id", "expected_revision", "request", "message", "agent_id", "budget",
                       "required_capabilities", "resources", "dependencies", "workspace_mode",
                       "task_kind", "due_at", "dag_run", "dag_node", "slot_id", "expected_collaboration_revision",
-                      "workspace_base_commit", "required_project_role"),
+                      "workspace_base_commit", "required_project_role", "write_paths"),
             ("task_id", "expected_revision", "request", "message", "agent_id", "budget"))
     task = _task(con, project_id, payload["task_id"])
     _revision(task, payload["expected_revision"])
@@ -523,6 +543,8 @@ def _enqueue(con, project_id, actor, payload):
                 "workspace_mode": mode, "task_kind": kind,
                 "workspace_base_commit": base_commit, "workspace_path": workspace_path,
                 "dag_run": payload.get("dag_run"), "dag_node": payload.get("dag_node")}
+    if "write_paths" in payload:
+        contract["write_paths"] = _write_paths(con, project_id, payload["write_paths"])
     approval_state, approver = _guard(con, project_id, actor)
     contract.update(approved_controller_id=actor, approved_controller_version=approver["version"],
                     approved_epoch=approval_state["controller_epoch"])
@@ -733,12 +755,17 @@ def _capacity(con, contract, agent, exclude_assignment=None):
     if len(claims) >= limit:
         raise service.ServiceError("All workflow execution slots are occupied; wait for Controller closure.")
     request = contract["request"]
+    from workspace_manager import _no_links
+    for path in contract.get("write_paths", ()):
+        _no_links(path)
     for attempt, claim in claims:
         old = claim["request"]
         if old["worker"]["role"] == request["worker"]["role"]:
             raise service.ServiceError("This worker still owns an open Assignment: " + attempt)
         paths = [old["cwd"], old["worker"]["expected_identity"]["launch_cwd"]]
         wanted = [request["cwd"], request["worker"]["expected_identity"]["launch_cwd"]]
+        paths.extend(claim.get("write_paths", ()))
+        wanted.extend(contract.get("write_paths", ()))
         if any(legacy.overlap(a, b) for a in paths for b in wanted):
             raise service.ServiceError("A directory is still claimed by " + attempt)
     for dimension, config_key in (("host", "per_host"), ("harness", "per_harness")):
@@ -932,10 +959,12 @@ def _intent(con, project_id, assignment_id):
     return assignment, dict(intent), json.loads(intent["contract_json"])
 
 
-def _runtime_open(state, actor, version, context, expected_epoch):
+def _runtime_open(state, actor, version, context, expected_epoch, authorize=None):
     con = service._connect(service._db_path(state))
     try:
         con.execute("BEGIN IMMEDIATE")
+        if authorize is not None:
+            authorize(con)
         service._controller(con, actor, version, context)
         row = service._state_row(con)
         if type(expected_epoch) is not int or expected_epoch != row["controller_epoch"]:
@@ -1070,9 +1099,9 @@ def _send_gates(con, project_id, assignment, intent, contract, actor, version, e
     _idle(contract["request"], transport)
 
 
-def dispatch_assignment(state, assignment_id, actor, version, context="main", *, expected_epoch, transport=None):
+def dispatch_assignment(state, assignment_id, actor, version, context="main", *, expected_epoch, transport=None, authorize=None):
     """Attempt send once. A persisted attempted intent is never retried."""
-    con, project_id = _runtime_open(state, actor, version, context, expected_epoch)
+    con, project_id = _runtime_open(state, actor, version, context, expected_epoch, authorize)
     try:
         assignment, intent, contract = _intent(con, project_id, assignment_id)
         if intent["send_state"] != "ready":
@@ -1098,7 +1127,7 @@ def dispatch_assignment(state, assignment_id, actor, version, context="main", *,
     # so a controller handoff/freeze cannot race with submission.
     con = None
     try:
-        con, project_id = _runtime_open(state, actor, version, context, expected_epoch)
+        con, project_id = _runtime_open(state, actor, version, context, expected_epoch, authorize)
         assignment, intent, contract = _intent(con, project_id, assignment_id)
         if intent["send_state"] != "attempted":
             raise service.ServiceError("Intent changed before send; inspect, do not retry.")
@@ -1228,8 +1257,8 @@ def reconcile_in_transaction(con, project_id, actor, assignment_id, *, transport
             "claims_retained": True, "assignment": assignment_get(con, project_id, assignment_id)}
 
 
-def reconcile_assignment(state, assignment_id, actor, version, context="main", *, expected_epoch, transport=None):
-    con, project_id = _runtime_open(state, actor, version, context, expected_epoch)
+def reconcile_assignment(state, assignment_id, actor, version, context="main", *, expected_epoch, transport=None, authorize=None):
+    con, project_id = _runtime_open(state, actor, version, context, expected_epoch, authorize)
     try:
         result = reconcile_in_transaction(con, project_id, actor, assignment_id, transport=transport)
         con.commit()

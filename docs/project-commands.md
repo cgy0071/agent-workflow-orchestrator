@@ -34,4 +34,20 @@ The command returns the ledger project ID, the canonical root path digest and th
 
 For one secretary working with two projects, configure a separate state, bound root, credential and expected ID for each. The existing project-entry command prepares its own state per run. Those run IDs alone cannot group tasks from a long-lived project. This command reads an existing project domain and does not attach an existing task or authorize access to another project's materials.
 
-Further integration has three steps. First, submit tasks through their selected project's controller and coordinate any shared path and harness claims before dispatch. Next, reserve and reconcile each task's budget with that controller. Finally, on restart, resolve the saved project ID and read the original assignment, review and evidence before attempting further dispatch.
+### Schedule tasks in the same project
+
+For shared scheduling, point both tasks at the same enabled controller ledger, bound project root and project-wide controller credential. Register the workers, reviewer, capabilities and budget policy in that ledger first. The secretary calls the following command once per envelope (task.create, scheduler.enqueue, then scheduler.claim). Each envelope uses the existing service format with a stable command_id, expected_epoch, tool and payload. See the [scheduler contract](../references/awo-scheduler.md) for request fields.
+
+```powershell
+$domain = @("--state", $state, "--project-root", $project, "--token-file", $controllerToken, "--expected-project-id", $projectId)
+python scripts/awo_project.py schedule @domain command --file create.json
+python scripts/awo_project.py schedule @domain command --file enqueue.json
+python scripts/awo_project.py schedule @domain command --file claim.json
+python scripts/awo_project.py schedule @domain dispatch --assignment $assignment --epoch $epoch
+python scripts/awo_project.py schedule @domain status --task $task
+python scripts/awo_project.py schedule @domain reconcile --assignment $assignment --epoch $epoch
+```
+
+Queue requests can declare literal project-relative `write_paths`, for example `["src/report.md"]`. The scheduler checks these claims, working directories, worker capacity, requested resources and shared budget before reservation. The participating workers must declare the paths they intend to modify. Separate ledger files govern independent scheduling pools.
+
+Reuse the original command ID after an interrupted response. The ledger returns the original result. A WAITING result leaves the task queued. Use a fresh claim command ID after capacity changes. On restart, read the original task and assignment, then reconcile any attempted send. Review and close the assignment through the existing AWO review flow. Closure releases its claims. A delivered result alone retains them.

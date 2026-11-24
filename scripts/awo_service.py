@@ -532,12 +532,14 @@ def _command_envelope(envelope, allowed=("task.create", "task.update", "schedule
     return envelope
 
 
-def execute_command(state, actor, version, context, envelope):
+def execute_command(state, actor, version, context, envelope, *, authorize=None):
     env = _command_envelope(envelope)
     path = _db_path(state)
     con = _connect(path)
     try:
         con.execute("BEGIN IMMEDIATE")
+        if authorize is not None:
+            authorize(con)
         binding = _controller(con, actor, version, context)
         if not schema_present(con):
             raise ServiceError("v2 schema is absent; run migrate --apply first")

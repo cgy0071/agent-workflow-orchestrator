@@ -34,4 +34,20 @@ python scripts/awo_project.py domain --state "$state" --project-root "$project" 
 
 同一秘书服务两个项目时，为每个项目分别配置状态目录、绑定根、凭据和预期 ID。现有项目任务入口按次创建运行状态，仅凭运行 ID 无法归集长期项目的多个任务。本命令读取已有项目身份，跨项目材料仍需单独授权。
 
-后续集成分三步。先将任务交给目标项目的控制者，派发前协调共享目录及 Harness 的占用。然后由该控制者预留和核销任务预算。最后验证重启恢复，按原项目 ID 查询对应的 assignment、评审和证据，再决定是否继续派工。
+### 在同一项目中调度多个任务
+
+需要共享调度时，两个任务使用同一个已启用的控制账本、绑定的项目根和项目级控制者凭据。先在该账本登记执行者、评审者、能力与预算策略。秘书依次调用 task.create、scheduler.enqueue 和 scheduler.claim，每个请求沿用服务格式，包含稳定的 command_id、expected_epoch、tool 和 payload。请求字段见[调度契约](../references/awo-scheduler.zh-CN.md)。
+
+```powershell
+$domain = @("--state", $state, "--project-root", $project, "--token-file", $controllerToken, "--expected-project-id", $projectId)
+python scripts/awo_project.py schedule @domain command --file create.json
+python scripts/awo_project.py schedule @domain command --file enqueue.json
+python scripts/awo_project.py schedule @domain command --file claim.json
+python scripts/awo_project.py schedule @domain dispatch --assignment $assignment --epoch $epoch
+python scripts/awo_project.py schedule @domain status --task $task
+python scripts/awo_project.py schedule @domain reconcile --assignment $assignment --epoch $epoch
+```
+
+入队请求可用 `write_paths` 声明要写入的项目相对路径，如 `["src/report.md"]`。调度器在预留前检查申报路径、工作目录、执行者容量、指定资源和共享预算。各执行者需申报计划修改的路径。不同账本各自管理独立的调度池。
+
+响应中断后重用原命令 ID，可取回原结果。WAITING 表示任务仍在队列，待容量变化后用新的命令 ID 再尝试认领。客户端重启后，先查询原任务和 assignment，再核对已尝试派发的运行。验收和关闭沿用 AWO 评审流程。任务交付后仍保留占用，关闭后释放。
