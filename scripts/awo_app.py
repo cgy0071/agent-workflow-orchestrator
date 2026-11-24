@@ -47,15 +47,18 @@ def profile(argv):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("capabilities", "profile", "maid", "prepare", "start", "status", "recover"))
+    parser.add_argument("operation", choices=("capabilities", "profile", "maid", "prepare", "start", "status", "recover", "schedule"))
     operation = parser.parse_args(argv[:1]).operation
     if operation == "capabilities":
         argparse.ArgumentParser(prog="awo_app.py capabilities").parse_args(argv[1:])
-        print(json.dumps({"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover"]}))
+        print(json.dumps({"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule"]}))
         return 0
     if operation in ("prepare", "start", "status", "recover"):
         from awo_app_operations import main as operations_main
         return operations_main(operation, argv[1:])
+    if operation == "schedule":
+        from project_schedule import main as schedule_main
+        return schedule_main(argv[1:])
     if operation == "profile":
         return profile(argv[1:])
     app = Path(__file__).resolve().parents[1] / "apps" / "maid" / "maid.py"

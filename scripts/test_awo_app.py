@@ -18,7 +18,7 @@ class AppBoundaryTests(unittest.TestCase):
             proc = subprocess.run([sys.executable, "-I", "-B",
                                    str(Path(awo_app.__file__).resolve()), "capabilities"],
                                   cwd=td, capture_output=True, text=True, check=True)
-            self.assertEqual(json.loads(proc.stdout), {"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover"]})
+            self.assertEqual(json.loads(proc.stdout), {"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule"]})
             self.assertFalse(list(Path(td).iterdir()))
 
     def test_profile_exclusive_and_scoped(self):
@@ -169,3 +169,23 @@ class AppBoundaryTests(unittest.TestCase):
                 response = json.loads(proc.stdout)
                 self.assertIn(response["state"], ("uncertain", "complete", "refused"))
                 self.assertEqual(jobs(), original)
+
+    def test_public_shared_schedule_reads_existing_task_and_checks_identity(self):
+        from test_project_schedule import SharedSchedulingTests
+        shared = SharedSchedulingTests()
+        shared.setUp()
+        self.addCleanup(shared.doCleanups)
+        shared.enqueue("T-PUBLIC", "executor")
+        base = [sys.executable, "-B", awo_app.__file__, "schedule", "--state", str(shared.f.state),
+                "--project-root", str(shared.f.root), "--token-file", str(shared.token_path),
+                "--expected-project-id"]
+        def run(project):
+            return subprocess.run([*base, project, "status", "--task", "T-PUBLIC"],
+                                  capture_output=True, text=True, timeout=60)
+        good = run(shared.f.project)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        result = json.loads(good.stdout)
+        self.assertEqual((result["project_id"], result["task_id"]), (shared.f.project, "T-PUBLIC"))
+        denied = run("other-project")
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertFalse(denied.stdout.strip())
