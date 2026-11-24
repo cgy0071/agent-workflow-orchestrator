@@ -13,7 +13,7 @@ AWO 可以独立使用。如果希望通过秘书交办任务，AWO v1.1.1 也�
 
 ## 让 AI 帮你快速部署
 
-把下面整段复制给 Codex、Claude Code、agy 或 Cursor 等助手：
+把下面整段复制给 Codex、Claude Code、Antigravity CLI (agy) 或 Cursor 等助手：
 
 ```text
 先检查 Git、Python 3.10+ 的路径和版本，并列出已安装的客户端（只查路径或版本，不启动会话）。缺少必需工具时告诉我，不要自行安装。

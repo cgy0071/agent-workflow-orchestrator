@@ -13,7 +13,7 @@ Let one AI agent plan and review while another does the work. You set the goal a
 
 ## Let your AI set this up
 
-Copy this prompt into your assistant (for example, Codex, Claude Code, agy or Cursor):
+Copy this prompt into your assistant (for example, Codex, Claude Code, Antigravity CLI (agy) or Cursor):
 
 ```text
 Check the paths and versions of Git and Python (3.10+). List installed clients by path or version without starting a session. Report missing prerequisites instead of installing them.
