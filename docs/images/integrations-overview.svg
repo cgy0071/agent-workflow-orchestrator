@@ -12,23 +12,23 @@ text{font-family:-apple-system,"Segoe UI","Noto Sans","Helvetica Neue",Arial,"Mi
 .mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace}
 .agent{fill:#ddf4ff;stroke:#54aeff}
 .ledger{fill:#eaf0fc;stroke:#7482aa}
-.knowledge{fill:#fbefff;stroke:#a475ce}
+
 .adapter{fill:#dafbe1;stroke:#4ac26b}
-.dashboard{fill:#ddf8f7;stroke:#32958f}
+
 .inbox{fill:#fff1e5;stroke:#c56b29}
 @media (prefers-color-scheme: dark){
 .agent{fill:#0c2d6b;stroke:#1f6feb}
 .ledger{fill:#252b42;stroke:#a4add0}
-.knowledge{fill:#2c183e;stroke:#b083db}
+
 .adapter{fill:#0f2d1a;stroke:#2ea043}
-.dashboard{fill:#063637;stroke:#45b8ae}
+
 .inbox{fill:#402411;stroke:#e79350}
 }
 </style><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
 <rect x=".5" y=".5" width="959" height="509" rx="12" class="bg"/>
 <text x="32" y="42" font-size="25" class="t" text-anchor="start" font-weight="600">Where optional tools connect</text>
 <text x="32" y="68" font-size="15" class="m" text-anchor="start">Document grants, client adapters, dashboards and inboxes support the execution workflow.</text>
-<rect x="30" y="110" width="195" height="80" rx="9" class="knowledge"/>
+<rect x="30" y="110" width="195" height="80" rx="9" class="adapter"/>
 <text x="46" y="136" font-size="17" class="t" text-anchor="start" font-weight="600">Knowledge base</text>
 <text x="46" y="159" font-size="14" class="m" text-anchor="start">Read granted documents.</text>
 <text x="46" y="177" font-size="14" class="m" text-anchor="start">Revoke to stop new reads.</text>
@@ -36,7 +36,7 @@ text{font-family:-apple-system,"Segoe UI","Noto Sans","Helvetica Neue",Arial,"Mi
 <text x="281" y="136" font-size="17" class="t" text-anchor="start" font-weight="600">Client adapters</text>
 <text x="281" y="159" font-size="14" class="m" text-anchor="start">Connect supported clients</text>
 <text x="281" y="177" font-size="14" class="m" text-anchor="start">for execution or review.</text>
-<rect x="500" y="110" width="195" height="80" rx="9" class="dashboard"/>
+<rect x="500" y="110" width="195" height="80" rx="9" class="ledger"/>
 <text x="516" y="136" font-size="17" class="t" text-anchor="start" font-weight="600">Status dashboard</text>
 <text x="516" y="159" font-size="14" class="m" text-anchor="start">Read recorded progress.</text>
 <text x="516" y="177" font-size="14" class="m" text-anchor="start">No approval authority.</text>
@@ -68,17 +68,13 @@ text{font-family:-apple-system,"Segoe UI","Noto Sans","Helvetica Neue",Arial,"Mi
 <g id="legend">
 <path d="M32 425 H928" class="ar" opacity=".35"/>
 <text x="32" y="455" class="t" font-size="15" font-weight="600">Color key</text>
-<rect x="148" y="442" width="17" height="17" rx="4" class="agent"/>
-<text x="173" y="456" class="t" font-size="14">AI role</text>
-<rect x="398" y="442" width="17" height="17" rx="4" class="ledger"/>
-<text x="423" y="456" class="t" font-size="14">Task record</text>
-<rect x="648" y="442" width="17" height="17" rx="4" class="knowledge"/>
-<text x="673" y="456" class="t" font-size="14">Knowledge source</text>
-<rect x="148" y="474" width="17" height="17" rx="4" class="adapter"/>
-<text x="173" y="488" class="t" font-size="14">Client adapter</text>
-<rect x="398" y="474" width="17" height="17" rx="4" class="dashboard"/>
-<text x="423" y="488" class="t" font-size="14">Status view</text>
-<rect x="648" y="474" width="17" height="17" rx="4" class="inbox"/>
-<text x="673" y="488" class="t" font-size="14">Notification channel</text>
+<rect x="148" y="441" width="17" height="17" rx="4" class="agent"/>
+<text x="173" y="455" class="t" font-size="14">Core AI roles</text>
+<rect x="533" y="441" width="17" height="17" rx="4" class="ledger"/>
+<text x="558" y="455" class="t" font-size="14">Local state and monitoring</text>
+<rect x="148" y="473" width="17" height="17" rx="4" class="adapter"/>
+<text x="173" y="487" class="t" font-size="14">External capabilities</text>
+<rect x="533" y="473" width="17" height="17" rx="4" class="inbox"/>
+<text x="558" y="487" class="t" font-size="14">Messages and alerts</text>
 </g>
 </svg>

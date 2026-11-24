@@ -12,23 +12,23 @@ text{font-family:-apple-system,"Segoe UI","Noto Sans","Helvetica Neue",Arial,"Mi
 .mono{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace}
 .agent{fill:#ddf4ff;stroke:#54aeff}
 .ledger{fill:#eaf0fc;stroke:#7482aa}
-.knowledge{fill:#fbefff;stroke:#a475ce}
+
 .adapter{fill:#dafbe1;stroke:#4ac26b}
-.dashboard{fill:#ddf8f7;stroke:#32958f}
+
 .inbox{fill:#fff1e5;stroke:#c56b29}
 @media (prefers-color-scheme: dark){
 .agent{fill:#0c2d6b;stroke:#1f6feb}
 .ledger{fill:#252b42;stroke:#a4add0}
-.knowledge{fill:#2c183e;stroke:#b083db}
+
 .adapter{fill:#0f2d1a;stroke:#2ea043}
-.dashboard{fill:#063637;stroke:#45b8ae}
+
 .inbox{fill:#402411;stroke:#e79350}
 }
 </style><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
 <rect x=".5" y=".5" width="959" height="509" rx="12" class="bg"/>
 <text x="32" y="42" font-size="25" class="t" text-anchor="start" font-weight="600">可选工具接在哪里？</text>
 <text x="32" y="68" font-size="15" class="m" text-anchor="start">知识授权、客户端、状态面板与收件箱围绕执行流程工作。</text>
-<rect x="30" y="110" width="195" height="80" rx="9" class="knowledge"/>
+<rect x="30" y="110" width="195" height="80" rx="9" class="adapter"/>
 <text x="46" y="136" font-size="17" class="t" text-anchor="start" font-weight="600">知识库</text>
 <text x="46" y="159" font-size="14" class="m" text-anchor="start">只读获准文档</text>
 <text x="46" y="177" font-size="14" class="m" text-anchor="start">撤权后拒绝再次读取</text>
@@ -36,7 +36,7 @@ text{font-family:-apple-system,"Segoe UI","Noto Sans","Helvetica Neue",Arial,"Mi
 <text x="281" y="136" font-size="17" class="t" text-anchor="start" font-weight="600">客户端适配器</text>
 <text x="281" y="159" font-size="14" class="m" text-anchor="start">调用受支持的客户端</text>
 <text x="281" y="177" font-size="14" class="m" text-anchor="start">可用于执行或审核</text>
-<rect x="500" y="110" width="195" height="80" rx="9" class="dashboard"/>
+<rect x="500" y="110" width="195" height="80" rx="9" class="ledger"/>
 <text x="516" y="136" font-size="17" class="t" text-anchor="start" font-weight="600">状态面板</text>
 <text x="516" y="159" font-size="14" class="m" text-anchor="start">从任务记录读取进度</text>
 <text x="516" y="177" font-size="14" class="m" text-anchor="start">不改变审核结论</text>
@@ -68,17 +68,13 @@ text{font-family:-apple-system,"Segoe UI","Noto Sans","Helvetica Neue",Arial,"Mi
 <g id="legend">
 <path d="M32 425 H928" class="ar" opacity=".35"/>
 <text x="32" y="455" class="t" font-size="15" font-weight="600">颜色图例</text>
-<rect x="148" y="442" width="17" height="17" rx="4" class="agent"/>
-<text x="173" y="456" class="t" font-size="14">AI 角色</text>
-<rect x="398" y="442" width="17" height="17" rx="4" class="ledger"/>
-<text x="423" y="456" class="t" font-size="14">任务记录</text>
-<rect x="648" y="442" width="17" height="17" rx="4" class="knowledge"/>
-<text x="673" y="456" class="t" font-size="14">知识来源</text>
-<rect x="148" y="474" width="17" height="17" rx="4" class="adapter"/>
-<text x="173" y="488" class="t" font-size="14">客户端适配</text>
-<rect x="398" y="474" width="17" height="17" rx="4" class="dashboard"/>
-<text x="423" y="488" class="t" font-size="14">状态视图</text>
-<rect x="648" y="474" width="17" height="17" rx="4" class="inbox"/>
-<text x="673" y="488" class="t" font-size="14">通知通道</text>
+<rect x="148" y="441" width="17" height="17" rx="4" class="agent"/>
+<text x="173" y="455" class="t" font-size="14">核心 AI 角色</text>
+<rect x="533" y="441" width="17" height="17" rx="4" class="ledger"/>
+<text x="558" y="455" class="t" font-size="14">本地状态与观测</text>
+<rect x="148" y="473" width="17" height="17" rx="4" class="adapter"/>
+<text x="173" y="487" class="t" font-size="14">外部能力接入</text>
+<rect x="533" y="473" width="17" height="17" rx="4" class="inbox"/>
+<text x="558" y="487" class="t" font-size="14">消息与提醒</text>
 </g>
 </svg>
