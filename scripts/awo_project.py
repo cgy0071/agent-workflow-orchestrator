@@ -2,6 +2,7 @@
 import sys
 
 COMMANDS = {
+    "materials": ("material_packets", "Search authorized document and task-source excerpts"),
     "schedule": ("project_schedule", "Queue, dispatch and inspect tasks in a shared project ledger"),
     "domain": ("project_domain", "Resolve a bound project identity across source revisions"),
     "role": ("project_roles", "Manage project-scoped roles and inspect authorization"),
