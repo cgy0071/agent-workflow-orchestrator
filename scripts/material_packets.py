@@ -10,6 +10,7 @@ import unicodedata
 
 from service_access import principal
 
+import material_glossary
 from material_http_embeddings import EmbeddingError, http_scorer
 from mcp_gateway import ServiceBackend, read_token_file
 from project_cli_inputs import check_paths
@@ -157,6 +158,9 @@ def main(argv=None):
     p.add_argument("--provider", choices=("lexical", "lsa", "http"), default="lsa")
     p.add_argument("--top-k", type=int, default=5)
     p.add_argument("--expand", action="append", default=[])
+    p.add_argument("--strict-glossary", action="store_true")
+    p.add_argument("--no-auto-expand", action="store_true")
+    p.add_argument("--expand-for", nargs=2, action="append", default=[], metavar=("SOURCE", "TERM"))
     p.add_argument("--embedding-url")
     p.add_argument("--embedding-model")
     p.add_argument("--allow-remote-embedding", action="store_true")
@@ -164,7 +168,6 @@ def main(argv=None):
     try:
         if not a.query.strip() or len(a.expand) > 12 or any(not x.strip() or len(x) > 96 for x in a.expand):
             raise ValueError("invalid query expansion")
-        query = " ".join([a.query, *a.expand])
         scorer = score
         if a.provider == "http":
             scorer = http_scorer(a.embedding_url, a.embedding_model, a.allow_remote_embedding)
@@ -187,10 +190,14 @@ def main(argv=None):
         if len({(p["project_id"], p["principal_id"], p.get("agent_id"))
                 for p in identities}) != 1:
             raise ValueError("mixed recipient identities")
+        configured = material_glossary.rules(a.state, identities[0]["project_id"])
+        query, expansion = material_glossary.expand(a.query, configured, a.expand, a.expand_for,
+                                                   a.strict_glossary, not a.no_auto_expand)
         if auto:
             refs = discover(api, creds, a.task)
         res = packet(lambda k, key: load(api, creds[k], k, key, a.task), refs, query,
                      a.provider, a.top_k, scorer=scorer, automatic=auto)
+        res["expansion"] = expansion
         if auto and discover(api, creds, a.task) != refs:
             raise ValueError("discovery changed during search")
     except EmbeddingError as exc:

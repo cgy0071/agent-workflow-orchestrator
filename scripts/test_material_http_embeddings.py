@@ -44,7 +44,7 @@ class EmbeddingTests(unittest.TestCase):
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                base = ["--state", str(env.state), "--project-root", str(env.root), "--doc-token",
+                base = ["--state", str(env.state), "--project-root", str(env.root), "--no-auto-expand", "--doc-token",
                         str(tokenfile), "--query", query]
                 online = ["--provider", "http", "--embedding-url",
                           "http://127.0.0.1:%d/v1/embeddings" % server.server_port,

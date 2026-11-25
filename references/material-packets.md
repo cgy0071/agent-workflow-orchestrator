@@ -76,3 +76,30 @@ Cross-language quality depends on the selected model.
 Before sending, AWO checks the source snapshots again and aborts on change.
 Sequential authority checks and HTTP delivery are not an atomic transaction:
 revocation stops subsequent queries but cannot recall text already sent.
+
+## Project terminology and secretary suggestions
+
+The operator may create a UTF-8 JSON file at
+`STATE/glossaries/PROJECT_ID.json`. Use the authenticated project's ID (also
+returned in document citations), not its directory name. Example:
+
+```json
+{"推理吞吐量": {"terms": ["inference throughput"], "avoid": ["bandwidth"]}}
+```
+
+Keys are local aliases; use separate entries for alternative names. Matching uses
+normalized case and whitespace, with longer overlapping aliases taking precedence.
+All designated terms are included. For matched entries, avoid phrases are removed
+from the query and rejected in suggestions; conflicting designated terms fail the query.
+Avoid is a translation rule, not a ban on passages containing that word.
+
+For uncovered text the secretary has a small built-in offline bilingual vocabulary.
+It does not contact a model or guess unknown translations. A calling secretary may
+supply additional translations with `--expand-for SOURCE TERM`; SOURCE must occur
+in uncovered query text. Legacy unscoped `--expand` suggestions are used only if
+no glossary alias matched. At most 12 secretary terms are applied.
+Use `--strict-glossary` to ignore all secretary suggestions, or `--no-auto-expand`
+to turn off only the built-in vocabulary. With no glossary matches strict mode
+searches the original query. Successful packets include the applied terms in
+`expansion.glossary` and `expansion.secretary`. These lists describe how the query
+was formed, not what the paper claims. Excerpts and citations are unchanged.
