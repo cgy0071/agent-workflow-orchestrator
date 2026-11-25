@@ -6,6 +6,10 @@ Entries are grouped by the date changes reached `main`; pull request numbers lin
 
 ## Unreleased
 
+### v1.2.0 (pending release)
+
+Search authorized project documents and research excerpts by topic, without IDs. Extract Markdown and text PDFs read-only; rank locally or explicitly enable a compatible embeddings endpoint. Bilingual expansion and a project glossary can constrain translations. See [material search](references/material-packets.md).
+
 ## v1.1.1
 
 Secretary reports use plain language and explain unfamiliar terms. Added Windows testing and release troubleshooting.

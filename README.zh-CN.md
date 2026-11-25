@@ -6,6 +6,8 @@ AWO 可以独立使用。如果希望通过秘书交办任务，AWO v1.1.1 也�
 
 让一个 AI 负责规划和验收，另一个 AI 负责动手干活。你只需要定好目标、划定允许修改的范围；任务通过本地台账一步步交接，**未经独立审核的改动，一律不算完成**。
 
+**v1.2.0 候选版本：** 按主题检索已获授权的项目文档和科研摘录，无需指定 ID。可只读提取 Markdown 与文本型 PDF，在本地排序，或显式启用兼容的向量服务。双语扩展与项目术语表可约束译法。见[材料检索指南](references/material-packets.md)。
+
 ## 它是怎么运作的
 
 ![工作流概览：你给出目标，Planner 只派发一次，Executor 交付文件，monitor_task.py 核对，台账记录一条收件箱事件，Reviewer 作出结论](docs/images/workflow-overview.zh-CN.svg)

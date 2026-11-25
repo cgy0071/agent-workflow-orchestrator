@@ -6,6 +6,8 @@ English | [Chinese](README.zh-CN.md)
 
 Let one AI agent plan and review while another does the work. You set the goal and define what is allowed; tasks move between agents through a local ledger, and **nothing counts as done until it has been independently reviewed**.
 
+**v1.2.0 release candidate:** Search authorized project documents and research excerpts by topic, without IDs. Extract Markdown and text PDFs read-only; rank locally or explicitly enable a compatible embeddings endpoint. Bilingual expansion and a project glossary can constrain translations. See [material search](references/material-packets.md).
+
 ## How it works
 
 ![Workflow overview: you give a goal, the Planner dispatches once, the Executor delivers files, monitor_task.py checks them, the ledger records one inbox event, and the Reviewer decides](docs/images/workflow-overview.svg)
