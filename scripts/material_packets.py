@@ -10,6 +10,7 @@ import unicodedata
 
 from service_access import principal
 
+from material_http_embeddings import EmbeddingError, http_scorer
 from mcp_gateway import ServiceBackend, read_token_file
 from project_cli_inputs import check_paths
 from project_retrieve import read_document
@@ -128,6 +129,10 @@ def packet(reader, refs, query, provider="lsa", limit=5, *, scorer=score, automa
         raise ValueError("excerpt count outside bounds")
     if type(limit) is not int or not 1 <= limit <= 32:
         raise ValueError("invalid result limit")
+    if provider == "http":
+        for ref in refs:
+            if reader(*ref) != snapshots[ref]:
+                raise ValueError("source changed before embedding")
     scores = scorer([t for t, _ in items], query, provider) if items else []
     if len(scores) != len(items) or not all(math.isfinite(s) for s in scores):
         raise ValueError("invalid provider scores")
@@ -149,10 +154,22 @@ def main(argv=None):
         p.add_argument("--"+name, action="append", default=[])
     for name in ("doc-token", "kb-token", "task"):
         p.add_argument("--"+name)
-    p.add_argument("--provider", choices=("lexical", "lsa"), default="lsa")
+    p.add_argument("--provider", choices=("lexical", "lsa", "http"), default="lsa")
     p.add_argument("--top-k", type=int, default=5)
+    p.add_argument("--expand", action="append", default=[])
+    p.add_argument("--embedding-url")
+    p.add_argument("--embedding-model")
+    p.add_argument("--allow-remote-embedding", action="store_true")
     a = p.parse_args(argv)
     try:
+        if not a.query.strip() or len(a.expand) > 12 or any(not x.strip() or len(x) > 96 for x in a.expand):
+            raise ValueError("invalid query expansion")
+        query = " ".join([a.query, *a.expand])
+        scorer = score
+        if a.provider == "http":
+            scorer = http_scorer(a.embedding_url, a.embedding_model, a.allow_remote_embedding)
+        elif a.embedding_url or a.embedding_model or a.allow_remote_embedding:
+            raise EmbeddingError("Embedding settings require --provider http.")
         check_paths(a.state, a.project_root)
         api = ServiceBackend(a.state, a.project_root, extensions_enabled=True)
         refs = [(k, key) for k in ("doc", "note", "pdf") for key in getattr(a, k)]
@@ -172,10 +189,13 @@ def main(argv=None):
             raise ValueError("mixed recipient identities")
         if auto:
             refs = discover(api, creds, a.task)
-        res = packet(lambda k, key: load(api, creds[k], k, key, a.task), refs, a.query,
-                     a.provider, a.top_k, automatic=auto)
+        res = packet(lambda k, key: load(api, creds[k], k, key, a.task), refs, query,
+                     a.provider, a.top_k, scorer=scorer, automatic=auto)
         if auto and discover(api, creds, a.task) != refs:
             raise ValueError("discovery changed during search")
+    except EmbeddingError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     except ImportError:
         print("Optional provider or plugin unavailable; check dependencies.", file=sys.stderr)
         return 2

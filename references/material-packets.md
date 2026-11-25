@@ -47,3 +47,32 @@ Document offsets count Unicode characters; plugin locators come from the registe
 source. Neither a ranking nor a matching hash verifies a scientific conclusion.
 Limits: 16 explicit inputs or 256 discovered sources, 256 passages, 8192 vocabulary terms; exceeding a limit fails the query without partial results. Narrow the selection
 on overflow. Zotero and persistent indexes are outside this increment.
+
+## Searching English papers from a Chinese query
+
+Without any service, the operator or secretary can supply optional translation
+terms, e.g. append `--provider lexical --expand "inference throughput" --expand "frames per second"`
+to the materials command above while keeping the original Chinese query. Expansion
+only affects ranking, never the corpus or citations. Terms are caller-supplied,
+not automatically translated. Up to 12 terms, 96 characters each; combined query
+and terms must fit the existing 512-character limit. Default LSA also accepts them.
+
+For multilingual embeddings, explicitly append these options (example for a
+locally configured Ollama endpoint with bge-m3 already available):
+
+    --provider http --embedding-url http://127.0.0.1:11434/v1/embeddings --embedding-model bge-m3
+
+For LM Studio use the endpoint and loaded model ID from your server. For an online
+service, specify its complete HTTPS embeddings URL and model ID, and explicitly
+add `--allow-remote-embedding` only if disclosure of the query and **all eligible
+passages**, not just the winners, to that destination is authorized. Set
+`AWO_EMBEDDING_API_KEY` in the process environment if the selected endpoint needs
+a bearer key; unset it when changing endpoints. The adapter sends no project tokens,
+citations or paths as metadata. It uses one POST, no redirects, proxies or automatic
+retries. Unavailable services and invalid vectors fail the query; rerun explicitly
+with lexical plus expansion for offline use. Ranking uses cosine similarity.
+Cross-language quality depends on the selected model.
+
+Before sending, AWO checks the source snapshots again and aborts on change.
+Sequential authority checks and HTTP delivery are not an atomic transaction:
+revocation stops subsequent queries but cannot recall text already sent.
