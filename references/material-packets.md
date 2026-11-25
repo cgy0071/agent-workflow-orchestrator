@@ -1,10 +1,12 @@
 # Search authorized research materials
 
-The operator can search named published documents and verified SRC excerpts together.
+The operator can search authorized published documents and verified SRC excerpts together.
 This local CLI displays material to the credential holder. Its output is not a grant
 to disclose it to another project or to inject it into a worker. Re-query at use time.
 It cannot retract previously printed text. MAID needs no change for its existing
 named-document requests.
+
+    python -B scripts/awo_project.py materials --state STATE --project-root PROJECT --doc-token DOC_TOKEN_FILE --kb-token TASK_TOKEN_FILE --task TASK_ID --query "inference throughput" --top-k 3
 
     python -B scripts/material_candidates.py sample.md
     python -B scripts/material_candidates.py sample.pdf
@@ -19,7 +21,9 @@ Candidates confer no authority. Repeated PDF quotes may fail the plugin's unique
 check: refine the excerpt before approval. PDF parsing assumes trusted local documents.
 
 The document service owns its published revisions. The plugin owns SRCs, policy and
-task-specific verification. Each reader obtains only explicitly selected material;
+task-specific verification. With no source IDs, discovery pages through visible, usable published documents and
+checks task-granted SRCs in the current project. Either credential can be used alone;
+supply --task with the KB credential. A single-document token cannot list its peers;
 both credentials for a mixed packet must identify the same project and recipient.
 All candidates are read again before emitting a result, because even a non-winning
 excerpt can influence the ranking. Reads are sequential, not an atomic transaction
@@ -35,8 +39,11 @@ enabled awo-kb deployment. Missing providers do not silently change rankings.
 A trusted local scorer can implement (passage_texts, query, provider_id) -> scores;
 never hand authorized material to a remote service without separate permission.
 
-Version 1 returns up to five excerpts with text hashes and source citations.
+By default the CLI returns up to five excerpts with relevance scores, text hashes and
+source citations. Use --top-k 1 through 32. No positive match yields an empty list.
+The LSA provider blends lexical and latent cosine similarity. Chinese characters and
+bigrams and English word trigrams permit partial matches; scores are not probabilities.
 Document offsets count Unicode characters; plugin locators come from the registered
 source. Neither a ranking nor a matching hash verifies a scientific conclusion.
-Limits: 16 explicit inputs, 256 passages, 8192 vocabulary terms; narrow the selection
+Limits: 16 explicit inputs or 256 discovered sources, 256 passages, 8192 vocabulary terms; exceeding a limit fails the query without partial results. Narrow the selection
 on overflow. Zotero and persistent indexes are outside this increment.

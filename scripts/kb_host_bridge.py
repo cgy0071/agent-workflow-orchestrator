@@ -182,6 +182,31 @@ def _binding(con, state, project_root, token, operation, task_id, deployed):
     return project, actor, task, reader
 
 
+def material_grants(state, project_root, token, task_id):
+    """Discover only this task's exact grants that are visible SRCs in its project."""
+    deployed = deployment(state)
+    if not deployed or 'kb.pull' not in deployed[1]:
+        raise PermissionError('source discovery unavailable')
+    with closing(service._connect(service._db_path(state), readonly=True)) as con:
+        con.execute('BEGIN')
+        project, actor, task, reader = _binding(con, state, project_root, token,
+                                                'kb.pull', task_id, deployed)
+        reader._scope(actor, project, task['profiles'])
+        grants = _config(state)['projects'][project]['tasks'][task_id]['source_grants'].get(actor, {})
+        refs = []
+        for kind, op in [('note', 'kb.evidence.text'), ('pdf', 'kb.evidence.pdf')]:
+            if op not in deployed[1]:
+                continue
+            for key in sorted(grants.get(op, {})):
+                try:
+                    row = reader.pull(actor, task, key)
+                except KeyError:
+                    continue
+                if row['type'] == 'SRC' and row['active'] and row['project'] == project:
+                    refs.append((kind, key))
+        return refs
+
+
 def call(state, project_root, token, operation, fields, deployed):
     if not deployed or operation not in deployed[1]:
         raise APIError('forbidden_role', 'KB operation unavailable')

@@ -91,17 +91,84 @@ class PacketTests(unittest.TestCase):
         d, t = env.root / "doc.token", env.root / "task.token"
         d.write_text(env.f.worker)
         t.write_text(bridge.token)
-        def run():
+        def run(*selection, query="verified evidence excerpt", limit=5):
             return subprocess.run([sys.executable, "-B", str(Path(m.__file__).with_name("awo_project.py")),
                                   "materials", "--state", str(env.state), "--project-root", str(env.root),
-                                  "--doc", doc["doc_id"], "--note", "S1", "--pdf", "S2", "--task", "T-A",
+                                  *selection, "--task", "T-A", "--top-k", str(limit),
                                   "--doc-token", str(d), "--kb-token", str(t), "--provider", "lexical",
-                                  "--query", "verified evidence excerpt"], capture_output=True, timeout=45)
-        p = run()
+                                  "--query", query], capture_output=True, timeout=45)
+        p = run("--doc", doc["doc_id"], "--note", "S1", "--pdf", "S2")
         self.assertEqual(p.returncode, 0, p.stderr)
         items = json.loads(p.stdout)["materials"]
         self.assertEqual({i["citation"]["authority"] for i in items}, {"awo", "awo-kb"})
         self.assertEqual(len(items), 3)
+        auto = run()
+        self.assertEqual(auto.returncode, 0, auto.stderr)
+        self.assertEqual(json.loads(auto.stdout)["materials"], items)
+        winner = run(query="excerp", limit=1)
+        self.assertEqual(json.loads(winner.stdout)["materials"][0]["citation"]["locator"], "p.1")
+        project = next(iter(bridge.cfg["projects"].values()))
+        del project["tasks"]["T-A"]["source_grants"][bridge.actor]["kb.evidence.pdf"]["S2"]
+        bridge.save()
+        again = run()
+        active = json.loads(again.stdout)["materials"]
+        self.assertEqual(len(active), 2)
+        self.assertFalse(any(i["citation"].get("record_id") == "S2" for i in active))
+        self.assertEqual([i["relevance"] for i in active], sorted(
+            (i["relevance"] for i in active), reverse=True))
         d.write_text(env.f.other)
         p = run()
         self.assertEqual((p.returncode, p.stdout), (2, b""))
+
+    def test_chinese_topic_discovery_excludes_unpublished_and_respects_entity_scope(self):
+        from test_project_retrieve import ProjectRetrieveTests
+        from mcp_gateway import ServiceBackend
+        fixture = ProjectRetrieveTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        env = fixture.env
+        api = ServiceBackend(env.state, env.root, extensions_enabled=True)
+        ref = fixture.publish("\u63a8\u7406\u541e\u5410\u7387 608 FPS")
+        other = fixture.publish("unrelated")
+        draft = env.doc()["doc_id"]
+        creds = {"doc": env.f.worker}
+        refs = m.discover(api, creds, None)
+        self.assertEqual(set(refs), {("doc", ref), ("doc", other)})
+        self.assertNotIn(("doc", draft), refs)
+        items = m.packet(lambda k, key: m.load(api, creds[k], k, key, None), refs,
+                         "\u60f3\u4e86\u89e3\u541e\u5410\u91cf", "lsa", 1, automatic=True)["materials"]
+        self.assertEqual(items[0]["citation"]["doc_id"], ref)
+        scoped = env.f.issue("reviewer", "planner", knowledge_id=other)
+        self.assertEqual(m.discover(api, {"doc": scoped}, None), [("doc", other)])
+
+    def test_foreign_visible_src_excluded_before_scoring(self):
+        import hashlib
+        import json
+        import awo_service as service
+        from awo_kb import store
+        from test_kb_host_bridge import BridgeTests
+        b = BridgeTests()
+        b.setUp()
+        self.addCleanup(b.doCleanups)
+        project, cfg = next(iter(b.cfg["projects"].items()))
+        grants = cfg["tasks"]["T-A"]["source_grants"]
+        local = b.call("kb.pull", record_id="S1")
+        task = json.loads(b.f.f.rows("SELECT body FROM v2_task WHERE task_id='T-A'")[0]["body"])["kb_task"]
+        spec = grants[b.actor]["kb.evidence.text"]["S1"]
+        pin = store._append(b.f.root / "vault", dict(id="FOREIGN", project="foreign", profiles=["core"],
+            type="SRC", author="External", locator="line 1", version="v1", quote=local["quote"],
+            byte_start=0, byte_end=len(local["quote"]), file_sha256=spec["sha256"]), task["kb_revision"])
+        task["kb_revision"] = pin
+        body = json.dumps({"kb_task": task})
+        service.execute_command(b.f.state, *b.f.f.actor, b.f.f.envelope("task.create",
+                                {"task_id": "T-B", "title": "fixture", "body": body}))
+        token = b.f.issue("worker", "executor", task_id="T-B")
+        b.policy["actors"][b.actor]["read"].append("foreign")
+        b.policy["projects"][project]["sources"].append("foreign")
+        cfg["tasks"]["T-B"] = {"body_sha256": hashlib.sha256(body.encode()).hexdigest(),
+                               "source_grants": {b.actor: {"kb.evidence.text": {"FOREIGN": spec, "S1": spec}}}}
+        b.save()
+        self.assertEqual(b.api.call(token, "kb.pull", {"task_id": "T-B", "record_id": "FOREIGN"})["project"], "foreign")
+        self.assertEqual(m.discover(b.api, {"note": token}, "T-B"), [("note", "S1")])
+        with self.assertRaises(PermissionError):
+            m.load(b.api, token, "note", "FOREIGN", "T-B")
