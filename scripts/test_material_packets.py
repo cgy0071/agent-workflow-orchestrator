@@ -145,8 +145,8 @@ class PacketTests(unittest.TestCase):
         import hashlib
         import json
         import awo_service as service
-        from awo_kb import store
         from test_kb_host_bridge import BridgeTests
+        from awo_kb import store
         b = BridgeTests()
         b.setUp()
         self.addCleanup(b.doCleanups)
