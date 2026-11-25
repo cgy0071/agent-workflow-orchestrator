@@ -1,12 +1,12 @@
 # Agent Workflow Orchestrator
 
-AWO 可以独立使用。如果希望通过秘书交办任务，AWO v1.1.1 也已与 MAID v0.2.1 联测通过。
+AWO 可以独立使用。如果希望通过秘书交办任务，AWO v1.2.0 也已与 MAID v0.2.1 联测通过。
 
 [English](README.md) | 中文
 
 让一个 AI 负责规划和验收，另一个 AI 负责动手干活。你只需要定好目标、划定允许修改的范围；任务通过本地台账一步步交接，**未经独立审核的改动，一律不算完成**。
 
-**v1.2.0 候选版本：** 按主题检索已获授权的项目文档和科研摘录，无需指定 ID。可只读提取 Markdown 与文本型 PDF，在本地排序，或显式启用兼容的向量服务。双语扩展与项目术语表可约束译法。见[材料检索指南](references/material-packets.md)。
+**v1.2.0 新功能：** 按主题检索已获授权的项目文档和科研摘录，无需指定 ID。可只读提取 Markdown 与文本型 PDF，在本地排序，或显式启用兼容的向量服务。双语扩展与项目术语表可约束译法。见[材料检索指南](references/material-packets.md)。
 
 ## 它是怎么运作的
 
@@ -35,7 +35,7 @@ AWO 可以独立使用。如果希望通过秘书交办任务，AWO v1.1.1 也�
 ```text
 先检查 Git、Python 3.10+ 的路径和版本，并列出已安装的客户端（只查路径或版本，不启动会话）。缺少必需工具时告诉我，不要自行安装。
 使用我指定的安装目录；如果没给目录，先问我。只在新的子目录中克隆，不覆盖现有文件。
-从 https://github.com/cgy0071/agent-workflow-orchestrator.git 克隆 v1.1.1；不用安装 MAID。进入新克隆，用已检查的 Python 运行以下两条命令。第一条只在新的演示目录生成模拟任务，第二条只读查询：
+从 https://github.com/cgy0071/agent-workflow-orchestrator.git 克隆 v1.2.0；不用安装 MAID。进入新克隆，用已检查的 Python 运行以下两条命令。第一条只在新的演示目录生成模拟任务，第二条只读查询：
 python -B scripts/demo_scheduler.py --directory runtime/first-run
 python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
 核对 OFFLINE_DEMO_PASS 以及 A、B、JOIN 三项均为 accepted。

@@ -1,12 +1,12 @@
 # Agent Workflow Orchestrator
 
-AWO runs on its own. If you want a secretary interface, AWO v1.1.1 has also been tested with MAID v0.2.1.
+AWO runs on its own. If you want a secretary interface, AWO v1.2.0 has also been tested with MAID v0.2.1.
 
 English | [Chinese](README.zh-CN.md)
 
 Let one AI agent plan and review while another does the work. You set the goal and define what is allowed; tasks move between agents through a local ledger, and **nothing counts as done until it has been independently reviewed**.
 
-**v1.2.0 release candidate:** Search authorized project documents and research excerpts by topic, without IDs. Extract Markdown and text PDFs read-only; rank locally or explicitly enable a compatible embeddings endpoint. Bilingual expansion and a project glossary can constrain translations. See [material search](references/material-packets.md).
+**New in v1.2.0:** Search authorized project documents and research excerpts by topic, without IDs. Extract Markdown and text PDFs read-only; rank locally or explicitly enable a compatible embeddings endpoint. Bilingual expansion and a project glossary can constrain translations. See [material search](references/material-packets.md).
 
 ## How it works
 
@@ -35,7 +35,7 @@ Copy this prompt into your assistant (for example, Codex, Claude Code, Antigravi
 ```text
 Check the paths and versions of Git and Python (3.10+). List installed clients by path or version without starting a session. Report missing prerequisites instead of installing them.
 Use my chosen setup directory; ask me for it if missing. Clone only into new subdirectories and never overwrite existing files.
-Clone tag v1.1.1 from https://github.com/cgy0071/agent-workflow-orchestrator.git. MAID is not required. From the new checkout, use the checked Python for both commands. The first creates disposable demo state; the second only reads it:
+Clone tag v1.2.0 from https://github.com/cgy0071/agent-workflow-orchestrator.git. MAID is not required. From the new checkout, use the checked Python for both commands. The first creates disposable demo state; the second only reads it:
 python -B scripts/demo_scheduler.py --directory runtime/first-run
 python -B scripts/workflow_control.py --state runtime/first-run/state status --summary --format text
 Check for OFFLINE_DEMO_PASS and verify that A, B and JOIN are all accepted.

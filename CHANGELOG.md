@@ -4,9 +4,7 @@ English | [Chinese](CHANGELOG.zh-CN.md)
 
 Entries are grouped by the date changes reached `main`; pull request numbers link to the details. Every change keeps the safety model: each task is sent once, approval prompts are never answered automatically, done means an independent recorded review, and configuration is not permission.
 
-## Unreleased
-
-### v1.2.0 (pending release)
+## v1.2.0
 
 Search authorized project documents and research excerpts by topic, without IDs. Extract Markdown and text PDFs read-only; rank locally or explicitly enable a compatible embeddings endpoint. Bilingual expansion and a project glossary can constrain translations. See [material search](references/material-packets.md).
 

@@ -87,6 +87,8 @@ returned in document citations), not its directory name. Example:
 {"\u63a8\u7406\u541e\u5410\u91cf": {"terms": ["inference throughput"], "avoid": ["bandwidth"]}}
 ```
 
+For a ready-to-copy example, use the [public machine learning glossary](../examples/glossary-ml-sample.json). Copy it to the project-specific JSON path above.
+
 Keys are local aliases; use separate entries for alternative names. Matching uses
 normalized case and whitespace, with longer overlapping aliases taking precedence.
 All designated terms are included. For matched entries, avoid phrases are removed

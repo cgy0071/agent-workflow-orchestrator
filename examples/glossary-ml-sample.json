@@ -1,0 +1,52 @@
+{
+  "训练后量化": {
+    "terms": [
+      "post-training quantization"
+    ]
+  },
+  "量化感知训练": {
+    "terms": [
+      "quantization-aware training"
+    ]
+  },
+  "知识蒸馏": {
+    "terms": [
+      "knowledge distillation"
+    ]
+  },
+  "反向传播": {
+    "terms": [
+      "backpropagation"
+    ]
+  },
+  "梯度消失": {
+    "terms": [
+      "vanishing gradients"
+    ]
+  },
+  "梯度爆炸": {
+    "terms": [
+      "exploding gradients"
+    ]
+  },
+  "过拟合": {
+    "terms": [
+      "overfitting"
+    ]
+  },
+  "正则化": {
+    "terms": [
+      "regularization"
+    ]
+  },
+  "自注意力": {
+    "terms": [
+      "self-attention"
+    ]
+  },
+  "批归一化": {
+    "terms": [
+      "batch normalization"
+    ]
+  }
+}
