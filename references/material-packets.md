@@ -84,7 +84,7 @@ The operator may create a UTF-8 JSON file at
 returned in document citations), not its directory name. Example:
 
 ```json
-{"推理吞吐量": {"terms": ["inference throughput"], "avoid": ["bandwidth"]}}
+{"\u63a8\u7406\u541e\u5410\u91cf": {"terms": ["inference throughput"], "avoid": ["bandwidth"]}}
 ```
 
 Keys are local aliases; use separate entries for alternative names. Matching uses
@@ -103,3 +103,9 @@ to turn off only the built-in vocabulary. With no glossary matches strict mode
 searches the original query. Successful packets include the applied terms in
 `expansion.glossary` and `expansion.secretary`. These lists describe how the query
 was formed, not what the paper claims. Excerpts and citations are unchanged.
+
+## Preserve quotations and original titles
+
+During terminology checks, polishing, or translation review, preserve direct quotations, titles in References or Bibliography, and original titles of external papers wherever they appear. Keep the source spelling, wording, capitalization, hyphens, and punctuation verbatim. Exclude these spans before applying glossary rules or bulk replacements, even if the source appears to contain an error.
+
+For example, keep `back-propagation` in a cited title even if the surrounding prose uses `backpropagation`. Place any labeled translation or editorial note outside the quoted text or original title.
