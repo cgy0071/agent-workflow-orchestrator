@@ -53,6 +53,18 @@ AWO 的各个模块围绕核心台账解耦设计，你可以按项目需要逐�
 
 ## 深入阅读
 
-- [完整安装、手动配置与全部文档索引](docs/setup.zh-CN.md)
-- [项目知识检索与术语表指南](references/material-packets.md)
+### 上手与实操
+- [手动安装、Windows 便携版与完整文档索引](docs/setup.zh-CN.md)
+- [面向已有仓库的项目入口（准备、独立审核、本地落地与恢复）](references/project-entry.zh-CN.md)
+- [第一次真实模型联动指南](references/first-real-run.zh-CN.md) ｜ [Git worktree 代码闭环](references/worktree-code-loop.zh-CN.md)
+- [窗口绑定、切换控制者与异常恢复](references/setup-and-switching.zh-CN.md)
+
+### 核心模块指南
+- [角色分工](references/roles.zh-CN.md) ｜ [任务与审核模板](references/task-and-review.zh-CN.md) ｜ [任务状态机](references/task-state-machine.zh-CN.md)
+- [后台监控、可视化状态面板、提醒与外部收件箱](references/monitoring.zh-CN.md)
+- [多客户端适配器（Codex / Claude / Pi / OMP / Herdr）](references/harness-adapters.zh-CN.md)
+- [项目知识检索、双语扩展与术语表](references/material-packets.md) ｜ [知识治理 API](references/awo-knowledge.zh-CN.md)
+
+### 排错与版本记录
 - [Windows 测试与发布排错指南](docs/troubleshooting-windows.zh-CN.md)
+- [更新记录（CHANGELOG）](CHANGELOG.zh-CN.md)

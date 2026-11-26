@@ -53,5 +53,17 @@ Report the demo results and how to start managing my own project, then wait for 
 
 ## Further reading
 
-- [Manual setup and full documentation index](docs/setup.md)
-- [Project material search and glossaries](references/material-packets.md)
+### Getting started and real runs
+- [Manual setup, Windows portable downloads, and full documentation index](docs/setup.md)
+- [Project entry for existing repositories (prepare, review, local landing, recovery)](references/project-entry.md)
+- [First real model run](references/first-real-run.md) | [Git worktree code loop](references/worktree-code-loop.md)
+- [Window setup, controller switching, and recovery](references/setup-and-switching.md)
+
+### Core module guides
+- [Roles](references/roles.md) | [Task and review templates](references/task-and-review.md) | [Task state machine](references/task-state-machine.md)
+- [Background monitoring, dashboard, alerts, and Owner intake](references/monitoring.md)
+- [Client adapters (Codex, Claude, Pi, OMP, Herdr)](references/harness-adapters.md)
+- [Project material search, bilingual expansion, and glossaries](references/material-packets.md) | [Knowledge governance API](references/awo-knowledge.md)
+
+### Release history
+- [Changelog](CHANGELOG.md)
