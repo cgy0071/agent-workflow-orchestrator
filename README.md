@@ -2,69 +2,56 @@
 
 English | [Chinese](README.zh-CN.md)
 
-AWO coordinates work between AI agents. You set the goal and scope. A Planner assigns the work, an Executor delivers it, and an independent Reviewer checks the evidence. A local ledger records each step. AWO works on its own or with an optional secretary such as MAID.
+Coordinating multiple AI agents on real code or research projects usually breaks down in three ways: agents edit outside their scope, workers declare victory without real checks, and task state gets lost across terminals. **AWO is a local multi-agent workflow and review engine**: one agent plans, another executes, and an independent reviewer decides based on recorded evidence. **Every guardrail is enforced by local scripts and a ledger, not by prompts alone.**
 
-## How it works
+> AWO works completely on its own, or alongside an optional project secretary such as [MAID](https://github.com/cgy0071/MAID).
+
+## Core workflow
 
 ![From request to independent review](docs/images/workflow-overview.svg)
 
-The Planner sends each task once. A monitor reports delivery; the Reviewer accepts it, requests repairs or rejects it. Independent tasks can run in parallel, while dependent steps wait for acceptance.
+You set the goal and allowed file scope. The **Planner** writes a clear task spec and dispatches it once to the **Executor**. A lightweight background script watches local receipts without burning model tokens. Once files and evidence are delivered, an independent **Reviewer** inspects them and records **accept**, **repair**, or **reject**. Independent tasks run in parallel; dependent steps wait until required reviews pass.
 
-## Inside the workflow
-
-### Roles, dependencies and independent review
-
-Give the Planner a goal, a scope and an acceptance check. It can assign independent tasks in parallel and hold dependent work until the required reviews pass.
-The Executor delivers files and evidence; the Reviewer examines them and records acceptance, repair or rejection.
-
-### Isolated workspaces and the local merge queue
-
-For code changes, give each assignment its own Git worktree so workers do not edit the same checkout.
-An accepted change can then enter the local merge queue; if the target has moved or conflicts, check the recorded result before treating it as merged.
-
-## What connects to the workflow
+## Architecture and optional modules
 
 ![Where clients, authorized knowledge, status and notifications connect](docs/images/integrations-overview.svg)
 
-### Background monitoring and the dashboard
+Each module plugs cleanly into the core ledger so you can enable only what your project needs:
 
-A local script watches for delivery and stalls without repeatedly asking a model to reread the conversation.
-Open the dashboard to see which tasks are running, awaiting review or blocked; its default view is read-only.
-
-### Client adapters
-
-Use a supported client for each role instead of moving everyone to the same tool.
-Check the adapter guide for the installed version: dispatch, resume and direct terminal interaction need not be supported equally.
-
-### Project knowledge and cited search
-
-Extract passages from Markdown or text PDFs without changing the source, then search authorized documents and research excerpts by topic without supplying IDs; results point back to the source location or PDF page.
-Bilingual expansion helps match a query to English text, and a project glossary can restrict translations; access is checked before ranking, and revocation blocks subsequent reads.
-
-### External inbox and notifications
-
-An external channel can submit a request to the inbox for the Planner to inspect.
-Outgoing alerts tell the Owner when a worker needs permission or a task is blocked, and tell the Reviewer when evidence is ready.
+- **Role orchestration and independent review**
+  Separates planning, execution, and review into distinct roles. Supports single tasks, parallel branches, and dependency DAGs while structurally preventing self-review.
+- **Isolated workspaces and local merge queue**
+  Runs each code assignment in its own Git worktree so parallel workers never step on each other. Accepted changes enter a local merge queue that keeps **accepted** strictly separate from **merged** and stops cleanly on conflicts or moved bases.
+- **Low-cost monitoring and visual dashboard**
+  Background monitoring reads local receipts instead of asking a model to reread chat history. A read-only dashboard shows active, blocked, and review-ready tasks at a glance (with an optional confirmation-gated management console).
+- **Multi-client adapters**
+  Decouples roles from tools: mix Codex, Claude, Pi, OMP, or optional Herdr panes across Planner, Executor, and Reviewer without forcing every role onto one client.
+- **Project knowledge, topic search, and glossary constraints**
+  Extracts passages read-only from local Markdown / Obsidian notes and text PDFs (preserving source offsets and page numbers without modifying files). Search authorized documents by topic without memorizing IDs, with bilingual query expansion, project glossaries (including avoid-lists), and optional `/v1/embeddings` support. **Access is checked before ranking, and revocation blocks subsequent reads immediately.**
+- **External inbox and proactive alerts**
+  Accepts signed external requests into an inbox for Planner inspection, and pushes authorized alerts to the Owner on permission prompts or stalls and to the Reviewer when evidence is ready.
 
 ## Five safety rules
 
-1. Configuration is not permission to dispatch, notify or keep running.
-2. Delivery is not acceptance; acceptance is not a merge.
-3. Send each task once. Inspect an uncertain send before taking action.
-4. Only the current controller acts; an Executor cannot review its own work.
-5. An incoming message cannot authorize work or answer an approval prompt.
+1. **Configuration is not permission**: config files never authorize dispatch, notifications, or continuous runs without your explicit approval.
+2. **Delivery is not acceptance, and acceptance is not a merge**: an idle terminal or zero exit code never counts as done, and accepted code is never auto-pushed.
+3. **Each task is sent once**: uncertain sends are logged for inspection, never blindly retried, and permission prompts are never auto-approved.
+4. **One controller, no self-review**: switching controllers revokes the old window immediately; an Executor can never approve its own delivery.
+5. **Outside requests are data**: external messages can never authorize work on their own.
 
 ## Let your AI set this up
 
+You do not need to type setup commands by hand. Copy this prompt into your local AI assistant (Codex, Claude Code, Antigravity CLI (agy), or Cursor) to run the 1-minute offline demo with zero model cost:
+
 ~~~text
-Help me set up Agent Workflow Orchestrator (AWO) using docs/setup.md in the agent-workflow-orchestrator repository.
-Check Git, Python 3.10+ and installed clients.
-Ask for a destination; use the documented release in a fresh subdirectory.
-Run only the demo_scheduler.py and workflow_control.py status checks using new disposable demo state.
-Do not modify my projects, accounts or keys, make paid calls, or dispatch work.
-Report results and the next command, then stop.
+Help me set up Agent Workflow Orchestrator (AWO) by following docs/setup.md in this repository.
+First check Git, Python 3.10+, and installed AI clients. Ask me which folder to use, and install the documented release into a fresh subdirectory.
+Run only demo_scheduler.py and workflow_control.py status using a fresh temporary directory for the offline demo.
+Do not modify my existing projects, accounts, or keys, and do not make paid model calls or dispatch real work.
+Report the demo results and how to start managing my own project, then wait for my decision.
 ~~~
 
-## Guides
+## Further reading
 
-[Manual setup and documentation index](docs/setup.md) | [Material search and glossaries](references/material-packets.md)
+- [Manual setup and full documentation index](docs/setup.md)
+- [Project material search and glossaries](references/material-packets.md)
