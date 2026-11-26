@@ -18,18 +18,32 @@ You set the goal and allowed file scope. The **Planner** writes a clear task spe
 
 Each module plugs cleanly into the core ledger so you can enable only what your project needs:
 
-- **Role orchestration and independent review**
-  Separates planning, execution, and review into distinct roles. Supports single tasks, parallel branches, and dependency DAGs while structurally preventing self-review.
-- **Isolated workspaces and local merge queue**
-  Runs each code assignment in its own Git worktree so parallel workers never step on each other. Accepted changes enter a local merge queue that keeps **accepted** strictly separate from **merged** and stops cleanly on conflicts or moved bases.
-- **Low-cost monitoring and visual dashboard**
-  Background monitoring reads local receipts instead of asking a model to reread chat history. A read-only dashboard shows active, blocked, and review-ready tasks at a glance (with an optional confirmation-gated management console).
-- **Multi-client adapters**
-  Decouples roles from tools: mix Codex, Claude, Pi, OMP, or optional Herdr panes across Planner, Executor, and Reviewer without forcing every role onto one client.
-- **Project knowledge, topic search, and glossary constraints**
-  Extracts passages read-only from local Markdown / Obsidian notes and text PDFs (preserving source offsets and page numbers without modifying files). Search authorized documents by topic without memorizing IDs, with bilingual query expansion, project glossaries (including avoid-lists), and optional `/v1/embeddings` support. **Access is checked before ranking, and revocation blocks subsequent reads immediately.**
-- **External inbox and proactive alerts**
-  Accepts signed external requests into an inbox for Planner inspection, and pushes authorized alerts to the Owner on permission prompts or stalls and to the Reviewer when evidence is ready.
+### 1. Role orchestration and independent review
+Separates planning, execution, and review into distinct roles, supporting single tasks, parallel branches, and dependency DAGs while structurally preventing self-review. Invoke `$agent-workflow-orchestrator` in Codex (or `/agent-workflow-orchestrator` in Claude Code) and give the Planner a goal and boundary:
+
+```text
+In this repository, add pagination to /users. Limit edits to the endpoint and its tests.
+Dispatch one task, monitor it and review its evidence. Stop after review; do not push.
+```
+
+### 2. Isolated workspaces and local merge queue
+Runs each code assignment in its own Git worktree so parallel workers never step on each other. Accepted changes enter a local merge queue that keeps **accepted** strictly separate from **merged** and stops cleanly on conflicts or moved bases.
+
+### 3. Low-cost monitoring and visual dashboard
+Background monitoring reads local receipts instead of asking a model to reread chat history. Ask the Planner to open the dashboard, or double-click `dashboard.cmd` (Windows) / `dashboard.command` (macOS). It is read-only by default, with an optional `--allow-manage` console where every action is previewed and confirmed.
+
+### 4. Multi-client adapters
+Decouples roles from tools: mix Codex, Claude, Pi, OMP, or optional Herdr panes across Planner, Executor, and Reviewer without forcing every role onto one client. Support is verified per version; see [harness-adapters.md](references/harness-adapters.md).
+
+### 5. Project knowledge, topic search, and glossary constraints
+Extracts passages read-only from local Markdown / Obsidian notes and text PDFs (preserving source offsets and page numbers without modifying files). Search authorized documents by topic without memorizing IDs, with bilingual query expansion, project glossaries (including avoid-lists), and optional `/v1/embeddings` support. **Access is checked before ranking, and revocation blocks subsequent reads immediately:**
+
+```powershell
+python -B scripts/awo_project.py materials --state <STATE_DIR> --project-root <PROJECT_DIR> --token-file <TOKEN> --query "inference throughput" --top-k 3 --strict-glossary
+```
+
+### 6. External inbox and proactive alerts
+External channels can drop signed requests into an inbox via `owner_intake.py` for Planner inspection, while `owner_notify.py` pushes authorized alerts to a file, webhook, or command on permission prompts, stalls, or review-ready deliveries.
 
 ## Five safety rules
 
