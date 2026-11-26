@@ -29,8 +29,12 @@ AWO 的各个模块围绕核心台账解耦设计，你可以按项目需要逐�
 ### 2. 隔离工作区与本地合并队列
 每项代码任务在独立的 Git worktree 中运行，多任务并行互不踩踏。审核通过的改动进入本地合并队列，严格区分**“已验收”**和**“已合并”**，遇到冲突或目标分支变化会明确拦截，不会悄悄覆盖你的工作区。
 
+![从并行修改到本地合并](docs/images/workspace-merge.zh-CN.svg)
+
 ### 3. 低成本后台监控与可视化状态面板
 后台监控脚本只读取本地回执，不让大模型反复重读聊天记录，几乎不消耗额度。想看全局进度时，直接让 Planner 打开状态面板，或双击根目录下的 `dashboard.cmd`（Windows）/ `dashboard.command`（macOS）；默认只读，按需可加 `--allow-manage` 开启带二次确认的管理台。
+
+![本地面板显示任务与审核状态](docs/images/dashboard-overview.png)
 
 ### 4. 多客户端适配（角色与工具解耦）
 Planner、Executor 和 Reviewer 可以自由混搭不同客户端（如 Codex、Claude、Pi、OMP 或可选 Herdr 分屏），不用为了协作被迫全换成同一个工具。每个客户端的能力按实际版本核验，详见[适配器说明](references/harness-adapters.zh-CN.md)。
@@ -41,6 +45,8 @@ Planner、Executor 和 Reviewer 可以自由混搭不同客户端（如 Codex、
 ```powershell
 python -B scripts/awo_project.py materials --state <状态目录> --project-root <项目目录> --token-file <凭据> --query "想了解推理吞吐量" --top-k 3 --strict-glossary
 ```
+
+![按主题找片段，凭出处核对](docs/images/knowledge-search.zh-CN.svg)
 
 ### 6. 外部收件箱与主动提醒
 外部聊天渠道可通过 `owner_intake.py` 把签名请求送入收件箱供 Planner 审阅；当执行者遇到权限弹窗、卡住或交付待审核时，可通过 `owner_notify.py` 按授权主动向文件、Webhook 或命令推送提醒。

@@ -29,8 +29,12 @@ Dispatch one task, monitor it and review its evidence. Stop after review; do not
 ### 2. Isolated workspaces and local merge queue
 Runs each code assignment in its own Git worktree so parallel workers never step on each other. Accepted changes enter a local merge queue that keeps **accepted** strictly separate from **merged** and stops cleanly on conflicts or moved bases.
 
+![From parallel edits to a local merge](docs/images/workspace-merge.svg)
+
 ### 3. Low-cost monitoring and visual dashboard
 Background monitoring reads local receipts instead of asking a model to reread chat history. Ask the Planner to open the dashboard, or double-click `dashboard.cmd` (Windows) / `dashboard.command` (macOS). It is read-only by default, with an optional `--allow-manage` console where every action is previewed and confirmed.
+
+![Local dashboard showing task and review status](docs/images/dashboard-overview.png)
 
 ### 4. Multi-client adapters
 Decouples roles from tools: mix Codex, Claude, Pi, OMP, or optional Herdr panes across Planner, Executor, and Reviewer without forcing every role onto one client. Support is verified per version; see [harness-adapters.md](references/harness-adapters.md).
@@ -41,6 +45,8 @@ Extracts passages read-only from local Markdown / Obsidian notes and text PDFs (
 ```powershell
 python -B scripts/awo_project.py materials --state <STATE_DIR> --project-root <PROJECT_DIR> --token-file <TOKEN> --query "inference throughput" --top-k 3 --strict-glossary
 ```
+
+![Find passages by topic, with sources](docs/images/knowledge-search.svg)
 
 ### 6. External inbox and proactive alerts
 External channels can drop signed requests into an inbox via `owner_intake.py` for Planner inspection, while `owner_notify.py` pushes authorized alerts to a file, webhook, or command on permission prompts, stalls, or review-ready deliveries.

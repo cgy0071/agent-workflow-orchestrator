@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="456" viewBox="0 0 960 456" role="img" aria-labelledby="title desc" lang="zh-CN">
+<title id="title">按主题找片段，凭出处核对</title><desc id="desc">无需预先知道文档编号。提取了文本，不等于获得读取授权。 只读提取: Markdown、笔记与文本型 PDF; 先按当前授权筛选: 检查项目与任务范围; 扩展查询词: 术语表、易混词过滤、双语扩展; 已撤权或超出范围: 排序前排除，不送向量服务; 仅对获准片段排序: 词法检索，可选向量排序; 返回相关片段及出处: 来源＋原文位置或 PDF 页码.</desc>
+<style>
+text{font-family:'Segoe UI','Microsoft YaHei',sans-serif;fill:#1f2328}.bg{fill:#ffffff;stroke:#d0d7de}.s{fill:#eef1f4;stroke:#7d8590}.g{fill:#dafbe1;stroke:#4b9866}.o{fill:#fff1da;stroke:#b27826}.b{fill:#ddf4ff;stroke:#54aeff}.edge{fill:none;stroke:#59636e;stroke-width:1.6}.tip{fill:#59636e}
+@media(prefers-color-scheme:dark){text{fill:#f0f6fc}.bg{fill:#0d1117;stroke:#3d444d}.s{fill:#20262e;stroke:#9aa4af}.g{fill:#123322;stroke:#57ab75}.o{fill:#382817;stroke:#cd994e}.b{fill:#0c2d6b;stroke:#388bfd}.edge{stroke:#aab5bf}.tip{fill:#aab5bf}}
+</style><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path class="tip" d="M0 0L10 5L0 10Z"/></marker></defs>
+<rect class="bg" x="0.5" y="0.5" width="959" height="455" rx="12"/>
+<text x="30" y="36" font-size="24" font-weight="650">按主题找片段，凭出处核对</text><text x="30" y="65" font-size="15">无需预先知道文档编号。提取了文本，不等于获得读取授权。</text>
+<path class="edge" d="M270 126 H355" marker-end="url(#arrow)"/>
+<path class="edge" d="M600 126 H685" marker-end="url(#arrow)"/>
+<path class="edge" d="M480 160 V205" marker-end="url(#arrow)"/>
+<path class="edge" d="M810 160 V205" marker-end="url(#arrow)"/>
+<path class="edge" d="M810 278 V311" marker-end="url(#arrow)"/>
+<rect class="g" x="30" y="92" width="240" height="68" rx="10"/>
+<text x="42" y="120" font-size="17" font-weight="650">只读提取</text><text x="42" y="144" font-size="13">Markdown、笔记与文本型 PDF</text>
+<rect class="o" x="360" y="92" width="240" height="68" rx="10"/>
+<text x="372" y="120" font-size="17" font-weight="650">先按当前授权筛选</text><text x="372" y="144" font-size="13">检查项目与任务范围</text>
+<rect class="g" x="690" y="92" width="240" height="68" rx="10"/>
+<text x="702" y="120" font-size="17" font-weight="650">扩展查询词</text><text x="702" y="144" font-size="13">术语表、易混词过滤、双语扩展</text>
+<rect class="s" x="360" y="210" width="240" height="68" rx="10"/>
+<text x="372" y="238" font-size="17" font-weight="650">已撤权或超出范围</text><text x="372" y="262" font-size="13">排序前排除，不送向量服务</text>
+<rect class="g" x="690" y="210" width="240" height="68" rx="10"/>
+<text x="702" y="238" font-size="17" font-weight="650">仅对获准片段排序</text><text x="702" y="262" font-size="13">词法检索，可选向量排序</text>
+<rect class="s" x="690" y="316" width="240" height="68" rx="10"/>
+<text x="702" y="344" font-size="17" font-weight="650">返回相关片段及出处</text><text x="702" y="368" font-size="13">来源＋原文位置或 PDF 页码</text>
+<rect class="s" x="32" y="422" width="15" height="15" rx="4"/><text x="56" y="435" font-size="14">记录与结果</text><rect class="g" x="314" y="422" width="15" height="15" rx="4"/><text x="338" y="435" font-size="14">资源与处理</text><rect class="o" x="596" y="422" width="15" height="15" rx="4"/><text x="620" y="435" font-size="14">核验与控制</text>
+</svg>
