@@ -2,7 +2,7 @@
 
 English | [Chinese](README.zh-CN.md)
 
-Coordinating multiple AI agents on real code or research projects usually breaks down in three ways: agents edit outside their scope, workers declare victory without real checks, and task state gets lost across terminals. **AWO is a local multi-agent workflow and review engine**: one agent plans, another executes, and an independent reviewer decides based on recorded evidence. **Every guardrail is enforced by local scripts and a ledger, not by prompts alone.**
+Coordinating multiple AI agents on real code or research projects usually breaks down in three ways: agents edit outside their scope, workers declare victory without real checks, and task state gets lost across terminals. **AWO is a local multi-agent workflow and review engine**: one agent plans, another executes, and an independent reviewer decides based on recorded evidence. **Local scripts use recorded state to enforce workflow rules and permissions independently of model behavior.**
 
 > AWO works completely on its own, or alongside an optional project secretary such as [MAID](https://github.com/cgy0071/MAID).
 
