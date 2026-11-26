@@ -436,6 +436,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       <button id="chat-open" type="button" class="hidden">Chat</button>
       <button id="lang" type="button" translate="no" aria-label="Language">&#x4e2d;&#x6587;</button>
       <button id="switch" type="button" class="hidden">Choose workflow</button></div></header>
+  <aside class="panel"><strong>How AWO works</strong><p>The Planner defines the task and dispatches it once. An independent reviewer checks the evidence. Accepted code then enters the local merge queue.</p></aside>
   <section class="overview" id="overview" aria-label="Workflow overview">
     <div class="metric"><span class="metric-label">Tasks</span><strong id="metric-tasks" class="metric-value">--</strong>
       <span id="metric-tasks-note" class="metric-note">Accepted tasks</span></div>
@@ -456,6 +457,7 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
       <button id="open-state" class="primary" type="button">Open</button></div>
     <p id="picker-error" class="error" role="alert"></p></section>
   <div class="grid" id="main">
+    <section class="panel wide"><h2>Current workflow capabilities</h2><div class="cards" id="capabilities"></div></section>
     <section class="panel wide hidden" id="chat-panel"><div class="panel-head"><h2>Chat with a role</h2>
       <span class="panel-caption" id="chat-caption">Sent by the bound controller</span></div>
       <p class="muted">Messages go to the selected agent's session as typed input.
@@ -1245,6 +1247,22 @@ svg line.grid { stroke:var(--line); stroke-width:1 } svg text.axis { font-size:1
         next:'Open the technical detail, correct the condition, then let the next scheduling pass run.',
         technical:block.reason || 'No reason recorded'});
     if (!alerts.children.length) empty(alerts, 'Nothing needs attention right now.');
+    const cap = data.capabilities, cards = id('capabilities'); cards.replaceChildren();
+    const presence = value => value ? 'Present' : 'Not present';
+    function capability(title, rows, note) {
+      const box = add(cards, 'div', 'card'); add(box, 'h3', '', title);
+      rows.forEach(([label, value]) => add(box, 'div', '', tr(label) + ': ' + tr(String(value))));
+      add(box, 'p', 'muted', note);
+    }
+    capability('Knowledge and access', [['Knowledge catalog', presence(cap.catalog)],
+      ['Document reader permissions', presence(cap.reader_registry)], ['Current project glossary file',
+      cap.glossary_file === null ? 'No project selected in ledger' : presence(cap.glossary_file)]],
+      'This view grants no document access and does not read glossary entries.');
+    capability('Shared scheduling', [['Registered projects', cap.projects ?? 'No project registry'],
+      ['Active reservations', cap.reservations], ['Tasks waiting for capacity', cap.capacity_waits]],
+      'This controller only; other controllers are not counted.');
+    capability('Client bindings', [['Recognized active clients', cap.clients.join(', ') || 'None recorded']],
+      'Native Claude uses Kedaya DeepSeek Flash. Bindings do not verify login or a live model session.');
     const resources = id('resources'); resources.replaceChildren();
     const caps = data.resource_capacities;
     if (!Object.keys(caps).length) add(resources, 'p', 'muted', 'No named resource limits are set for this workflow.');
@@ -1917,6 +1935,28 @@ def _remember(recent_file, state):
         pass
 
 
+def capability_summary(state, summary, roles):
+    """Controller-local metadata only. Never open a glossary or resolve a material grant."""
+    with scheduler._read_database(state) as con:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                  "AND name IN ('v2_project','v2_service_state','v2_knowledge','v2_knowledge_reader')")}
+        projects = con.execute("SELECT count(*) FROM v2_project").fetchone()[0] if 'v2_project' in tables else None
+        row = (con.execute("SELECT project_id FROM v2_service_state WHERE id=1").fetchone()
+               if 'v2_service_state' in tables else None)
+    glossary = None
+    if row and isinstance(row[0], str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", row[0]):
+        folder = Path(state) / 'glossaries'
+        glossary = not folder.is_symlink() and (folder / (row[0] + '.json')).is_file()
+    known = {'claude', 'codex', 'agy', 'pi', 'omp', 'opencode', 'grok'}
+    clients = sorted({b['harness'] for role in roles for b in role['bindings']
+                      if b['status'] == 'active' and b.get('harness') in known})
+    waits = sum(1 for task in summary['tasks'] if task['phase'] == 'scheduling_blocked' and
+                task.get('blocking_reason', '').startswith(('resource capacity exhausted:', 'max_concurrency reached')))
+    return {'catalog': 'v2_knowledge' in tables, 'reader_registry': 'v2_knowledge_reader' in tables,
+            'glossary_file': glossary, 'projects': projects, 'reservations': len(summary['claims']),
+            'capacity_waits': waits, 'clients': clients}
+
+
 class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
     # Windows SO_REUSEADDR lets a second socket bind an in-use port; keep port conflicts visible there.
@@ -2115,6 +2155,7 @@ class DashboardServer(ThreadingHTTPServer):
         details = workflow_status.dashboard_details(state, summary)
         targets = [{"role": item["role"], "mode": binding["mode"]}
                    for item in details["roles"] for binding in item["bindings"] if binding["status"] == "active"]
+        base["capabilities"] = capability_summary(state, summary, details["roles"])
         base["chat_targets"] = targets
         if self.manager:
             with scheduler._read_database(state) as con:

@@ -176,6 +176,15 @@ def build_ledger(root):
                 value = json.loads(data)
                 value["created_at"] = (now - ago + timedelta(minutes=2 * len(rows))).isoformat()
                 con.execute("UPDATE events SET data=? WHERE id=?", (json.dumps(value), event_id))
+    # Metadata for a synthetic project; no personal catalog or client credentials.
+    import awo_service
+    with sqlite3.connect(state / "workflow.sqlite3") as con:
+        con.row_factory = sqlite3.Row
+        awo_service.create_schema(con)
+        project = awo_service._ensure_project(con, state)
+    folder = state / "glossaries"
+    folder.mkdir(exist_ok=True)
+    (folder / (project + ".json")).write_text("{}", encoding="utf-8")
     return state, who
 
 
@@ -205,6 +214,11 @@ def capture(browser, root, server, target, prepare, bottom_js, name):
         for expression in prepare:
             tools.call("Runtime.evaluate", expression=expression)
             time.sleep(1)
+        if name == "overview":
+            ready = tools.call("Runtime.evaluate", returnByValue=True, expression=
+                               "document.querySelectorAll('#capabilities h3').length === 3")
+            if not ready["result"].get("value"):
+                raise RuntimeError("Capability cards did not render")
         top, bottom = tools.call("Runtime.evaluate", returnByValue=True, expression=bottom_js)["result"]["value"]
         shot = tools.call("Page.captureScreenshot", format="png", captureBeyondViewport=True,
                           clip={"x": 0, "y": top, "width": 1280, "height": bottom - top, "scale": 1})

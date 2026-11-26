@@ -181,6 +181,39 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(patterns["^Reason code: (.+)$"], "原因代码：$1")
         self.assertEqual(patterns["^Error: (.+)$"], "错误：$1")
 
+    def test_capability_summary_exposes_only_controller_metadata(self):
+        import awo_service
+        before = self.http("GET", "/api/status")[1]["capabilities"]
+        self.assertIsNone(before["projects"])
+        self.assertIsNone(before["glossary_file"])
+        with control.database(self.state) as con:
+            awo_service.create_schema(con)
+            project = awo_service._ensure_project(con, self.state)
+        folder = self.state / "glossaries"
+        folder.mkdir()
+        (folder / (project + ".json")).write_bytes(b"private-canary-invalid-json")
+        status, data, _ = self.http("GET", "/api/status")
+        self.assertEqual(status, 200)
+        cap = data["capabilities"]
+        self.assertTrue(cap["glossary_file"] and cap["catalog"] and cap["reader_registry"])
+        self.assertEqual(cap["projects"], 1)
+        self.assertNotIn("private-canary", json.dumps(data))
+        self.assertNotIn(project, json.dumps(cap))
+        self.assertFalse(data["allow_manage"])
+        (folder / (project + ".json")).unlink()
+        self.assertFalse(self.http("GET", "/api/status")[1]["capabilities"]["glossary_file"])
+
+    def test_capacity_waits_and_bindings_exclude_unrelated_states(self):
+        tasks = [{"phase": phase, "blocking_reason": why} for phase, why in (
+            ("scheduling_blocked", "resource capacity exhausted: gpu"),
+            ("scheduling_blocked", "max_concurrency reached"),
+            ("scheduling_blocked", "workspace overlaps a running task: T1"),
+            ("accepted", "resource capacity exhausted: gpu"))]
+        bindings = [{"status": status, "harness": harness} for status, harness in (
+            ("active", "claude"), ("active", "private-canary"), ("pending", "codex"))]
+        cap = dashboard.capability_summary(self.state, {"tasks": tasks, "claims": []}, [{"bindings": bindings}])
+        self.assertEqual((cap["capacity_waits"], cap["clients"]), (2, ["claude"]))
+
     def test_status_never_writes_or_queries_adapters(self):
         database = self.state / "workflow.sqlite3"
         before = database.read_bytes()
