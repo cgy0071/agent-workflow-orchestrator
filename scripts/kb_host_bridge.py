@@ -267,3 +267,40 @@ def call(state, project_root, token, operation, fields, deployed):
             return deployed[0].invoke(operation, reader, actor, task, **fields)
     except (KeyError, OSError, TypeError, ValueError, service.ServiceError) as exc:
         raise APIError('forbidden_role', 'KB task or source scope denied') from exc
+
+
+def source_position(api, token, task_id, kind, key, revision):
+    """Read the exact position from an authorized immutable SRC record."""
+    from awo_kb import views
+    operation = {"note": "kb.evidence.text", "pdf": "kb.evidence.pdf"}[kind]
+    deployed = deployment(api.state)
+    if not deployed or operation not in deployed[1]:
+        raise PermissionError("Source verification unavailable.")
+    with closing(service._connect(service._db_path(api.state), readonly=True)) as con:
+        con.execute("BEGIN")
+        project, actor, task, reader = _binding(con, api.state, api.project_root, token,
+                                               operation, task_id, deployed)
+        grants = _config(api.state)["projects"][project]["tasks"][task_id]["source_grants"]
+        if key not in grants[actor][operation] or task["kb_revision"] != revision:
+            raise PermissionError("Source grant or revision changed.")
+        records, projects, profiles, _ = reader._args(actor, task, None)
+        record = views._visible(records, projects, profiles)[key]
+        if record["type"] != "SRC" or record["project"] != project:
+            raise PermissionError("Source unavailable.")
+        if kind == "note":
+            return {field: record[field] for field in ("byte_start", "byte_end")}
+        from material_candidates import extract
+        cfg = _config(api.state)["projects"][project]
+        spec = cfg["tasks"][task_id]["source_grants"][actor][operation][key]
+        base = Path(cfg["source_root"]).resolve(strict=True)
+        path = (base / spec["path"]).resolve(strict=True)
+        path.relative_to(base)
+        with path.open("rb") as source:
+            raw = source.read(8 * 1024 * 1024 + 1)
+        if hashlib.sha256(raw).hexdigest() != spec["sha256"] or spec["sha256"] != record["file_sha256"]:
+            raise PermissionError("Approved PDF changed.")
+        matches = [i for i, row in enumerate(extract(raw, ".pdf")["candidates"])
+                   if row["physical_page"] == record["physical_page"] and row["quote"] == record["quote"]]
+        if len(matches) != 1:
+            raise ValueError("Study passage has no unique match in the target PDF.")
+        return {"physical_page": record["physical_page"], "chunk": matches[0]}

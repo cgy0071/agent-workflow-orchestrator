@@ -18,7 +18,7 @@ class AppBoundaryTests(unittest.TestCase):
             proc = subprocess.run([sys.executable, "-I", "-B",
                                    str(Path(awo_app.__file__).resolve()), "capabilities"],
                                   cwd=td, capture_output=True, text=True, check=True)
-            self.assertEqual(json.loads(proc.stdout), {"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule"]})
+            self.assertEqual(json.loads(proc.stdout), {"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft"]})
             self.assertFalse(list(Path(td).iterdir()))
 
     def test_profile_exclusive_and_scoped(self):
