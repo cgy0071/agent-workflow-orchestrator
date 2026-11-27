@@ -111,3 +111,26 @@ was formed, not what the paper claims. Excerpts and citations are unchanged.
 During terminology checks, polishing, or translation review, preserve direct quotations, titles in References or Bibliography, and original titles of external papers wherever they appear. Keep the source spelling, wording, capitalization, hyphens, and punctuation verbatim. Exclude these spans before applying glossary rules or bulk replacements, even if the source appears to contain an error.
 
 For example, keep `back-propagation` in a cited title even if the surrounding prose uses `backpropagation`. Place any labeled translation or editorial note outside the quoted text or original title.
+
+## Read and freeze task evidence (Python API)
+
+Use `task_evidence.KnowledgeReadFacade(api, credentials, task=None)` with the
+authenticated service backend. Without a task, supply a document credential
+for learning. For task reads, supply the target task and the recipient's own
+credentials by source kind (doc, note, pdf). The facade performs reads only.
+
+1. Call `search(query)` and show the selected hits and their citations.
+   Record `checksum(facade.selection(selected_hits))` with the draft.
+2. At confirmation, call `pin(selected_hits, draft_digest, expected_selection_digest)`.
+   The task facade re-reads the selection. Keep the returned
+   `awo.task-evidence.v1` manifest and its digest with the confirmed task.
+3. Call `resolve(manifest, expected_packet_digest)` with the digest from
+   the trusted task record and the current recipient's facade. A failed
+   authorization or missing exact revision stops the read. The packet digest
+   provides integrity only when its expected value comes from the host.
+
+Document locations are half-open Unicode character offsets. Plugin references
+identify an immutable KB history revision and SRC record, the source file
+digest, and the verified excerpt digest. PDF references also identify the
+physical page. Tokens, source paths, and excerpt bodies are excluded from the
+manifest. The materials CLI continues to produce its v1 search response.

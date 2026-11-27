@@ -182,6 +182,20 @@ def _binding(con, state, project_root, token, operation, task_id, deployed):
     return project, actor, task, reader
 
 
+def source_revision(state, project_root, token, task_id, operation, record_id):
+    """Return the immutable KB history and source file digests under the current grant."""
+    deployed = deployment(state)
+    if not deployed or operation not in deployed[1]:
+        raise PermissionError("source verification unavailable")
+    with closing(service._connect(service._db_path(state), readonly=True)) as con:
+        con.execute("BEGIN")
+        project, actor, task, reader = _binding(con, state, project_root, token,
+                                                operation, task_id, deployed)
+        reader._scope(actor, project, task["profiles"])
+        grants = _config(state)["projects"][project]["tasks"][task_id]["source_grants"]
+        return task["kb_revision"], grants[actor][operation][record_id]["sha256"]
+
+
 def material_grants(state, project_root, token, task_id):
     """Discover only this task's exact grants that are visible SRCs in its project."""
     deployed = deployment(state)

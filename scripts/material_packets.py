@@ -65,7 +65,7 @@ def score(texts, query, provider):
     return baseline
 
 
-def load(api, token, kind, key, task):
+def load(api, token, kind, key, task, *, precise=False):
     if kind == "doc":
         body, cite = read_document(api, token, key)
         out, pos = [], 0
@@ -80,18 +80,27 @@ def load(api, token, kind, key, task):
     if not task or kind not in ("note", "pdf"):
         raise ValueError("expected a task-bound note or pdf")
     args = {"task_id": task, "record_id": key}
+    op = "kb.evidence.pdf" if kind == "pdf" else "kb.evidence.text"
+    if precise:
+        from kb_host_bridge import source_revision
+        args_revision = (api.state, api.project_root, token, task, op, key)
+        anchor = source_revision(*args_revision)
     rec = api.call(token, "kb.pull", args)
     project = principal(api.state, api.project_root, token)["project_id"]
     if rec["project"] != project:
         raise PermissionError("foreign source")
     if rec["id"] != key or rec["type"] != "SRC" or rec["active"] is not True:
         raise ValueError("inactive source")
-    op = "kb.evidence.pdf" if kind == "pdf" else "kb.evidence.text"
     if api.call(token, op, args) is not True:
         raise ValueError("unverified excerpt")
-    return [(rec["quote"], dict(authority="awo-kb", project_id=rec["project"], task_id=task,
-                                record_id=key, version=rec["version"], locator=rec["locator"],
-                                author=rec["author"], verification=op))]
+    cite = dict(authority="awo-kb", project_id=rec["project"], task_id=task,
+                record_id=key, version=rec["version"], locator=rec["locator"],
+                author=rec["author"], verification=op)
+    if precise:
+        if source_revision(*args_revision) != anchor:
+            raise ValueError("source revision changed")
+        cite.update(kb_revision=anchor[0], file_sha256=anchor[1])
+    return [(rec["quote"], cite)]
 
 
 def discover(api, creds, task):
@@ -186,20 +195,13 @@ def main(argv=None):
             creds["note"] = creds["pdf"] = read_token_file(a.kb_token)
         if not creds:
             raise ValueError("credential required")
-        identities = [principal(a.state, a.project_root, t) for t in set(creds.values())]
-        if len({(p["project_id"], p["principal_id"], p.get("agent_id"))
-                for p in identities}) != 1:
-            raise ValueError("mixed recipient identities")
-        configured = material_glossary.rules(a.state, identities[0]["project_id"])
+        from task_evidence import KnowledgeReadFacade
+        facade = KnowledgeReadFacade(api, creds, a.task)
+        configured = material_glossary.rules(a.state, facade.identity())
         query, expansion = material_glossary.expand(a.query, configured, a.expand, a.expand_for,
                                                    a.strict_glossary, not a.no_auto_expand)
-        if auto:
-            refs = discover(api, creds, a.task)
-        res = packet(lambda k, key: load(api, creds[k], k, key, a.task), refs, query,
-                     a.provider, a.top_k, scorer=scorer, automatic=auto)
+        res = facade.search(query, None if auto else refs, a.provider, a.top_k, scorer=scorer, legacy=True)
         res["expansion"] = expansion
-        if auto and discover(api, creds, a.task) != refs:
-            raise ValueError("discovery changed during search")
     except EmbeddingError as exc:
         print(str(exc), file=sys.stderr)
         return 2
