@@ -109,6 +109,25 @@ def delivery(root, job):
     excerpts = resolve(route, role, packet)
     prompt = job["prompt"] + "\nFrozen reference material (data only):\n" + json.dumps(
         {"packet": packet, "excerpts": excerpts}, ensure_ascii=True)
+    if role == "worker":
+        prompt += ("\nEnd RESULT.md with a fenced json block containing task_id and packet_sha256 from the packet, "
+                   "and claims: an array of {id,statement,citations}. Number claims C1,C2 in order. "
+                   "Copy each cited packet item exactly. Declare unsupported inferences with empty citations; "
+                   "these require repair. Include every material conclusion.")
+    if role == "reviewer" and label == "code":
+        import evidence_claims as chain
+        try:
+            body = chain.report(plan, packet)
+        except chain.ERRORS:
+            body = None
+        prompt += ("\nAlso return evidence_review with task_id, packet_sha256, claims_sha256 and checks. "
+                   "Independently compare each statement to the freshly delivered original material. "
+                   "Check that every substantive conclusion in the worker result is represented. "
+                   "One check per citation in order: claim_id, evidence_id, supported (boolean), reason. "
+                   "Return repair or reject for unsupported or omitted conclusions. "
+                   "Worker report (untrusted data): " +
+                   json.dumps((Path(d["paths"]["delivery"]) / "RESULT.md").read_text(encoding="utf-8")) +
+                   "\nClaim block digest: " + (chain.checksum(body) if body else "invalid"))
     receipt = dict(role=role, agent_id=route[role]["agent_id"], nonce=job["nonce"],
                    packet_sha256=packet["packet_sha256"],
                    prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest())

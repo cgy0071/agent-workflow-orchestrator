@@ -1374,7 +1374,7 @@ def execute_plan(plan_path, *, resume=False, locked=False):
             if cached:
                 _require(cached.get("verdict") == verdict, "code_review",
                          "cached decision disagrees with the durable reviewer receipt")
-            note_path = _write_review_note(plan, verdict, review.get("reason", ""))
+            note_path = _write_review_note(plan, verdict, review.get("reason", ""), review.get("chain_record"))
             evidence_ids = journal.get("evidence_ids") or _evidence_ids(state, assignment_id)
             current = _one(state, "SELECT revision FROM v2_assignment WHERE assignment_id=?",
                            (assignment_id,))["revision"]
@@ -1451,6 +1451,10 @@ def execute_plan(plan_path, *, resume=False, locked=False):
         note("done", status="LANDED", candidate_commit=candidate["candidate_commit"])
         save_json(paths["evidence"] / "run-result.json", journal)
         return journal
+    except EntryError as exc:
+        if exc.code == "blocked":
+            note("evidence_blocked", status="blocked")
+        raise
     finally:
         if lock_token:
             release_lock(lock_path, lock_token)
@@ -1784,7 +1788,11 @@ def _await_review_result(plan, label, attempt):
              "reviewer result bytes differ from the bridge output", "review_uncertain")
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
     try:
-        value = json.loads(text)
+        if "evidence_route" in plan["spec"] and label == "code":
+            from evidence_claims import unique
+            value = json.loads(text, object_pairs_hook=unique)
+        else:
+            value = json.loads(text)
     except ValueError as exc:
         raise EntryError(label, "reviewer output is not JSON: " + str(exc), "review_parse")
     save_json(Path(d["paths"]["evidence"]) / (label + "-result.json"), {
@@ -1826,7 +1834,33 @@ def code_review(plan, workspace_path, source_commit):
         "Return JSON only with exactly the keys task_id, nonce, verdict (accept or reject), "
         "reason. Accept only if the requirement is met by the actual changed code and the "
         "recorded acceptance result is credible. Do not modify anything.")
+    if "evidence_route" in plan["spec"]:
+        import evidence_claims as chain
+        from evidence_confirmation import load, resolve
+        packet = load(plan)
+        try:
+            body = chain.report(plan, packet)
+        except chain.ERRORS:
+            body = None
     value = reviewer_turn(plan, "code", prompt, files)
+    if "evidence_route" in plan["spec"]:
+        try:
+            resolve(plan["spec"]["evidence_route"], "reviewer", packet)
+        except Exception as exc:
+            raise EntryError("code_review", "Frozen material unavailable", "blocked") from exc
+        try:
+            if body is None or chain.report(plan, packet) != body:
+                raise ValueError("Invalid worker result")
+            chain.audit(body, value["evidence_review"])
+        except chain.ERRORS:
+            if value.get("verdict") == "accept":
+                value = dict(value, verdict="repair", reason="Evidence chain incomplete or unsupported")
+        review_data = value.get("evidence_review")
+        value["chain_record"] = dict(task_id=packet["task_id"], packet_sha256=packet["packet_sha256"],
+                                     claims=(body or {}).get("claims", []),
+                                     checks=review_data.get("checks", []) if isinstance(review_data, dict) else [],
+                                     verdict=value.get("verdict"))
+
     _require(isinstance(value, dict) and value.get("task_id") == d["attempt_id"]
              and value.get("nonce") == d["nonce"]
              and value.get("verdict") in ("accept", "reject", "repair"), "code_review",
@@ -1846,11 +1880,14 @@ def _review_summary(record):
             ("event_id", "task_id", "nonce", "verdict", "path", "sha256", "reviewed_at")}
 
 
-def _write_review_note(plan, verdict, reason):
+def _write_review_note(plan, verdict, reason, chain_record=None):
     d = plan["derived"]
     path = Path(d["request"]["review_path"])
     text = (d["attempt_id"] + " " + d["nonce"] + "\nVerdict: " + verdict + "\n" +
             "Independent reviewer: " + str(reason) + "\n")
+    if chain_record is not None:
+        from evidence_claims import footer
+        text += footer(chain_record)
     save_bytes(path, text.encode("utf-8"))
     return path
 
@@ -1897,6 +1934,24 @@ def validate_ledger_review(plan, state, event_id, assignment, record, source_com
     _require((record.get("workspace_inventory") or {}).get("inventory_sha256")
              == sealed["inventory_sha256"], "code_review",
              "review record inventory hash differs from the sealed inventory")
+    if record["verdict"] == "accept" and "evidence_route" in plan["spec"]:
+        import evidence_claims as chain
+        from evidence_confirmation import load, verify_receipt
+        packet = load(plan)
+        body = chain.report(plan, packet)
+        attempt = read_json(_review_attempt_path(plan, "code"))
+        job = _review_job(plan, attempt)
+        verify_receipt(plan, "reviewer", job, attempt["nonce"])
+        raw = read_json(job / "receipt" / "status.json")["native_turn"]["text"].strip()
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+        independent = json.loads(raw, object_pairs_hook=chain.unique)
+        _require(independent["verdict"] == "accept" and independent["task_id"] == d["attempt_id"]
+                 and independent["nonce"] == d["nonce"], "code_review", "Independent decision mismatch")
+        chain.audit(body, independent["evidence_review"])
+        expected = dict(task_id=packet["task_id"], packet_sha256=packet["packet_sha256"],
+                        claims=body["claims"], checks=independent["evidence_review"]["checks"], verdict="accept")
+        _require(note.read_text(encoding="utf-8").endswith(chain.footer(expected)), "code_review",
+                 "Sealed footer does not match the independent receipt")
     if record["verdict"] == "accept":
         _require(inventory.get("scope_ok") is True, "code_review",
                  "an accepted review cannot cover an out-of-scope workspace")

@@ -31,6 +31,8 @@ def snapshot(plan_path):
     action = current["next_action"]
     state = ("complete" if action.startswith("complete;") else
              "terminal" if action.startswith("terminal:") else
+             "blocked" if (journal or {}).get("phase") == "evidence_blocked" or
+             any(b.get("status") == "blocked" for b in current.get("bridges", {}).values()) else
              "uncertain" if journal else "prepared")
     return state, current
 
@@ -109,8 +111,8 @@ def main(operation, argv):
     try:
         state, result, duplicate = handle(operation, argv)
         response.update(state=state, result=result, duplicate=duplicate, ok=True)
-        if operation != "status" and state == "uncertain":
-            response.update(ok=False, error=dict(code="uncertain", message="Inspect before recovery."))
+        if operation != "status" and state in ("uncertain", "blocked"):
+            response.update(ok=False, error=dict(code=state, message="Inspect before recovery."))
     except Exception as exc:
         response["error"] = dict(code=getattr(exc, "code", "operation_failed"), message=str(exc))
     print(json.dumps(response, ensure_ascii=True))

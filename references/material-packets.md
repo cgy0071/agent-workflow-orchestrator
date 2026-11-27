@@ -153,3 +153,14 @@ scheduler still owns dispatch. Each native recipient resolves the references
 again under its own grants; successful jobs record task-evidence-receipt.json
 beside job.json. Review and integration review read independently. Revocation
 blocks the next read; it cannot recall data previously delivered.
+
+### Check an evidence-backed result
+
+RESULT.md ends in a fenced JSON object with the knowledge task_id, packet_sha256,
+and ordered claims (C1, C2, ...). Each claim has a statement and citations copied
+from the frozen manifest, including its exact locator, revision and excerpt hash.
+Declare an unsupported inference with an empty citations list; it does not pass
+acceptance. REVIEW.md records the same task, packet, claims, citation decisions
+and independent reasons. Only the existing review ledger can accept the task.
+A missing grant or unavailable revision blocks the next read. A wrong page,
+changed digest, missing judgment or unsupported conclusion cannot be accepted.

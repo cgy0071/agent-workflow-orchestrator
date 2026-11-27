@@ -344,7 +344,10 @@ def run(directory, job_path):
             from evidence_confirmation import delivery
             if "kb_context" in config or job.get("kb_context_required"):
                 raise ValueError("Ambiguous evidence routes")
-            prompt, evidence = delivery(root, job)
+            try:
+                prompt, evidence = delivery(root, job)
+            except Exception as exc:
+                raise PermissionError("Frozen evidence unavailable; fresh authorization or review required") from exc
             job = dict(job, argv=argv_for(config, dict(job, prompt=prompt), root), redact_argv=True)
         receipt = run_job.run(job)
         if evidence and receipt.get("status") == "done":
@@ -373,7 +376,7 @@ def run(directory, job_path):
     except Exception as exc:
         receipt_file = target / "receipt" / "status.json"
         saved = read_json(receipt_file) if receipt_file.exists() else {}
-        outcome = {"status": "blocked" if saved.get("status") == "blocked" else "failed", "error": str(exc),
+        outcome = {"status": "blocked" if saved.get("status") == "blocked" or (job.get("frozen_evidence") and isinstance(exc, PermissionError)) else "failed", "error": str(exc),
                    "execution_semantics": config["mode"], "turn_status": saved.get("native_turn", {}).get("status", "unverified"),
                    "process_status": saved.get("process_status", "unverified")}
     save_json(target / "outcome.json", outcome)

@@ -35,6 +35,22 @@ prompt = sys.argv[-1]
 
 
 def emit(text):
+    if "Frozen reference material (data only):" in prompt:
+        payload = json.JSONDecoder().raw_decode(prompt.split("Frozen reference material (data only):\n")[1])[0]
+        packet = payload["packet"]
+        tag = {"task_id": packet["task_id"], "packet_sha256": packet["packet_sha256"]}
+        if "End RESULT.md" in prompt:
+            statement = {"id": "C1", "statement": "Latency is 17 ms.", "citations": packet["items"]}
+            if mode.get("fixture_wrong_locator"):
+                statement["citations"][0]["locator"] = {"physical_page": 999}
+            text += "\n```json\n" + json.dumps(dict(tag, claims=[statement])) + "\n```"
+        elif "Also return evidence_review" in prompt:
+            value = json.loads(text)
+            checks = [dict(claim_id="C1", evidence_id=item["evidence_id"], supported=mode.get("fixture_support", True),
+                           reason="Synthetic report states the latency.") for item in packet["items"]]
+            value["evidence_review"] = dict(tag, claims_sha256=prompt.rsplit("Claim block digest: ",1)[1],
+                                            checks=checks)
+            text = json.dumps(value)
     if "--model" in sys.argv:
         model = sys.argv[sys.argv.index("--model") + 1]
         print(json.dumps({"type": "result", "subtype": "success", "is_error": False,
