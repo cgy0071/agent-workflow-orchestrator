@@ -134,3 +134,22 @@ identify an immutable KB history revision and SRC record, the source file
 digest, and the verified excerpt digest. PDF references also identify the
 physical page. Tokens, source paths, and excerpt bodies are excluded from the
 manifest. The materials CLI continues to produce its v1 search response.
+
+### Freeze a reviewed task draft
+
+For an evidence-backed project entry, add evidence_route to the local execution
+spec before prepare. Set state, root, project_id and task to the selected
+knowledge domain and task. Add separate worker and reviewer objects, each with
+its authorized agent_id and absolute task_token_file; include doc_token_file
+for published documents or kb: true for task-scoped plugin sources. These are
+operator-owned file references, not bearer tokens. Use the same goal as the
+reviewed draft. The route explicitly binds the knowledge task to this run.
+Do not put personal configuration or credentials in Git.
+
+Use the public start operation with --confirm-execute, --draft and
+--draft-digest. The confirmation and pointer-only manifest are recorded
+atomically in task-evidence.sqlite3 under the knowledge domain state. The
+scheduler still owns dispatch. Each native recipient resolves the references
+again under its own grants; successful jobs record task-evidence-receipt.json
+beside job.json. Review and integration review read independently. Revocation
+blocks the next read; it cannot recall data previously delivered.

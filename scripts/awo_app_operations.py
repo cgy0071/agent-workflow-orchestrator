@@ -42,6 +42,9 @@ def handle(operation, argv):
         parser.add_argument("--spec", type=Path, required=True)
     if operation in ("start", "recover"):
         parser.add_argument("--confirm-execute", action="store_true")
+    if operation == "start":
+        parser.add_argument("--draft", type=Path)
+        parser.add_argument("--draft-digest")
     args = parser.parse_args(argv)
     root = args.thread.resolve()
     path = root / "plan.json"
@@ -74,6 +77,16 @@ def handle(operation, argv):
     if operation == "start":
         if not args.confirm_execute:
             raise entry.EntryError("start", "Explicit execution confirmation required.", "not_confirmed")
+        if "evidence_route" in plan["spec"]:
+            from evidence_confirmation import confirm, load
+            if not args.draft or not args.draft_digest:
+                raise ValueError("Provide the reviewed draft and its displayed digest")
+            if state == "prepared":
+                confirm(plan, json.loads(args.draft.read_text(encoding="utf-8")), args.draft_digest)
+            elif load(plan)["draft_digest"] != args.draft_digest:
+                raise ValueError("Different draft already confirmed")
+        elif args.draft or args.draft_digest:
+            raise ValueError("Prepare a run with an evidence route first")
         if state != "prepared":
             duplicate = True
         else:

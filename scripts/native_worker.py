@@ -339,7 +339,16 @@ def run(directory, job_path):
             prompt, measurement = prepare(config, job)
             job = dict(job, argv=argv_for(config, dict(job, prompt=prompt), root))
             save_json(target / "kb-context-receipt.json", measurement)
+        evidence = None
+        if job.get("frozen_evidence"):
+            from evidence_confirmation import delivery
+            if "kb_context" in config or job.get("kb_context_required"):
+                raise ValueError("Ambiguous evidence routes")
+            prompt, evidence = delivery(root, job)
+            job = dict(job, argv=argv_for(config, dict(job, prompt=prompt), root), redact_argv=True)
         receipt = run_job.run(job)
+        if evidence and receipt.get("status") == "done":
+            save_json(target / "task-evidence-receipt.json", evidence)
         turn = receipt.get("native_turn", {})
         if turn.get("status") != "completed":
             raise ValueError(turn.get("error", "native turn did not complete"))

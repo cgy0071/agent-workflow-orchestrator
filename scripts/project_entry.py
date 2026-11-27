@@ -309,7 +309,7 @@ def _validate_allowed_entries(repository, commit, paths):
 def validate_spec(spec):
     allowed = {"version", "repository", "goal", "allowed_paths", "verify_argv",
                "worker", "reviewer", "authorization", "budget", "target_ref",
-               "work_root", "change_name", "max_real_turns", "timeout_seconds"}
+               "work_root", "change_name", "max_real_turns", "timeout_seconds", "evidence_route"}
     _require(isinstance(spec, dict), "spec", "spec must be an object")
     _require(set(spec) <= allowed, "spec", "unknown spec keys: " + ", ".join(sorted(set(spec) - allowed)))
     for key in ("version", "repository", "goal", "allowed_paths", "verify_argv",
@@ -321,6 +321,9 @@ def validate_spec(spec):
     _require(isinstance(spec["change_name"], str)
              and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", spec["change_name"]) is not None,
              "spec", "change_name must be a lowercase slug")
+    if "evidence_route" in spec:
+        from evidence_confirmation import validate
+        validate(spec["evidence_route"])
     paths = spec["allowed_paths"]
     _require(isinstance(paths, list) and paths, "spec", "allowed_paths must be nonempty")
     spec["allowed_paths"] = [_safe_relative(item, "allowed path") for item in paths]
@@ -783,6 +786,7 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
                    canonical({"citation": route["material"], "text": material}))
     message = json.dumps({
         "task_id": delivery["task_id"], "nonce": delivery["nonce"], "cwd": delivery["cwd"],
+        **({"frozen_evidence": True} if "evidence_route" in spec else {}),
         "prompt": prompt, "marker": delivery["completion"]["marker"],
         "execution_cwd": str(workspace_path), "sandbox": "workspace-write",
         "authorization": {"source": spec["authorization"]["source"],
@@ -1082,6 +1086,9 @@ def execute_plan(plan_path, *, resume=False, locked=False):
     d = plan["derived"]
     paths = _paths(plan)
     state, actor, epoch = Path(d["paths"]["state"]), _actor(plan), d["epoch"]
+    if "evidence_route" in plan["spec"]:
+        from evidence_confirmation import load
+        load(plan)
     journal_path = paths["root"] / "run.json"
     journal = load_journal(journal_path)
     if journal is not None and not resume:
@@ -1486,6 +1493,8 @@ def collect_turn(plan, journal, workspace_path):
     active = Path(worker_root) / "active.json"
     _require(active.is_file(), "worker_turn", "native bridge has no active record")
     job_dir = Path(read_json(active)["directory"])
+    from evidence_confirmation import verify_receipt
+    verify_receipt(plan, "worker", job_dir, d["nonce"])
     receipt = read_json(job_dir / "receipt" / "status.json")
     _require(receipt.get("status") == "done" and receipt.get("returncode") == 0
              and receipt.get("process_status") == "clean_exit", "worker_turn",
@@ -1704,6 +1713,8 @@ def reviewer_turn(plan, label, prompt, files, worktree=None, sandbox=None):
             message["execution_cwd"] = str(worktree)
             if plan["derived"]["reviewer_spec"].get("harness") != "claude":
                 message["sandbox"] = sandbox or "workspace-write"
+        if "evidence_route" in plan["spec"]:
+            message["frozen_evidence"] = True
         sent = native_worker.send(reviewer_root, message)
         attempt["send_response"] = sent
         save_json(attempt_path, attempt)
@@ -1755,6 +1766,8 @@ def _await_review_result(plan, label, attempt):
     _require(outcome.get("status") == "done", label,
              "reviewer turn did not complete cleanly: " + json.dumps(outcome)[:400],
              "review_uncertain")
+    from evidence_confirmation import verify_receipt
+    verify_receipt(plan, "reviewer", job, attempt["nonce"])
     output = job / "receipt" / "output.log"
     _require(output.is_file(), label, "reviewer output log is missing", "review_uncertain")
     harness = plan["derived"]["reviewer_spec"]["harness"]
