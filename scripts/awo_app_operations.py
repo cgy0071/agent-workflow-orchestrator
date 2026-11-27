@@ -40,6 +40,8 @@ def snapshot(plan_path):
 def handle(operation, argv):
     parser = Arguments(prog="awo_app.py " + operation)
     parser.add_argument("--thread", type=Path, required=True)
+    if operation == "session":
+        parser.add_argument("--action", choices=("records", "focus", "resume"), required=True)
     if operation == "prepare":
         parser.add_argument("--spec", type=Path, required=True)
     if operation in ("start", "recover"):
@@ -71,6 +73,9 @@ def handle(operation, argv):
             pin.get("plan") != plan["plan_sha256"] or pin.get("protocol") != 1 or
             pin.get("backend") != version or pin.get("spec") != digest((root / "spec.json").read_bytes())):
         raise entry.EntryError("pin", "Run identity, backend, plan or frozen spec changed.", "pin_mismatch")
+    if operation == "session":
+        from task_session import access
+        return "inspected", access(plan, args.action), False
     if operation == "prepare":
         if digest(args.spec.read_bytes()) != pin["spec"]:
             raise entry.EntryError("prepare", "Different spec for an existing thread.", "conflict")

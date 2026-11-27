@@ -364,9 +364,13 @@ def validate_spec(spec):
     for name in ("worker", "reviewer"):
         bridge = spec[name]
         _require(isinstance(bridge, dict), "spec", name + " must be an object")
-        _require(set(bridge) <= {"harness", "executable", "timeout_seconds", "model", "max_tool_turns"}, "spec",
+        _require(set(bridge) <= {"harness", "executable", "timeout_seconds", "model", "max_tool_turns", "session_mode"}, "spec",
                  name + " has unknown keys")
         harness = bridge.get("harness")
+        mode = bridge.get("session_mode", "one-shot")
+        _require(mode == "one-shot" or (mode == "session" and name == "worker"
+                 and harness == "codex" and "evidence_route" not in spec), "spec",
+                 "Persistent sessions require a Codex worker without frozen material.")
         _require(harness in ("codex", "claude"), "spec",
                  name + " harness must be codex or DS-only Claude for the verified one-shot path")
         if harness == "claude":
@@ -623,6 +627,8 @@ def prepare(spec_path, out_dir, *, route_resolver=None):
 
 
 def _prepare_into(spec, spec_path, out, route=None, material=None):
+    _require(not (spec["worker"].get("session_mode") == "session" and (route or material)),
+             "prepare", "Material-bearing tasks require a one-shot worker.")
     (out / "spec.json").write_bytes(Path(spec_path).read_bytes())
 
     repository = Path(spec["repository"]).resolve()
@@ -678,7 +684,8 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
         spec["worker"]["timeout_seconds"]), role="planner", version=controller_version)
     worker_version = cli_version(spec["worker"]["executable"])
     worker_spec = dict(native_worker.initialize(
-        out / "worker", spec["worker"]["harness"], spec["worker"]["executable"], "one-shot",
+        out / "worker", spec["worker"]["harness"], spec["worker"]["executable"],
+        spec["worker"].get("session_mode", "one-shot"),
         spec["worker"]["timeout_seconds"], model=spec["worker"].get("model"),
         launch_cwd=str(workspace_path),
         max_tool_turns=spec["worker"].get("max_tool_turns"),
@@ -718,7 +725,7 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
     save_json(capability, {
         "kind": "installed-cli-command-bridge", "harness": spec["worker"]["harness"],
         "version": worker_version,
-        "mode": "one-shot",
+        "mode": spec["worker"].get("session_mode", "one-shot"),
         "worker_config_sha256": sha_file(out / "worker" / "config.json"),
         "reviewer_config_sha256": sha_file(out / "reviewer" / "config.json"),
         "bridge_source_sha256": sha_file(Path(native_worker.__file__)),
@@ -787,6 +794,7 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
     message = json.dumps({
         "task_id": delivery["task_id"], "nonce": delivery["nonce"], "cwd": delivery["cwd"],
         **({"frozen_evidence": True} if "evidence_route" in spec else {}),
+        **({"keep_session_for_view": True} if spec["worker"].get("session_mode") == "session" else {}),
         "prompt": prompt, "marker": delivery["completion"]["marker"],
         "execution_cwd": str(workspace_path), "sandbox": "workspace-write",
         "authorization": {"source": spec["authorization"]["source"],
@@ -2333,6 +2341,7 @@ def usage(plan):
 
 def status(plan_path):
     import task_continuity
+    import task_session
 
     plan = load_plan(plan_path)
     d = plan["derived"]
@@ -2372,8 +2381,9 @@ def status(plan_path):
             bridges[name] = {"status": "unavailable", "error": str(exc)}
     return {
         "status": "STATUS", "plan_sha256": plan["plan_sha256"],
-        "continuity": task_continuity.card(journal, reviews, task, merge_row,
+        "continuity": dict(task_continuity.card(journal, reviews, task, merge_row,
                                            bridges["worker"], d["attempt_id"], d["nonce"]),
+                           session=task_session.access(plan)),
         "journal": journal and {key: journal.get(key) for key in
                                 ("phase", "status", "started_at", "updated_at",
                                  "source_commit", "merge_request_id", "candidate_commit")},

@@ -178,7 +178,9 @@ def argv_for(config, payload, root):
         sandbox = payload.get("sandbox", "read-only")
         if sandbox not in ("read-only", "workspace-write"):
             raise ValueError("Codex sandbox must be read-only or workspace-write")
-        if sandbox == "workspace-write" and config["mode"] == "session":
+        if sandbox == "workspace-write" and config["mode"] == "session" and not (
+                payload.get("keep_session_for_view") is True and not config.get("native_session_id")
+                and not payload.get("frozen_evidence") and "kb_context" not in config):
             raise ValueError("Codex workspace-write execution requires one-shot mode")
         if config["mode"] == "session" and config.get("native_session_id"):
             return executable + ["exec", "resume", config["native_session_id"], "--json", "--skip-git-repo-check", payload["prompt"]]

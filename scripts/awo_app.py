@@ -47,13 +47,13 @@ def profile(argv):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("capabilities", "profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft"))
+    parser.add_argument("operation", choices=("capabilities", "profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft", "session"))
     operation = parser.parse_args(argv[:1]).operation
     if operation == "capabilities":
         argparse.ArgumentParser(prog="awo_app.py capabilities").parse_args(argv[1:])
-        print(json.dumps({"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft"]}))
+        print(json.dumps({"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft", "session"]}))
         return 0
-    if operation in ("prepare", "start", "status", "recover"):
+    if operation in ("prepare", "start", "status", "recover", "session"):
         from awo_app_operations import main as operations_main
         return operations_main(operation, argv[1:])
     if operation == "evidence-draft":
