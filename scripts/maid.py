@@ -21,7 +21,8 @@ def report(path):
     verdict = reviews[-1]["verdict"] if reviews else None
     accepted = (task.get("task_state") in ("accepted", "landed") and
                 assignment.get("review_status") == "accepted" and verdict == "accept")
-    return {"accepted": accepted, "task_state": task.get("task_state"),
+    return {**({"continuity": state["continuity"]} if "continuity" in state else {}),
+            "accepted": accepted, "task_state": task.get("task_state"),
             "assignment_state": assignment.get("state"), "review": verdict,
             "accepted_evidence_id": task.get("accepted_evidence_id") if accepted else None,
             "next_action": state["next_action"]}

@@ -2332,6 +2332,8 @@ def usage(plan):
 
 
 def status(plan_path):
+    import task_continuity
+
     plan = load_plan(plan_path)
     d = plan["derived"]
     state = Path(d["paths"]["state"])
@@ -2370,6 +2372,8 @@ def status(plan_path):
             bridges[name] = {"status": "unavailable", "error": str(exc)}
     return {
         "status": "STATUS", "plan_sha256": plan["plan_sha256"],
+        "continuity": task_continuity.card(journal, reviews, task, merge_row,
+                                           bridges["worker"], d["attempt_id"], d["nonce"]),
         "journal": journal and {key: journal.get(key) for key in
                                 ("phase", "status", "started_at", "updated_at",
                                  "source_commit", "merge_request_id", "candidate_commit")},

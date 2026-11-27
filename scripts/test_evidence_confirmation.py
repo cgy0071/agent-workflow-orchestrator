@@ -165,6 +165,17 @@ class FrozenDeliveryTests(unittest.TestCase):
             fresh = subprocess.run([sys.executable,"-B",str(command),"status",*args],
                                    capture_output=True, check=True)
             self.assertEqual(json.loads(fresh.stdout)["result"]["task"]["accepted_evidence_id"], accepted)
+            continuity = json.loads(fresh.stdout)["result"]["continuity"]
+            self.assertEqual(continuity["accepted_evidence_id"], accepted)
+            self.assertTrue(continuity["delivered"])
+            self.assertEqual(continuity["checks"][0]["returncode"], 0)
+            observer = Path(app.__file__).with_name("task_continuity.py")
+            follow = [sys.executable, "-B", str(observer), "--once", "--plan",
+                      str(self.root / "plan.json"), "--inbox", str(self.root / "updates.db"),
+                      "--recipient", "secretary"]
+            rows = subprocess.check_output(follow).splitlines()
+            self.assertIn("awaiting_review", [json.loads(row)["state"] for row in rows])
+            self.assertEqual(subprocess.check_output(follow), b"")
             self.assertIn('"checks"', Path(plan["derived"]["request"]["review_path"]).read_text())
 
             self.assertTrue(app.handle("start", start)[2])
