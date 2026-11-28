@@ -50,6 +50,8 @@ def handle(operation, argv):
         parser.add_argument("--handoff", choices=("continue", "manual", "reassign"))
         parser.add_argument("--state-version")
         parser.add_argument("--recipient")
+        parser.add_argument("--lanes", type=Path)
+        parser.add_argument("--reassign-lane")
     if operation in ("status", "start", "recover"):
         parser.add_argument("--rework-attempt", action="store_true")
         parser.add_argument("--handoff-attempt", action="store_true")
@@ -59,6 +61,9 @@ def handle(operation, argv):
     if operation == "rework":
         parser.add_argument("--evidence-route", type=Path)
     args = parser.parse_args(argv)
+    if operation == "recover" and (args.lanes or args.reassign_lane):
+        if not (args.lanes and args.reassign_lane and args.handoff == "reassign"):
+            parser.error("Lane reassignment requires --lanes, --reassign-lane and --handoff reassign")
     if operation == "recover" and any((args.handoff, args.state_version, args.recipient)):
         if not all((args.handoff, args.state_version, args.recipient, args.confirm_execute)):
             parser.error("A handoff requires action, observed state version, recipient and confirmation.")
@@ -103,6 +108,8 @@ def handle(operation, argv):
         if getattr(args, "handoff", None):
             rest.extend(["--handoff", args.handoff, "--state-version", args.state_version,
                          "--recipient", args.recipient])
+            if args.reassign_lane:
+                rest.extend(["--lanes", str(args.lanes), "--reassign-lane", args.reassign_lane])
         if getattr(args, "draft", None):
             rest += ["--draft", str(args.draft)]
         if getattr(args, "draft_digest", None):
@@ -137,8 +144,12 @@ def handle(operation, argv):
     if operation == "recover":
         import task_handoff
         if args.handoff:
+            worker = None
+            if args.reassign_lane:
+                import cli_lanes
+                worker = cli_lanes.native_bridge(cli_lanes.load_lanes(args.lanes), args.reassign_lane, "executor")
             result["recovery"], duplicate = task_handoff.apply(
-                plan, args.handoff, args.state_version, args.recipient)
+                plan, args.handoff, args.state_version, args.recipient, worker)
             state = "handoff_recorded"
         elif not args.confirm_execute:
             result["recovery"] = entry.recover(path, False)

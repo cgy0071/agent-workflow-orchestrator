@@ -147,14 +147,22 @@ def _clone(plan, view, files, dest):
     return e.git_text(dest, "rev-parse", "HEAD")
 
 
-def apply(plan, action, version, recipient):
+def apply(plan, action, version, recipient, worker=None):
     if action not in ("continue", "manual", "reassign") or not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,95}", recipient or ""):
         raise ValueError("Choose an action and a local recipient identifier.")
     d = plan["derived"]
     root = _root(plan)
     area = root / "handoff"
-    key = e.digest([plan["plan_sha256"], version, action, recipient])
+    identity = [plan["plan_sha256"], version, action, recipient]
+    if worker is not None:
+        if action != "reassign":
+            raise ValueError("A replacement worker requires reassign")
+        spec = e.read_json(root / "spec.json")
+        spec["worker"] = worker.copy()
+        e.validate_spec(spec)
+        identity.append(worker)
+    key = e.digest(identity)
     receipt = area / (key + ".json")
     lock, token = e.acquire_lock(plan)
     try:
@@ -203,6 +211,8 @@ def apply(plan, action, version, recipient):
                 child = area / "run"
                 spec = e.read_json(root / "spec.json")
                 spec.pop("rework_origin", None)
+                if worker is not None:
+                    spec["worker"] = worker.copy()
                 spec.update(repository=str(dest), work_root=str(child),
                             handoff_origin={"action_id": key, "parent_plan": plan["plan_sha256"]},
                             target_ref="refs/heads/handoff-" + key[:16])

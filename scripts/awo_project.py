@@ -11,6 +11,7 @@ COMMANDS = {
     "ask": ("agy_turn", "Send one prompt through agy"),
     "inventory": ("kb_cli", "Read the authenticated task knowledge inventory"),
     "task": ("project_entry", "Prepare, run, inspect or recover a project task"),
+    "discover-cli": ("cli_lanes", "Discover installed local CLIs and manage named lanes"),
 }
 
 

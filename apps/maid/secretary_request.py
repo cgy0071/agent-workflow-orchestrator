@@ -1,6 +1,7 @@
 """Prepare a secretary task using a trusted local AWO project profile."""
 import argparse
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -13,7 +14,10 @@ def main(argv):
     sys.path.insert(0, str(SCRIPTS))
     import secretary_adapter
     parser = argparse.ArgumentParser(prog="maid.py request")
-    parser.add_argument("--profile", type=Path, required=True)
+    parser.add_argument("--profile", type=Path)
+    parser.add_argument("--lanes", type=Path, default=os.environ.get("MAID_LANES_FILE"))
+    parser.add_argument("--lane")
+    parser.add_argument("--reviewer-lane")
     parser.add_argument("--thread", type=Path, required=True)
     secretary_adapter.options(parser)
     parser.add_argument("--directory", type=Path,
@@ -32,7 +36,22 @@ def main(argv):
             parser.error("Use a new thread and a nonempty request.")
         if bool(args.directory) != bool(args.project) or (args.material and not args.directory):
             parser.error("Supply --directory and --project together; --material requires both.")
-        spec = json.loads(args.profile.read_text(encoding="utf-8"))
+        profile = args.profile
+        if args.lane or args.reviewer_lane:
+            import cli_lanes
+            if not args.lanes or not args.lane:
+                parser.error("Lane selection requires --lanes and --lane")
+            config = cli_lanes.load_lanes(args.lanes)
+            if not profile and config.get("project_profile"):
+                profile = args.lanes.parent / config["project_profile"]
+        if not profile:
+            parser.error("Supply --profile or set project_profile in the lanes file")
+        spec = json.loads(profile.read_text(encoding="utf-8"))
+        if args.lane:
+            for key, role, name, peer in (("worker", "executor", args.lane, args.reviewer_lane),
+                                          ("reviewer", "reviewer", args.reviewer_lane, args.lane)):
+                if name:
+                    spec[key] = cli_lanes.native_bridge(config, name, role, peer)
         spec.update(goal=args.request, work_root=str(root))
         project_entry.validate_spec(dict(spec))
         route_data = None
