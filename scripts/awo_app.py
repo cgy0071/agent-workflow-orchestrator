@@ -47,15 +47,21 @@ def profile(argv):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("capabilities", "profile", "maid", "prepare", "start", "status", "recover", "schedule"))
+    parser.add_argument("operation", choices=("capabilities", "profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft", "session", "rework"))
+    if argv[:1] == ["discover-cli"]:
+        from cli_lanes import main as discover
+        return discover(argv[1:])
     operation = parser.parse_args(argv[:1]).operation
     if operation == "capabilities":
         argparse.ArgumentParser(prog="awo_app.py capabilities").parse_args(argv[1:])
-        print(json.dumps({"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule"]}))
+        print(json.dumps({"protocol": 1, "capabilities": ["profile", "maid", "prepare", "start", "status", "recover", "schedule", "evidence-draft", "session", "rework", "discover-cli"]}))
         return 0
-    if operation in ("prepare", "start", "status", "recover"):
+    if operation in ("prepare", "start", "status", "recover", "session", "rework"):
         from awo_app_operations import main as operations_main
         return operations_main(operation, argv[1:])
+    if operation == "evidence-draft":
+        from evidence_draft import main as draft_main
+        return draft_main(argv[1:])
     if operation == "schedule":
         from project_schedule import main as schedule_main
         return schedule_main(argv[1:])

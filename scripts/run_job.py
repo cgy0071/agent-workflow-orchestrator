@@ -88,12 +88,14 @@ def run(job):
     directory = Path(job["output_dir"]).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     state = {"task_id": job["task_id"], "nonce": job["nonce"], "identity": job["identity"],
-             "status": "working", "completion_seq": 0, "argv": argv, "cwd": job["cwd"],
+             "status": "working", "completion_seq": 0, "argv": [] if job.get("redact_argv") else argv, "cwd": job["cwd"],
              "execution_cwd": str(execution_cwd),
              "runner_pid": os.getpid(),
              "started_at": datetime.now(timezone.utc).isoformat(),
              "harness_version": job.get("harness_version"),
              "output_path": str(directory / "output.log"), "stderr_path": str(directory / "stderr.log")}
+    if job.get("redact_argv"):
+        state["prompt_sha256"] = hashlib.sha256(argv[-1].encode()).hexdigest()
     save_json(directory / "status.json", state)
     proc = None
     try:

@@ -187,7 +187,7 @@ def staged_paths(repo, base):
 
 def status_paths(repo):
     """Parse `git status --porcelain=v1 -z` including quoted names and renames."""
-    raw = git(repo, "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z",
+    raw = git(repo, "--no-optional-locks", "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z",
               "--untracked-files=all", "--ignore-submodules=none")["stdout"]
     fields, result, index = _fields(raw), [], 0
     while index < len(fields):
@@ -309,7 +309,8 @@ def _validate_allowed_entries(repository, commit, paths):
 def validate_spec(spec):
     allowed = {"version", "repository", "goal", "allowed_paths", "verify_argv",
                "worker", "reviewer", "authorization", "budget", "target_ref",
-               "work_root", "change_name", "max_real_turns", "timeout_seconds"}
+               "work_root", "change_name", "max_real_turns", "timeout_seconds", "evidence_route",
+               "rework_origin", "handoff_origin"}
     _require(isinstance(spec, dict), "spec", "spec must be an object")
     _require(set(spec) <= allowed, "spec", "unknown spec keys: " + ", ".join(sorted(set(spec) - allowed)))
     for key in ("version", "repository", "goal", "allowed_paths", "verify_argv",
@@ -321,6 +322,20 @@ def validate_spec(spec):
     _require(isinstance(spec["change_name"], str)
              and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", spec["change_name"]) is not None,
              "spec", "change_name must be a lowercase slug")
+    if "evidence_route" in spec:
+        from evidence_confirmation import validate
+        validate(spec["evidence_route"])
+    if "handoff_origin" in spec:
+        origin = spec["handoff_origin"]
+        _require(isinstance(origin, dict) and set(origin) == {"action_id", "parent_plan"} and
+                 all(isinstance(v, str) and re.fullmatch("[0-9a-f]{64}", v) for v in origin.values()),
+                 "spec", "Invalid handoff origin")
+    if "rework_origin" in spec:
+        origin = spec["rework_origin"]
+        _require(isinstance(origin, dict) and set(origin) == {"snapshot_sha256"} and
+                 isinstance(origin["snapshot_sha256"], str) and
+                 re.fullmatch("[0-9a-f]{64}", origin["snapshot_sha256"]),
+                 "spec", "Invalid rework origin")
     paths = spec["allowed_paths"]
     _require(isinstance(paths, list) and paths, "spec", "allowed_paths must be nonempty")
     spec["allowed_paths"] = [_safe_relative(item, "allowed path") for item in paths]
@@ -361,9 +376,13 @@ def validate_spec(spec):
     for name in ("worker", "reviewer"):
         bridge = spec[name]
         _require(isinstance(bridge, dict), "spec", name + " must be an object")
-        _require(set(bridge) <= {"harness", "executable", "timeout_seconds", "model", "max_tool_turns"}, "spec",
+        _require(set(bridge) <= {"harness", "executable", "timeout_seconds", "model", "max_tool_turns", "session_mode"}, "spec",
                  name + " has unknown keys")
         harness = bridge.get("harness")
+        mode = bridge.get("session_mode", "one-shot")
+        _require(mode == "one-shot" or (mode == "session" and name == "worker"
+                 and harness == "codex" and "evidence_route" not in spec), "spec",
+                 "Persistent sessions require a Codex worker without frozen material.")
         _require(harness in ("codex", "claude"), "spec",
                  name + " harness must be codex or DS-only Claude for the verified one-shot path")
         if harness == "claude":
@@ -620,6 +639,8 @@ def prepare(spec_path, out_dir, *, route_resolver=None):
 
 
 def _prepare_into(spec, spec_path, out, route=None, material=None):
+    _require(not (spec["worker"].get("session_mode") == "session" and (route or material)),
+             "prepare", "Material-bearing tasks require a one-shot worker.")
     (out / "spec.json").write_bytes(Path(spec_path).read_bytes())
 
     repository = Path(spec["repository"]).resolve()
@@ -675,7 +696,8 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
         spec["worker"]["timeout_seconds"]), role="planner", version=controller_version)
     worker_version = cli_version(spec["worker"]["executable"])
     worker_spec = dict(native_worker.initialize(
-        out / "worker", spec["worker"]["harness"], spec["worker"]["executable"], "one-shot",
+        out / "worker", spec["worker"]["harness"], spec["worker"]["executable"],
+        spec["worker"].get("session_mode", "one-shot"),
         spec["worker"]["timeout_seconds"], model=spec["worker"].get("model"),
         launch_cwd=str(workspace_path),
         max_tool_turns=spec["worker"].get("max_tool_turns"),
@@ -715,7 +737,7 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
     save_json(capability, {
         "kind": "installed-cli-command-bridge", "harness": spec["worker"]["harness"],
         "version": worker_version,
-        "mode": "one-shot",
+        "mode": spec["worker"].get("session_mode", "one-shot"),
         "worker_config_sha256": sha_file(out / "worker" / "config.json"),
         "reviewer_config_sha256": sha_file(out / "reviewer" / "config.json"),
         "bridge_source_sha256": sha_file(Path(native_worker.__file__)),
@@ -783,6 +805,9 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
                    canonical({"citation": route["material"], "text": material}))
     message = json.dumps({
         "task_id": delivery["task_id"], "nonce": delivery["nonce"], "cwd": delivery["cwd"],
+        **({"frozen_evidence": True} if "evidence_route" in spec else {}),
+        **({"linked_rework": True} if "rework_origin" in spec else {}),
+        **({"keep_session_for_view": True} if spec["worker"].get("session_mode") == "session" else {}),
         "prompt": prompt, "marker": delivery["completion"]["marker"],
         "execution_cwd": str(workspace_path), "sandbox": "workspace-write",
         "authorization": {"source": spec["authorization"]["source"],
@@ -1035,7 +1060,35 @@ def _lock_value(path):
     return value if isinstance(value, dict) else None
 
 
+_RUN_GUARDS = {}
+
+
 def acquire_lock(plan):
+    # Protect stale-PID cleanup itself. The persistent guard inode is never
+    # unlinked; the kernel releases its byte lock when the controller dies.
+    path = Path(plan["derived"]["paths"]["root"]) / "run.guard"
+    guard = path.open("a+b")
+    try:
+        guard.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(guard.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        guard.close()
+        raise EntryError("lock", "another controller owns this plan", "concurrent") from None
+    try:
+        lock, token = _acquire_legacy_lock(plan)
+        _RUN_GUARDS[token] = guard
+        return lock, token
+    except BaseException:
+        guard.close()
+        raise
+
+
+def _acquire_legacy_lock(plan):
     """Bounded mutual exclusion for run/recover on one prepared plan."""
     path = Path(plan["derived"]["paths"]["root"]) / "run.lock"
     token = uuid.uuid4().hex
@@ -1051,7 +1104,7 @@ def acquire_lock(plan):
         except FileExistsError:
             owner = _lock_value(path)
             pid = owner.get("pid") if owner else None
-            if type(pid) is int and pid > 0 and pid_alive(pid):
+            if type(pid) is int and pid > 0 and pid_alive(pid) is not False:
                 raise EntryError("lock", "another run or recover owns this plan (pid " +
                                  str(pid) + ")", "concurrent") from None
             if owner is None:
@@ -1068,9 +1121,14 @@ def acquire_lock(plan):
 
 
 def release_lock(path, token):
-    value = _lock_value(path)
-    if value and value.get("token") == token:
-        Path(path).unlink(missing_ok=True)
+    guard = _RUN_GUARDS.pop(token, None)
+    try:
+        value = _lock_value(path)
+        if value and value.get("token") == token:
+            Path(path).unlink(missing_ok=True)
+    finally:
+        if guard:
+            guard.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1079,9 +1137,26 @@ def release_lock(path, token):
 
 def execute_plan(plan_path, *, resume=False, locked=False):
     plan = load_plan(plan_path)
+    if not locked:
+        path, token = acquire_lock(plan)
+        try:
+            return execute_plan(plan_path, resume=resume, locked=True)
+        finally:
+            release_lock(path, token)
+    from task_handoff import check_writer
+    check_writer(plan)
+    if "handoff_origin" in plan["spec"]:
+        from task_handoff import validate_successor
+        validate_successor(plan)
+    if "rework_origin" in plan["spec"]:
+        from task_rework import validate_child
+        validate_child(plan)
     d = plan["derived"]
     paths = _paths(plan)
     state, actor, epoch = Path(d["paths"]["state"]), _actor(plan), d["epoch"]
+    if "evidence_route" in plan["spec"]:
+        from evidence_confirmation import load
+        load(plan)
     journal_path = paths["root"] / "run.json"
     journal = load_journal(journal_path)
     if journal is not None and not resume:
@@ -1106,9 +1181,6 @@ def execute_plan(plan_path, *, resume=False, locked=False):
                                       "status")}})
         save_journal(journal_path, journal)
 
-    lock_path = lock_token = None
-    if not locked:
-        lock_path, lock_token = acquire_lock(plan)
     try:
         verify_environment(plan, journal)
         ensure_target(plan, journal)
@@ -1367,7 +1439,7 @@ def execute_plan(plan_path, *, resume=False, locked=False):
             if cached:
                 _require(cached.get("verdict") == verdict, "code_review",
                          "cached decision disagrees with the durable reviewer receipt")
-            note_path = _write_review_note(plan, verdict, review.get("reason", ""))
+            note_path = _write_review_note(plan, verdict, review.get("reason", ""), review.get("chain_record"))
             evidence_ids = journal.get("evidence_ids") or _evidence_ids(state, assignment_id)
             current = _one(state, "SELECT revision FROM v2_assignment WHERE assignment_id=?",
                            (assignment_id,))["revision"]
@@ -1444,9 +1516,10 @@ def execute_plan(plan_path, *, resume=False, locked=False):
         note("done", status="LANDED", candidate_commit=candidate["candidate_commit"])
         save_json(paths["evidence"] / "run-result.json", journal)
         return journal
-    finally:
-        if lock_token:
-            release_lock(lock_path, lock_token)
+    except EntryError as exc:
+        if exc.code == "blocked":
+            note("evidence_blocked", status="blocked")
+        raise
 
 
 def _find_event(state, plan):
@@ -1486,6 +1559,8 @@ def collect_turn(plan, journal, workspace_path):
     active = Path(worker_root) / "active.json"
     _require(active.is_file(), "worker_turn", "native bridge has no active record")
     job_dir = Path(read_json(active)["directory"])
+    from evidence_confirmation import verify_receipt
+    verify_receipt(plan, "worker", job_dir, d["nonce"])
     receipt = read_json(job_dir / "receipt" / "status.json")
     _require(receipt.get("status") == "done" and receipt.get("returncode") == 0
              and receipt.get("process_status") == "clean_exit", "worker_turn",
@@ -1704,6 +1779,8 @@ def reviewer_turn(plan, label, prompt, files, worktree=None, sandbox=None):
             message["execution_cwd"] = str(worktree)
             if plan["derived"]["reviewer_spec"].get("harness") != "claude":
                 message["sandbox"] = sandbox or "workspace-write"
+        if "evidence_route" in plan["spec"]:
+            message["frozen_evidence"] = True
         sent = native_worker.send(reviewer_root, message)
         attempt["send_response"] = sent
         save_json(attempt_path, attempt)
@@ -1755,6 +1832,8 @@ def _await_review_result(plan, label, attempt):
     _require(outcome.get("status") == "done", label,
              "reviewer turn did not complete cleanly: " + json.dumps(outcome)[:400],
              "review_uncertain")
+    from evidence_confirmation import verify_receipt
+    verify_receipt(plan, "reviewer", job, attempt["nonce"])
     output = job / "receipt" / "output.log"
     _require(output.is_file(), label, "reviewer output log is missing", "review_uncertain")
     harness = plan["derived"]["reviewer_spec"]["harness"]
@@ -1771,7 +1850,11 @@ def _await_review_result(plan, label, attempt):
              "reviewer result bytes differ from the bridge output", "review_uncertain")
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
     try:
-        value = json.loads(text)
+        if "evidence_route" in plan["spec"] and label == "code":
+            from evidence_claims import unique
+            value = json.loads(text, object_pairs_hook=unique)
+        else:
+            value = json.loads(text)
     except ValueError as exc:
         raise EntryError(label, "reviewer output is not JSON: " + str(exc), "review_parse")
     save_json(Path(d["paths"]["evidence"]) / (label + "-result.json"), {
@@ -1810,10 +1893,37 @@ def code_review(plan, workspace_path, source_commit):
         "Changed paths: " + json.dumps(changed) + "\n"
         "Acceptance argv: " + json.dumps(verify["argv"]) +
         " returned " + str(verify["returncode"]) + ".\n"
-        "Return JSON only with exactly the keys task_id, nonce, verdict (accept or reject), "
-        "reason. Accept only if the requirement is met by the actual changed code and the "
+        "Return JSON only with exactly the keys task_id, nonce, verdict (accept, repair or reject), "
+        "reason. For repair, give one actionable finding per line. Accept only if the "
+        "requirement is met by the actual changed code and the "
         "recorded acceptance result is credible. Do not modify anything.")
+    if "evidence_route" in plan["spec"]:
+        import evidence_claims as chain
+        from evidence_confirmation import load, resolve
+        packet = load(plan)
+        try:
+            body = chain.report(plan, packet)
+        except chain.ERRORS:
+            body = None
     value = reviewer_turn(plan, "code", prompt, files)
+    if "evidence_route" in plan["spec"]:
+        try:
+            resolve(plan["spec"]["evidence_route"], "reviewer", packet)
+        except Exception as exc:
+            raise EntryError("code_review", "Frozen material unavailable", "blocked") from exc
+        try:
+            if body is None or chain.report(plan, packet) != body:
+                raise ValueError("Invalid worker result")
+            chain.audit(body, value["evidence_review"])
+        except chain.ERRORS:
+            if value.get("verdict") == "accept":
+                value = dict(value, verdict="repair", reason="Evidence chain incomplete or unsupported")
+        review_data = value.get("evidence_review")
+        value["chain_record"] = dict(task_id=packet["task_id"], packet_sha256=packet["packet_sha256"],
+                                     claims=(body or {}).get("claims", []),
+                                     checks=review_data.get("checks", []) if isinstance(review_data, dict) else [],
+                                     verdict=value.get("verdict"))
+
     _require(isinstance(value, dict) and value.get("task_id") == d["attempt_id"]
              and value.get("nonce") == d["nonce"]
              and value.get("verdict") in ("accept", "reject", "repair"), "code_review",
@@ -1833,11 +1943,14 @@ def _review_summary(record):
             ("event_id", "task_id", "nonce", "verdict", "path", "sha256", "reviewed_at")}
 
 
-def _write_review_note(plan, verdict, reason):
+def _write_review_note(plan, verdict, reason, chain_record=None):
     d = plan["derived"]
     path = Path(d["request"]["review_path"])
     text = (d["attempt_id"] + " " + d["nonce"] + "\nVerdict: " + verdict + "\n" +
             "Independent reviewer: " + str(reason) + "\n")
+    if chain_record is not None:
+        from evidence_claims import footer
+        text += footer(chain_record)
     save_bytes(path, text.encode("utf-8"))
     return path
 
@@ -1884,6 +1997,24 @@ def validate_ledger_review(plan, state, event_id, assignment, record, source_com
     _require((record.get("workspace_inventory") or {}).get("inventory_sha256")
              == sealed["inventory_sha256"], "code_review",
              "review record inventory hash differs from the sealed inventory")
+    if record["verdict"] == "accept" and "evidence_route" in plan["spec"]:
+        import evidence_claims as chain
+        from evidence_confirmation import load, verify_receipt
+        packet = load(plan)
+        body = chain.report(plan, packet)
+        attempt = read_json(_review_attempt_path(plan, "code"))
+        job = _review_job(plan, attempt)
+        verify_receipt(plan, "reviewer", job, attempt["nonce"])
+        raw = read_json(job / "receipt" / "status.json")["native_turn"]["text"].strip()
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+        independent = json.loads(raw, object_pairs_hook=chain.unique)
+        _require(independent["verdict"] == "accept" and independent["task_id"] == d["attempt_id"]
+                 and independent["nonce"] == d["nonce"], "code_review", "Independent decision mismatch")
+        chain.audit(body, independent["evidence_review"])
+        expected = dict(task_id=packet["task_id"], packet_sha256=packet["packet_sha256"],
+                        claims=body["claims"], checks=independent["evidence_review"]["checks"], verdict="accept")
+        _require(note.read_text(encoding="utf-8").endswith(chain.footer(expected)), "code_review",
+                 "Sealed footer does not match the independent receipt")
     if record["verdict"] == "accept":
         _require(inventory.get("scope_ok") is True, "code_review",
                  "an accepted review cannot cover an out-of-scope workspace")
@@ -2264,6 +2395,9 @@ def usage(plan):
 
 
 def status(plan_path):
+    import task_continuity
+    import task_session
+
     plan = load_plan(plan_path)
     d = plan["derived"]
     state = Path(d["paths"]["state"])
@@ -2302,6 +2436,9 @@ def status(plan_path):
             bridges[name] = {"status": "unavailable", "error": str(exc)}
     return {
         "status": "STATUS", "plan_sha256": plan["plan_sha256"],
+        "continuity": dict(task_continuity.card(journal, reviews, task, merge_row,
+                                           bridges["worker"], d["attempt_id"], d["nonce"]),
+                           session=task_session.access(plan)),
         "journal": journal and {key: journal.get(key) for key in
                                 ("phase", "status", "started_at", "updated_at",
                                  "source_commit", "merge_request_id", "candidate_commit")},
@@ -2499,13 +2636,26 @@ def recover(plan_path, confirm):
         report["reason"] = ("completed; recovery would be idempotent"
                             if landed or accepted_no_land else
                             "diagnosis only; pass --confirm-execute to resume safe steps")
-        save_json(paths["root"] / "recover.json", report)
+        # Looking at an interrupted task must not replace an earlier recovery receipt.
+        workspace = paths["workspace"]
+        top = git_opt(workspace, "rev-parse", "--show-toplevel") if workspace.is_dir() else None
+        known = bool(top and Path(top).resolve() == workspace.resolve())
+        report["workspace_inspection"] = {
+            "path": str(workspace), "available": known,
+            "head": git_opt(workspace, "rev-parse", "HEAD") if known else None,
+            "changes": git_text(workspace, "--no-optional-locks", "-c", "core.fsmonitor=false",
+                                "status", "--porcelain=v1", "--ignore-submodules=all",
+                                "--untracked-files=all").splitlines() if known else None,
+            "writer_isolation": "unverified",
+        }
         return report
     if journal is None:
         raise EntryError("recover", "no run journal to recover", "no_journal")
 
     lock_path, lock_token = acquire_lock(plan)
     try:
+        from task_handoff import check_writer
+        check_writer(plan)
         # Same frozen-environment and evidence checks as a normal run, before
         # any recovery effect.
         verify_environment(plan, journal)

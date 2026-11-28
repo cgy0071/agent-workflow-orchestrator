@@ -178,7 +178,9 @@ def argv_for(config, payload, root):
         sandbox = payload.get("sandbox", "read-only")
         if sandbox not in ("read-only", "workspace-write"):
             raise ValueError("Codex sandbox must be read-only or workspace-write")
-        if sandbox == "workspace-write" and config["mode"] == "session":
+        if sandbox == "workspace-write" and config["mode"] == "session" and not (
+                payload.get("keep_session_for_view") is True and not config.get("native_session_id")
+                and not payload.get("frozen_evidence") and "kb_context" not in config):
             raise ValueError("Codex workspace-write execution requires one-shot mode")
         if config["mode"] == "session" and config.get("native_session_id"):
             return executable + ["exec", "resume", config["native_session_id"], "--json", "--skip-git-repo-check", payload["prompt"]]
@@ -235,6 +237,8 @@ def send(directory, payload):
                              "; use release-lock to inspect and clear it") from None
         raise ValueError("another send is in progress or its lock cannot be verified") from None
     try:
+        if (root.parent / "handoff" / "reservation.json").exists():
+            raise ValueError("Previous writer retired by handoff")
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
         config = read_json(root / "config.json")
@@ -247,9 +251,19 @@ def send(directory, payload):
         if config["harness"] == "claude":
             selection("claude", config.get("provider"), config.get("model"))
         argv = argv_for(config, payload, root)
+        resumed = None
+        if payload.get("linked_rework") is True:
+            from task_rework import native_resume
+            resumed = native_resume(root, config, payload)
+            if resumed:
+                executable = config.get("argv_prefix") or cli_prefix(config["executable"])
+                argv = executable + ["exec", "--cd", execution, "--sandbox", "workspace-write",
+                                     "resume", "--json", "--skip-git-repo-check", resumed,
+                                     payload["prompt"]]
         directory = root / "jobs" / task_key(payload)
         directory.mkdir(parents=True, exist_ok=False)
         job = dict(payload, argv=argv, identity=config["identity"],
+                   **({"expected_rework_session": resumed} if resumed else {}),
                    output_dir=str(directory / "receipt"), timeout_seconds=config["timeout_seconds"],
                    harness_version=config.get("harness_version"),
                    completion_contract={"type": "native_turn", "harness": config["harness"],
@@ -331,6 +345,8 @@ def release(directory, reason):
 
 def run(directory, job_path):
     root, job = Path(directory), read_json(job_path)
+    if (root.parent / "handoff" / "reservation.json").exists():
+        raise ValueError("Previous writer retired by handoff")
     config = read_json(root / "config.json")
     target = Path(job_path).parent
     try:
@@ -339,11 +355,25 @@ def run(directory, job_path):
             prompt, measurement = prepare(config, job)
             job = dict(job, argv=argv_for(config, dict(job, prompt=prompt), root))
             save_json(target / "kb-context-receipt.json", measurement)
+        evidence = None
+        if job.get("frozen_evidence"):
+            from evidence_confirmation import delivery
+            if "kb_context" in config or job.get("kb_context_required"):
+                raise ValueError("Ambiguous evidence routes")
+            try:
+                prompt, evidence = delivery(root, job)
+            except Exception as exc:
+                raise PermissionError("Frozen evidence unavailable; fresh authorization or review required") from exc
+            job = dict(job, argv=argv_for(config, dict(job, prompt=prompt), root), redact_argv=True)
         receipt = run_job.run(job)
+        if evidence and receipt.get("status") == "done":
+            save_json(target / "task-evidence-receipt.json", evidence)
         turn = receipt.get("native_turn", {})
         if turn.get("status") != "completed":
             raise ValueError(turn.get("error", "native turn did not complete"))
         text, session = turn["text"], turn["native_session_id"]
+        if job.get("expected_rework_session") and session != job["expected_rework_session"]:
+            raise ValueError("Rework receipt belongs to a different native session")
         if config["harness"] == "omp" and receipt["status"] != "done":
             raise ValueError("OMP output is not accepted without a clean process exit")
         # Preserve a completed answer even when process cleanup remains blocked.
@@ -364,7 +394,7 @@ def run(directory, job_path):
     except Exception as exc:
         receipt_file = target / "receipt" / "status.json"
         saved = read_json(receipt_file) if receipt_file.exists() else {}
-        outcome = {"status": "blocked" if saved.get("status") == "blocked" else "failed", "error": str(exc),
+        outcome = {"status": "blocked" if saved.get("status") == "blocked" or (job.get("frozen_evidence") and isinstance(exc, PermissionError)) else "failed", "error": str(exc),
                    "execution_semantics": config["mode"], "turn_status": saved.get("native_turn", {}).get("status", "unverified"),
                    "process_status": saved.get("process_status", "unverified")}
     save_json(target / "outcome.json", outcome)

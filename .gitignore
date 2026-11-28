@@ -18,3 +18,5 @@ notification_result.json
 *.sqlite3-shm
 frozen_request.json
 pending_event.json
+
+lanes.json
