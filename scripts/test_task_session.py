@@ -9,8 +9,12 @@ from task_session import access
 
 
 class SessionTests(unittest.TestCase):
-    plan = {"spec": {"worker": {"harness": "codex"}}, "derived": {"paths": {
-        "workspace": "work", "delivery": "delivery"}}}
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = temp.name
+        self.plan = {"spec": {"worker": {"harness": "codex"}}, "derived": {"paths": {
+            "root": root, "workspace": "work", "delivery": "delivery"}}}
     identity = dict(project="P", task="T", attempt="A", nonce="N", role="executor",
                     instance="I", session="S")
 

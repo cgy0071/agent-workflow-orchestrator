@@ -187,7 +187,7 @@ def staged_paths(repo, base):
 
 def status_paths(repo):
     """Parse `git status --porcelain=v1 -z` including quoted names and renames."""
-    raw = git(repo, "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z",
+    raw = git(repo, "--no-optional-locks", "-c", "core.quotepath=false", "status", "--porcelain=v1", "-z",
               "--untracked-files=all", "--ignore-submodules=none")["stdout"]
     fields, result, index = _fields(raw), [], 0
     while index < len(fields):
@@ -310,7 +310,7 @@ def validate_spec(spec):
     allowed = {"version", "repository", "goal", "allowed_paths", "verify_argv",
                "worker", "reviewer", "authorization", "budget", "target_ref",
                "work_root", "change_name", "max_real_turns", "timeout_seconds", "evidence_route",
-               "rework_origin"}
+               "rework_origin", "handoff_origin"}
     _require(isinstance(spec, dict), "spec", "spec must be an object")
     _require(set(spec) <= allowed, "spec", "unknown spec keys: " + ", ".join(sorted(set(spec) - allowed)))
     for key in ("version", "repository", "goal", "allowed_paths", "verify_argv",
@@ -325,6 +325,11 @@ def validate_spec(spec):
     if "evidence_route" in spec:
         from evidence_confirmation import validate
         validate(spec["evidence_route"])
+    if "handoff_origin" in spec:
+        origin = spec["handoff_origin"]
+        _require(isinstance(origin, dict) and set(origin) == {"action_id", "parent_plan"} and
+                 all(isinstance(v, str) and re.fullmatch("[0-9a-f]{64}", v) for v in origin.values()),
+                 "spec", "Invalid handoff origin")
     if "rework_origin" in spec:
         origin = spec["rework_origin"]
         _require(isinstance(origin, dict) and set(origin) == {"snapshot_sha256"} and
@@ -1055,7 +1060,35 @@ def _lock_value(path):
     return value if isinstance(value, dict) else None
 
 
+_RUN_GUARDS = {}
+
+
 def acquire_lock(plan):
+    # Protect stale-PID cleanup itself. The persistent guard inode is never
+    # unlinked; the kernel releases its byte lock when the controller dies.
+    path = Path(plan["derived"]["paths"]["root"]) / "run.guard"
+    guard = path.open("a+b")
+    try:
+        guard.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(guard.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        guard.close()
+        raise EntryError("lock", "another controller owns this plan", "concurrent") from None
+    try:
+        lock, token = _acquire_legacy_lock(plan)
+        _RUN_GUARDS[token] = guard
+        return lock, token
+    except BaseException:
+        guard.close()
+        raise
+
+
+def _acquire_legacy_lock(plan):
     """Bounded mutual exclusion for run/recover on one prepared plan."""
     path = Path(plan["derived"]["paths"]["root"]) / "run.lock"
     token = uuid.uuid4().hex
@@ -1071,7 +1104,7 @@ def acquire_lock(plan):
         except FileExistsError:
             owner = _lock_value(path)
             pid = owner.get("pid") if owner else None
-            if type(pid) is int and pid > 0 and pid_alive(pid):
+            if type(pid) is int and pid > 0 and pid_alive(pid) is not False:
                 raise EntryError("lock", "another run or recover owns this plan (pid " +
                                  str(pid) + ")", "concurrent") from None
             if owner is None:
@@ -1088,9 +1121,14 @@ def acquire_lock(plan):
 
 
 def release_lock(path, token):
-    value = _lock_value(path)
-    if value and value.get("token") == token:
-        Path(path).unlink(missing_ok=True)
+    guard = _RUN_GUARDS.pop(token, None)
+    try:
+        value = _lock_value(path)
+        if value and value.get("token") == token:
+            Path(path).unlink(missing_ok=True)
+    finally:
+        if guard:
+            guard.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1099,6 +1137,17 @@ def release_lock(path, token):
 
 def execute_plan(plan_path, *, resume=False, locked=False):
     plan = load_plan(plan_path)
+    if not locked:
+        path, token = acquire_lock(plan)
+        try:
+            return execute_plan(plan_path, resume=resume, locked=True)
+        finally:
+            release_lock(path, token)
+    from task_handoff import check_writer
+    check_writer(plan)
+    if "handoff_origin" in plan["spec"]:
+        from task_handoff import validate_successor
+        validate_successor(plan)
     if "rework_origin" in plan["spec"]:
         from task_rework import validate_child
         validate_child(plan)
@@ -1132,9 +1181,6 @@ def execute_plan(plan_path, *, resume=False, locked=False):
                                       "status")}})
         save_journal(journal_path, journal)
 
-    lock_path = lock_token = None
-    if not locked:
-        lock_path, lock_token = acquire_lock(plan)
     try:
         verify_environment(plan, journal)
         ensure_target(plan, journal)
@@ -1474,9 +1520,6 @@ def execute_plan(plan_path, *, resume=False, locked=False):
         if exc.code == "blocked":
             note("evidence_blocked", status="blocked")
         raise
-    finally:
-        if lock_token:
-            release_lock(lock_path, lock_token)
 
 
 def _find_event(state, plan):
@@ -2593,13 +2636,26 @@ def recover(plan_path, confirm):
         report["reason"] = ("completed; recovery would be idempotent"
                             if landed or accepted_no_land else
                             "diagnosis only; pass --confirm-execute to resume safe steps")
-        save_json(paths["root"] / "recover.json", report)
+        # Looking at an interrupted task must not replace an earlier recovery receipt.
+        workspace = paths["workspace"]
+        top = git_opt(workspace, "rev-parse", "--show-toplevel") if workspace.is_dir() else None
+        known = bool(top and Path(top).resolve() == workspace.resolve())
+        report["workspace_inspection"] = {
+            "path": str(workspace), "available": known,
+            "head": git_opt(workspace, "rev-parse", "HEAD") if known else None,
+            "changes": git_text(workspace, "--no-optional-locks", "-c", "core.fsmonitor=false",
+                                "status", "--porcelain=v1", "--ignore-submodules=all",
+                                "--untracked-files=all").splitlines() if known else None,
+            "writer_isolation": "unverified",
+        }
         return report
     if journal is None:
         raise EntryError("recover", "no run journal to recover", "no_journal")
 
     lock_path, lock_token = acquire_lock(plan)
     try:
+        from task_handoff import check_writer
+        check_writer(plan)
         # Same frozen-environment and evidence checks as a normal run, before
         # any recovery effect.
         verify_environment(plan, journal)

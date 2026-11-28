@@ -237,6 +237,8 @@ def send(directory, payload):
                              "; use release-lock to inspect and clear it") from None
         raise ValueError("another send is in progress or its lock cannot be verified") from None
     try:
+        if (root.parent / "handoff" / "reservation.json").exists():
+            raise ValueError("Previous writer retired by handoff")
         current = status(root)
         if current["status"] != "idle": raise ValueError("native worker still occupied or uncertain")
         config = read_json(root / "config.json")
@@ -343,6 +345,8 @@ def release(directory, reason):
 
 def run(directory, job_path):
     root, job = Path(directory), read_json(job_path)
+    if (root.parent / "handoff" / "reservation.json").exists():
+        raise ValueError("Previous writer retired by handoff")
     config = read_json(root / "config.json")
     target = Path(job_path).parent
     try:

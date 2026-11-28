@@ -209,6 +209,19 @@ class Fixture:
 
 
 class ProjectEntryTests(unittest.TestCase):
+    def test_inspection_preserves_existing_recovery_receipt_and_absent_journal(self):
+        root = self.run_dir("inspect")
+        rc, _, err = self.fixture.prepare(root, self.target("inspect"))
+        self.assertEqual(rc, 0, err)
+        old = b'{"previous":"confirmed recovery"}\n'
+        receipt = root / "recover.json"
+        receipt.write_bytes(old)
+        rc, result, err = self.fixture.cli("recover", "--plan", str(root / "plan.json"))
+        self.assertEqual(rc, 0, (result, err))
+        self.assertIn("workspace_inspection", result)
+        self.assertEqual(receipt.read_bytes(), old)
+        self.assertFalse((root / "run.json").exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="awo-entry-test-")
         self.fixture = Fixture(self.temp.name)

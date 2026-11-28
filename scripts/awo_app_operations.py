@@ -46,14 +46,22 @@ def handle(operation, argv):
         parser.add_argument("--spec", type=Path, required=True)
     if operation in ("start", "recover"):
         parser.add_argument("--confirm-execute", action="store_true")
+    if operation == "recover":
+        parser.add_argument("--handoff", choices=("continue", "manual", "reassign"))
+        parser.add_argument("--state-version")
+        parser.add_argument("--recipient")
     if operation in ("status", "start", "recover"):
         parser.add_argument("--rework-attempt", action="store_true")
+        parser.add_argument("--handoff-attempt", action="store_true")
     if operation == "start":
         parser.add_argument("--draft", type=Path)
         parser.add_argument("--draft-digest")
     if operation == "rework":
         parser.add_argument("--evidence-route", type=Path)
     args = parser.parse_args(argv)
+    if operation == "recover" and any((args.handoff, args.state_version, args.recipient)):
+        if not all((args.handoff, args.state_version, args.recipient, args.confirm_execute)):
+            parser.error("A handoff requires action, observed state version, recipient and confirmation.")
     root = args.thread.resolve()
     path = root / "plan.json"
     marker = root / "application-pin.json"
@@ -81,12 +89,20 @@ def handle(operation, argv):
         from task_rework import prepare
         link, duplicate = prepare(plan, entry.read_json(args.evidence_route) if args.evidence_route else None)
         return "prepared", link, duplicate
-    if getattr(args, "rework_attempt", False):
-        from task_rework import linked_child
+    if getattr(args, "rework_attempt", False) or getattr(args, "handoff_attempt", False):
+        if args.rework_attempt:
+            from task_rework import linked_child
+        else:
+            from task_handoff import linked_child
         child, _ = linked_child(plan)
         rest = ["--thread", str(child.parent)]
+        if args.rework_attempt and args.handoff_attempt:
+            rest.append("--handoff-attempt")
         if getattr(args, "confirm_execute", False):
             rest.append("--confirm-execute")
+        if getattr(args, "handoff", None):
+            rest.extend(["--handoff", args.handoff, "--state-version", args.state_version,
+                         "--recipient", args.recipient])
         if getattr(args, "draft", None):
             rest += ["--draft", str(args.draft)]
         if getattr(args, "draft_digest", None):
@@ -119,7 +135,16 @@ def handle(operation, argv):
             entry.execute_plan(path)
             state, result = snapshot(path)
     if operation == "recover":
-        if state == "complete":
+        import task_handoff
+        if args.handoff:
+            result["recovery"], duplicate = task_handoff.apply(
+                plan, args.handoff, args.state_version, args.recipient)
+            state = "handoff_recorded"
+        elif not args.confirm_execute:
+            result["recovery"] = entry.recover(path, False)
+            result["recovery"]["handoff"] = task_handoff.inspect(plan)
+            duplicate = state == "complete"
+        elif state == "complete":
             duplicate = True
         else:
             report = entry.recover(path, args.confirm_execute)
@@ -138,7 +163,8 @@ def main(operation, argv):
     try:
         state, result, duplicate = handle(operation, argv)
         response.update(state=state, result=result, duplicate=duplicate, ok=True)
-        if operation != "status" and state in ("uncertain", "blocked"):
+        diagnosis = operation == "recover" and "--confirm-execute" not in argv
+        if operation != "status" and not diagnosis and state in ("uncertain", "blocked"):
             response.update(ok=False, error=dict(code=state, message="Inspect before recovery."))
     except Exception as exc:
         response["error"] = dict(code=getattr(exc, "code", "operation_failed"), message=str(exc))

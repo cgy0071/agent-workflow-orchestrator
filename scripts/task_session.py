@@ -58,6 +58,10 @@ def access(plan, action="details", adapter=None):
         raise ValueError("Unknown session operation")
     d = plan["derived"]
     info = dict(records=True, focus=False, resume=False, adapter=plan["spec"]["worker"]["harness"])
+    if (Path(d["paths"]["root"]) / "handoff" / "reservation.json").exists() and action != "records":
+        if action != "details":
+            raise ValueError("Previous executor retired; view delivery and workspace instead.")
+        return dict(info, reason="retired")
     if action == "records":
         return dict(info, delivery=d["paths"]["delivery"], workspace=d["paths"]["workspace"])
     call = adapter or host

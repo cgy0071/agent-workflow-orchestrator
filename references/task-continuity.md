@@ -40,3 +40,22 @@ Focus/resume must atomically compare the current binding before opening the
 target, then return the binding and opened:true. If comparison is not possible,
 refuse. Focus must not send keys; resume opens a conversation without a prompt
 or model turn. Never implement focus as an unguarded switch to a cached pane.
+
+## An interrupted executor
+
+Open `recover --thread PATH` before choosing what to do. The command reports
+the last step with a receipt, the workspace and its changes, the original
+session, the writer's status and the actions currently available. A missing
+reply does not authorize another send. If the original job might still write,
+inspect the records and workspace. The optional trusted session host may
+attest a permanent fence for the exact executor binding and its descendants;
+an idle terminal or a missing process is insufficient.
+
+To choose an available action, repeat recover with `--handoff continue`,
+`--handoff manual` or `--handoff reassign`, the displayed `--state-version`,
+`--recipient` and `--confirm-execute`. Continue uses the original executor
+instance. Refresh if the state changed. Manual takeover exposes a local
+checkpoint; reassignment prepares a new executor without sending it a task.
+Use `--handoff-attempt` to inspect or explicitly start the replacement. Add
+`--rework-attempt` if the interruption happened during a repair. The new
+delivery still needs its own independent review.
