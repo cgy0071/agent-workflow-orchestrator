@@ -801,6 +801,7 @@ def _prepare_into(spec, spec_path, out, route=None, material=None):
     message = json.dumps({
         "task_id": delivery["task_id"], "nonce": delivery["nonce"], "cwd": delivery["cwd"],
         **({"frozen_evidence": True} if "evidence_route" in spec else {}),
+        **({"linked_rework": True} if "rework_origin" in spec else {}),
         **({"keep_session_for_view": True} if spec["worker"].get("session_mode") == "session" else {}),
         "prompt": prompt, "marker": delivery["completion"]["marker"],
         "execution_cwd": str(workspace_path), "sandbox": "workspace-write",

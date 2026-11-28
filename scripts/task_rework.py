@@ -30,6 +30,9 @@ def snapshot(plan):
         raise ValueError("Working tree conflict; left unchanged: " + json.dumps(dirty))
     e._validate_source_evidence(plan, w, j)
     patch = e.git(w, "diff", "--binary", d["base"], commit, "--")["stdout"]
+    patch_path = e._review_out_dir(plan, "code") / "patch.diff"
+    if patch_path.read_bytes() != patch:
+        raise ValueError("Reviewed patch differs from committed changes.")
     evidence = Path(d["paths"]["evidence"])
     result = Path(d["paths"]["delivery"]) / "RESULT.md"
     row = e._one(state, "SELECT sealed_sha256 FROM v2_evidence WHERE assignment_id=? "
@@ -39,7 +42,8 @@ def snapshot(plan):
         raise ValueError("Delivered RESULT.md differs from the evidence ledger.")
     return dict(task=d["task_id"], attempt=d["attempt_id"], plan_sha256=plan["plan_sha256"],
                 event=j["event_id"], base=d["base"], commit=commit,
-                repository=str(w), result_path=str(result), result_sha256=row["sealed_sha256"],
+                repository=str(w), patch_path=str(patch_path),
+                result_path=str(result), result_sha256=row["sealed_sha256"],
                 verify_path=str(evidence / "verify-1.json"),
                 receipt_path=str(evidence / "worker-receipt.json"),
                 patch_sha256=hashlib.sha256(patch).hexdigest(), review_path=r["path"],
@@ -82,7 +86,6 @@ def prepare(plan, fresh_route=None):
             raise ValueError("Historical snapshot or child plan changed.")
         return saved, True
     # Exclusive reservation; an interrupted preparation is inspected, never replaced.
-    area.mkdir(exist_ok=False)
     review = Path(source["review_path"]).read_text(encoding="utf-8")
     reason = review.partition("Independent reviewer: ")[2].split("\n```", 1)[0].strip()
     if not reason:
@@ -90,12 +93,21 @@ def prepare(plan, fresh_route=None):
     # For protected material never reuse free text from the old review or prompt.
     items = (protected_items(review) if material
              else [line.strip() for line in reason.splitlines() if line.strip()])
-    spec.update(repository=d["paths"]["workspace"], work_root=str(child),
+    reviewed_paths = {p for change in e.name_status(Path(source["repository"]), source["base"],
+                                                    source["commit"]) for p in change[1:]}
+    scope = [p for p in d["allowed_paths"] if p in reviewed_paths]
+    if not scope:
+        raise ValueError("No reviewed path within the original authorized scope.")
+    spec.update(repository=d["paths"]["workspace"], work_root=str(child), allowed_paths=scope,
                 target_ref="refs/heads/rework-" + source["review_sha256"][:16],
                 rework_origin={"snapshot_sha256": checksum(source)},
                 goal="Address only these independent review findings:\n" +
                      "\n".join(f"{i}. {v}" for i, v in enumerate(items, 1)))
     spec["worker"].pop("session_mode", None)
+    try:
+        area.mkdir(exist_ok=False)
+    except FileExistsError:
+        raise ValueError("Rework already being prepared or interrupted; inspect the existing attempt.") from None
     e.save_json(area / "spec.json", spec)
     handle("prepare", ["--thread", str(child), "--spec", str(area / "spec.json")])
     new = e.load_plan(child / "plan.json")
@@ -142,13 +154,59 @@ def validate_child(plan):
             resolve(plan["spec"]["evidence_route"], role, packet)
 
 
-def card(plan):
+def linked_child(plan):
     area = Path(plan["derived"]["paths"]["root"]) / "rework"
     saved = e.read_json(area / "link.json")
     child = area / "run" / "plan.json"
-    if (e.load_plan(child)["plan_sha256"] != saved["child_plan"]
+    prepared = e.load_plan(child)
+    if (prepared["plan_sha256"] != saved["child_plan"] or
+            prepared["spec"]["rework_origin"]["snapshot_sha256"] != checksum(saved["previous"])
+            or saved["nonce"] != prepared["derived"]["nonce"]
             or saved["previous"]["plan_sha256"] != plan["plan_sha256"]):
         raise ValueError("Rework link no longer matches this run.")
+    return child, saved
+
+
+def card(plan):
+    child, saved = linked_child(plan)
     status = e.status(child)["continuity"]
     return {"previous_commit": saved["previous"]["commit"], "previous_review": "repair",
             "state": status["state"], "review": status["review"], "nonce": saved["nonce"]}
+
+
+def native_resume(root, config, payload, broker=None):
+    """Require a live, exclusive session attestation for this exact destination."""
+    import sqlite3
+    import subprocess
+    import task_session
+    child = e.load_plan(root.parent / "plan.json")
+    d = child["derived"]
+    if ("rework_origin" not in child["spec"] or Path(d["paths"]["worker"]).resolve() != root.resolve()
+            or (d["attempt_id"], d["nonce"]) != (payload["task_id"], payload["nonce"])
+            or Path(payload["execution_cwd"]).resolve() != Path(d["paths"]["workspace"]).resolve()
+            or config["identity"] != d["worker_spec"]["expected_identity"]):
+        raise ValueError("Unexpected rework executor binding")
+    if ("evidence_route" in child["spec"] or d.get("route") or "kb_context" in config
+            or config["harness"] != "codex"):
+        return None
+    parent = e.load_plan(root.parent.parent.parent / "plan.json")
+    if parent["derived"].get("route") or "evidence_route" in parent["spec"]:
+        return None
+    try:
+        original = task_session.binding(parent)
+        original_root = Path(parent["derived"]["paths"]["worker"])
+        prior_job = original_root / "jobs" / task_session.task_key(
+            {"task_id": original["attempt"], "nonce": original["nonce"]}) / "job.json"
+        if ("kb_context" in e.read_json(original_root / "config.json")
+                or e.read_json(prior_job).get("kb_context_required")):
+            return None
+        identity = dict(original, destination={"project": d["project_id"], "task": d["task_id"],
+                        "nonce": d["nonce"], "instance": d["worker"]["instance_id"],
+                        "workspace": str(Path(payload["execution_cwd"]).resolve())})
+        reply = (broker or task_session.host)("inspect-rework", identity)
+        if (reply.get("binding") == identity and reply.get("exclusive") is True
+                and reply.get("isolated_workspace") is True and reply.get("no_private_context") is True):
+            return original["session"]
+    except (OSError, KeyError, ValueError, TypeError, sqlite3.Error, subprocess.SubprocessError):
+        pass
+    return None

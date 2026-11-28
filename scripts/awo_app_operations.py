@@ -46,6 +46,8 @@ def handle(operation, argv):
         parser.add_argument("--spec", type=Path, required=True)
     if operation in ("start", "recover"):
         parser.add_argument("--confirm-execute", action="store_true")
+    if operation in ("status", "start", "recover"):
+        parser.add_argument("--rework-attempt", action="store_true")
     if operation == "start":
         parser.add_argument("--draft", type=Path)
         parser.add_argument("--draft-digest")
@@ -79,6 +81,17 @@ def handle(operation, argv):
         from task_rework import prepare
         link, duplicate = prepare(plan, entry.read_json(args.evidence_route) if args.evidence_route else None)
         return "prepared", link, duplicate
+    if getattr(args, "rework_attempt", False):
+        from task_rework import linked_child
+        child, _ = linked_child(plan)
+        rest = ["--thread", str(child.parent)]
+        if getattr(args, "confirm_execute", False):
+            rest.append("--confirm-execute")
+        if getattr(args, "draft", None):
+            rest += ["--draft", str(args.draft)]
+        if getattr(args, "draft_digest", None):
+            rest += ["--draft-digest", args.draft_digest]
+        return handle(operation, rest)
     if operation == "session":
         from task_session import access
         return "inspected", access(plan, args.action), False

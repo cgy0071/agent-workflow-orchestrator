@@ -249,9 +249,19 @@ def send(directory, payload):
         if config["harness"] == "claude":
             selection("claude", config.get("provider"), config.get("model"))
         argv = argv_for(config, payload, root)
+        resumed = None
+        if payload.get("linked_rework") is True:
+            from task_rework import native_resume
+            resumed = native_resume(root, config, payload)
+            if resumed:
+                executable = config.get("argv_prefix") or cli_prefix(config["executable"])
+                argv = executable + ["exec", "--cd", execution, "--sandbox", "workspace-write",
+                                     "resume", "--json", "--skip-git-repo-check", resumed,
+                                     payload["prompt"]]
         directory = root / "jobs" / task_key(payload)
         directory.mkdir(parents=True, exist_ok=False)
         job = dict(payload, argv=argv, identity=config["identity"],
+                   **({"expected_rework_session": resumed} if resumed else {}),
                    output_dir=str(directory / "receipt"), timeout_seconds=config["timeout_seconds"],
                    harness_version=config.get("harness_version"),
                    completion_contract={"type": "native_turn", "harness": config["harness"],
@@ -358,6 +368,8 @@ def run(directory, job_path):
         if turn.get("status") != "completed":
             raise ValueError(turn.get("error", "native turn did not complete"))
         text, session = turn["text"], turn["native_session_id"]
+        if job.get("expected_rework_session") and session != job["expected_rework_session"]:
+            raise ValueError("Rework receipt belongs to a different native session")
         if config["harness"] == "omp" and receipt["status"] != "done":
             raise ValueError("OMP output is not accepted without a clean process exit")
         # Preserve a completed answer even when process cleanup remains blocked.
