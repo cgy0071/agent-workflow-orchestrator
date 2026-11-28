@@ -51,6 +51,28 @@ python -B scripts/awo_project.py materials --state <STATE_DIR> --project-root <P
 ### 6. External inbox and proactive alerts
 External channels can drop signed requests into an inbox via `owner_intake.py` for Planner inspection, while `owner_notify.py` pushes authorized alerts to a file, webhook, or command on permission prompts, stalls, or review-ready deliveries.
 
+## Everyday tasks: from research to handoff
+
+From the AWO checkout, run `python -B scripts/awo_project.py discover-cli` to inspect local CLIs; add `--write-lanes lanes.json` to create a private lane configuration. Discovery does not dispatch work.
+
+To find sources by topic without document IDs:
+
+`python -B scripts/awo_project.py materials --state STATE --project-root PROJECT --doc-token DOC_TOKEN_FILE --kb-token TASK_TOKEN_FILE --task TASK_ID --query "inference latency" --top-k 3`
+
+Grants filter the candidates before ranking. For interactive study and passage selection, use `maid.py study` in [MAID](https://github.com/cgy0071/MAID), or `request --query` for an evidence draft. Ordinary secretary requests can select a worker with `request --lane`.
+
+Append the operations below to `python -B scripts/awo_app.py`. THREAD is the run directory.
+
+| Operation | When to use it |
+|---|---|
+| `prepare --thread THREAD --spec spec.json` | Prepare the indexed run first; its spec needs an evidence route for a draft with citations. |
+| `start --thread THREAD --confirm-execute --draft draft.json --draft-digest SHA256` | After reviewing the selection, use its displayed `draft_sha256` to confirm dispatch. |
+| `status --thread THREAD` | Read changes, checks and remaining issues. Delivery, review and merge are separate outcomes. |
+| `session --thread THREAD --action records` | Find the delivery and workspace. Use `focus` or `resume` only when the bound session supports it. |
+| `rework --thread THREAD` | After a repair verdict, prepare a linked attempt from the review. Inspect it with `status --rework-attempt`; dispatch with `start --rework-attempt --confirm-execute`. |
+| `recover --thread THREAD` | Inspect the last receipt, changes and available handoffs before choosing an action. |
+| `recover --thread THREAD --handoff reassign --state-version VERSION --lanes lanes.json --reassign-lane LANE --recipient LANE --confirm-execute` | Use the version just displayed and an eligible replacement lane. Inspect the replacement with `status --handoff-attempt` before starting it. |
+
 ## Five safety rules
 
 1. **Configuration is not permission**: config files never authorize dispatch, notifications, or continuous runs without your explicit approval.

@@ -51,6 +51,28 @@ python -B scripts/awo_project.py materials --state <状态目录> --project-root
 ### 6. 外部收件箱与主动提醒
 外部聊天渠道可通过 `owner_intake.py` 把签名请求送入收件箱供 Planner 审阅；当执行者遇到权限弹窗、卡住或交付待审核时，可通过 `owner_notify.py` 按授权主动向文件、Webhook 或命令推送提醒。
 
+## 日常任务：从找资料到接手
+
+从 AWO 仓库根目录运行。先用 `python -B scripts/awo_project.py discover-cli` 查看本机 CLI；要创建私有通道配置，加 `--write-lanes lanes.json`。这不会派工。
+
+按主题查资料，无需文档 ID：
+
+`python -B scripts/awo_project.py materials --state STATE --project-root PROJECT --doc-token DOC_TOKEN_FILE --kb-token TASK_TOKEN_FILE --task TASK_ID --query "inference latency" --top-k 3`
+
+先按权限筛选，再排序并返回出处。在 [MAID](https://github.com/cgy0071/MAID) 中可用 `maid.py study` 学习并选段，或用 `request --query` 生成证据草案；普通任务可用 `request --lane` 选执行者。
+
+以下操作接在 `python -B scripts/awo_app.py` 后；THREAD 为本次运行目录。
+
+| 命令参数 | 何时使用 |
+|---|---|
+| `prepare --thread THREAD --spec spec.json` | 先准备索引中的运行；要带入引用，运行配置须有证据读取授权（`evidence_route`）。 |
+| `start --thread THREAD --confirm-execute --draft draft.json --draft-digest SHA256` | 核对选段后，填入刚才看到的 `draft_sha256` 才确认派工。 |
+| `status --thread THREAD` | 查看改了什么、查了什么、还剩什么；交付、审核通过、合并分别显示。 |
+| `session --thread THREAD --action records` | 先找交付记录和工作区；只有绑定的会话支持时，才将 `records` 换成 `focus` 或 `resume`。 |
+| `rework --thread THREAD` | 审核要求返工时，按意见准备关联尝试。用 `status --rework-attempt` 查看，用 `start --rework-attempt --confirm-execute` 派工。 |
+| `recover --thread THREAD` | 中断后先查看最后回执、工作区改动和当前允许的接手动作。 |
+| `recover --thread THREAD --handoff reassign --state-version VERSION --lanes lanes.json --reassign-lane LANE --recipient LANE --confirm-execute` | 使用刚查到的状态版本和可用替代通道。此步只准备接手；先用 `status --handoff-attempt` 核对，再决定是否启动。 |
+
 ## 五条不可逾越的安全底线
 
 1. **配置不等于授权**：写进配置文件不会自动派工、发通知或连续运行，必须由你明确同意。
