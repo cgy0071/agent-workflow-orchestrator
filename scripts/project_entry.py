@@ -309,7 +309,8 @@ def _validate_allowed_entries(repository, commit, paths):
 def validate_spec(spec):
     allowed = {"version", "repository", "goal", "allowed_paths", "verify_argv",
                "worker", "reviewer", "authorization", "budget", "target_ref",
-               "work_root", "change_name", "max_real_turns", "timeout_seconds", "evidence_route"}
+               "work_root", "change_name", "max_real_turns", "timeout_seconds", "evidence_route",
+               "rework_origin"}
     _require(isinstance(spec, dict), "spec", "spec must be an object")
     _require(set(spec) <= allowed, "spec", "unknown spec keys: " + ", ".join(sorted(set(spec) - allowed)))
     for key in ("version", "repository", "goal", "allowed_paths", "verify_argv",
@@ -324,6 +325,12 @@ def validate_spec(spec):
     if "evidence_route" in spec:
         from evidence_confirmation import validate
         validate(spec["evidence_route"])
+    if "rework_origin" in spec:
+        origin = spec["rework_origin"]
+        _require(isinstance(origin, dict) and set(origin) == {"snapshot_sha256"} and
+                 isinstance(origin["snapshot_sha256"], str) and
+                 re.fullmatch("[0-9a-f]{64}", origin["snapshot_sha256"]),
+                 "spec", "Invalid rework origin")
     paths = spec["allowed_paths"]
     _require(isinstance(paths, list) and paths, "spec", "allowed_paths must be nonempty")
     spec["allowed_paths"] = [_safe_relative(item, "allowed path") for item in paths]
@@ -1091,6 +1098,9 @@ def release_lock(path, token):
 
 def execute_plan(plan_path, *, resume=False, locked=False):
     plan = load_plan(plan_path)
+    if "rework_origin" in plan["spec"]:
+        from task_rework import validate_child
+        validate_child(plan)
     d = plan["derived"]
     paths = _paths(plan)
     state, actor, epoch = Path(d["paths"]["state"]), _actor(plan), d["epoch"]
@@ -1839,8 +1849,9 @@ def code_review(plan, workspace_path, source_commit):
         "Changed paths: " + json.dumps(changed) + "\n"
         "Acceptance argv: " + json.dumps(verify["argv"]) +
         " returned " + str(verify["returncode"]) + ".\n"
-        "Return JSON only with exactly the keys task_id, nonce, verdict (accept or reject), "
-        "reason. Accept only if the requirement is met by the actual changed code and the "
+        "Return JSON only with exactly the keys task_id, nonce, verdict (accept, repair or reject), "
+        "reason. For repair, give one actionable finding per line. Accept only if the "
+        "requirement is met by the actual changed code and the "
         "recorded acceptance result is credible. Do not modify anything.")
     if "evidence_route" in plan["spec"]:
         import evidence_claims as chain

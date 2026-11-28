@@ -49,6 +49,8 @@ def handle(operation, argv):
     if operation == "start":
         parser.add_argument("--draft", type=Path)
         parser.add_argument("--draft-digest")
+    if operation == "rework":
+        parser.add_argument("--evidence-route", type=Path)
     args = parser.parse_args(argv)
     root = args.thread.resolve()
     path = root / "plan.json"
@@ -73,6 +75,10 @@ def handle(operation, argv):
             pin.get("plan") != plan["plan_sha256"] or pin.get("protocol") != 1 or
             pin.get("backend") != version or pin.get("spec") != digest((root / "spec.json").read_bytes())):
         raise entry.EntryError("pin", "Run identity, backend, plan or frozen spec changed.", "pin_mismatch")
+    if operation == "rework":
+        from task_rework import prepare
+        link, duplicate = prepare(plan, entry.read_json(args.evidence_route) if args.evidence_route else None)
+        return "prepared", link, duplicate
     if operation == "session":
         from task_session import access
         return "inspected", access(plan, args.action), False
@@ -106,6 +112,9 @@ def handle(operation, argv):
             report = entry.recover(path, args.confirm_execute)
             state, result = snapshot(path)
             result["recovery"] = report
+    if operation == "status" and (root / "rework" / "link.json").is_file():
+        from task_rework import card
+        result["continuity"]["rework"] = card(plan)
     result["backend_version"] = version
     return state, result, duplicate
 
